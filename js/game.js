@@ -53,7 +53,8 @@ function World() {
 	// Scoped variables in this world.
 	var element, scene, camera, character, renderer, light,
 		objects, paused, keysAllowed, score, difficulty,
-		treePresenceProb, maxTreeSize, fogDistance, gameOver;
+		treePresenceProb, maxTreeSize, fogDistance, gameOver,
+		coins, coinCount;
 
 	// Initialize the world.
 	init();
@@ -104,10 +105,13 @@ function World() {
 		scene.add(ground);
 
 		objects = [];
+		coins = [];
+		coinCount = 0;
 		treePresenceProb = 0.2;
 		maxTreeSize = 0.5;
 		for (var i = 10; i < 40; i++) {
 			createRowOfTrees(i * -3000, treePresenceProb, 0.5, maxTreeSize);
+			createCoins(i * -3000 + 1500, 0.3);
 		}
 
 		// The game is paused to begin with and the game is not over.
@@ -175,6 +179,7 @@ function World() {
 		score = 0;
 		difficulty = 0;
 		document.getElementById("score").innerHTML = score;
+		document.getElementById("coins").innerHTML = coinCount;
 
 		// Begin the rendering loop.
 		loop();
@@ -231,6 +236,7 @@ function World() {
 					fogDistance -= (5000 / levelLength);
 				}
 				createRowOfTrees(-120000, treePresenceProb, 0.5, maxTreeSize);
+				createCoins(-120000 + 1500, 0.3);
 				scene.fog.far = fogDistance;
 			}
 
@@ -239,13 +245,27 @@ function World() {
 				object.mesh.position.z += 100;
 			});
 
+			// Move the coins closer to the character and rotate them.
+			coins.forEach(function(coin) {
+				coin.mesh.position.z += 100;
+				coin.mesh.rotation.y += 0.05;
+			});
+
 			// Remove trees that are outside of the world.
 			objects = objects.filter(function(object) {
 				return object.mesh.position.z < 0;
 			});
 
+			// Remove coins that are outside of the world.
+			coins = coins.filter(function(coin) {
+				return coin.mesh.position.z < 0;
+			});
+
 			// Make the character move according to the controls.
 			character.update();
+
+			// Check for coin collection.
+			checkCoinCollection();
 
 			// Check for collisions between the character and objects.
 			if (collisionsDetected()) {
@@ -352,6 +372,23 @@ function World() {
 	}
 
 	/**
+	 * Creates coins at the specified position with given probability.
+	 *
+	 * @param {number} POSITION The z-position of the coins.
+	 * @param {number} PROBABILITY The probability that a coin spawns in a lane.
+	 */
+	function createCoins(position, probability) {
+		for (var lane = -1; lane < 2; lane++) {
+			var randomNumber = Math.random();
+			if (randomNumber < probability) {
+				var coin = new Coin(lane * 800, 200, position);
+				coins.push(coin);
+				scene.add(coin.mesh);
+			}
+		}
+	}
+
+	/**
 	 * Returns true if and only if the character is currently colliding with
 	 * an object on the map.
 	 */
@@ -370,6 +407,27 @@ function World() {
  		}
  		return false;
  	}
+
+	/**
+	 * Checks for coin collection and removes collected coins.
+	 */
+	function checkCoinCollection() {
+		var charMinX = character.element.position.x - 115;
+		var charMaxX = character.element.position.x + 115;
+		var charMinY = character.element.position.y - 310;
+		var charMaxY = character.element.position.y + 320;
+		var charMinZ = character.element.position.z - 40;
+		var charMaxZ = character.element.position.z + 40;
+		for (var i = 0; i < coins.length; i++) {
+			if (coins[i].collides(charMinX, charMaxX, charMinY,
+					charMaxY, charMinZ, charMaxZ)) {
+				coins[i].collected = true;
+				scene.remove(coins[i].mesh);
+				coinCount++;
+				document.getElementById("coins").innerHTML = coinCount;
+			}
+		}
+	}
 	
 }
 
@@ -663,6 +721,48 @@ function Tree(x, y, z, s) {
     	return treeMinX <= maxX && treeMaxX >= minX
     		&& treeMinY <= maxY && treeMaxY >= minY
     		&& treeMinZ <= maxZ && treeMaxZ >= minZ;
+    }
+
+}
+
+/**
+  * A collectable coin in the game positioned at X, Y, Z in the scene.
+  */
+function Coin(x, y, z) {
+
+	// Explicit binding.
+	var self = this;
+
+	// The object portrayed in the scene.
+	this.mesh = new THREE.Object3D();
+	var coinGeometry = new THREE.CylinderGeometry(80, 80, 20, 32);
+	var coinMaterial = new THREE.MeshPhongMaterial({
+		color: Colors.yellow,
+		flatShading: true
+	});
+	var coin = new THREE.Mesh(coinGeometry, coinMaterial);
+	coin.rotation.z = Math.PI / 2;
+	coin.castShadow = true;
+	coin.receiveShadow = true;
+	this.mesh.add(coin);
+	this.mesh.position.set(x, y, z);
+	this.collected = false;
+
+	/**
+	 * A method that detects whether this coin is colliding with the character,
+	 * which is modelled as a box bounded by the given coordinate space.
+	 */
+    this.collides = function(minX, maxX, minY, maxY, minZ, maxZ) {
+    	if (self.collected) return false;
+    	var coinMinX = self.mesh.position.x - 80;
+    	var coinMaxX = self.mesh.position.x + 80;
+    	var coinMinY = self.mesh.position.y - 80;
+    	var coinMaxY = self.mesh.position.y + 80;
+    	var coinMinZ = self.mesh.position.z - 20;
+    	var coinMaxZ = self.mesh.position.z + 20;
+    	return coinMinX <= maxX && coinMaxX >= minX
+    		&& coinMinY <= maxY && coinMaxY >= minY
+    		&& coinMinZ <= maxZ && coinMaxZ >= minZ;
     }
 
 }
