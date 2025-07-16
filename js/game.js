@@ -326,6 +326,11 @@ function World() {
     				row.insertCell(1).innerHTML = rankNames[7];
     			}
 
+    			// Generate QR code for NFT claiming
+    			generateQRCode(coinCount, score);
+    			document.getElementById('nft-coins').innerHTML = coinCount;
+    			document.getElementById('qr-container').style.display = 'block';
+
 			}
 
 			// Update the scores.
@@ -873,4 +878,31 @@ function createCylinder(radiusTop, radiusBottom, height, radialSegments,
     cylinder.receiveShadow = true;
     cylinder.position.set(x, y, z);
     return cylinder;
+}
+
+/**
+ * Generates a QR code for claiming NFT with collected coins
+ *
+ * @param {number} coins Number of coins collected
+ * @param {number} score Player's final score
+ */
+function generateQRCode(coins, score) {
+    // Build game data string with score
+    var gameData = 'Score: ' + score;
+    
+    // Build URL - coins as amount, score in gameData
+    var url = 'nfcwallet://mint-request?token=BoxyRun&amount=' + coins + '&tokenData=' + encodeURIComponent(gameData);
+    
+    // Clear previous QR code
+    document.getElementById('qrcode').innerHTML = '';
+    
+    // Generate QR code
+    var qrcode = new QRCode(document.getElementById('qrcode'), {
+        text: url,
+        width: 256,
+        height: 256,
+        colorDark: '#000000',
+        colorLight: '#FFFFFF',
+        correctLevel: QRCode.CorrectLevel.H
+    });
 }

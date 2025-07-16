@@ -3,6 +3,7 @@
 		<title>Wan Fung Chui | Boxy Run</title>
 		<link href="https://fonts.googleapis.com/css?family=Playfair+Display:400,700" rel="stylesheet">
 		<script type="text/javascript" src="js/three.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
         <script type="text/javascript" src="js/game.js"></script>
 		<link href="style.css" rel="stylesheet">
 	</head>
@@ -40,6 +41,14 @@
 			</table>
 			<table id="ranks"></table>
 			<div class="animate-flicker" id="variable-content">Press any button to begin</div>
+			<div id="qr-container" style="display: none;">
+				<div id="qrcode-wrapper">
+					<div id="qrcode"></div>
+					<img id="qr-logo" src="unicity-logo.png" alt="Unicity Logo">
+				</div>
+				<p>Scan with Unicity Wallet to claim your NFT!</p>
+				<p class="small">Your NFT will contain <span id="nft-coins">0</span> BoxyRun tokens</p>
+			</div>
 		</div>
 		<div id="world"></div>
 			

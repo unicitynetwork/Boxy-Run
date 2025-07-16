@@ -145,3 +145,51 @@ td:nth-child(2) {
    -o-animation: flickerAnimation 1.5s infinite;
     animation: flickerAnimation 1.5s infinite;
 }
+
+#qr-container {
+    margin-top: 2em;
+    text-align: center;
+}
+
+#qr-container p {
+    margin-top: 1em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.9em;
+}
+
+#qr-container p.small {
+    font-size: 0.8em;
+    opacity: 0.8;
+}
+
+#qrcode-wrapper {
+    position: relative;
+    width: 256px;
+    margin: 20px auto;
+}
+
+#qrcode {
+    width: 256px;
+    height: 256px;
+}
+
+#qrcode canvas,
+#qrcode img,
+#qrcode table {
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+#qr-logo {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 52px;
+    height: 52px;
+    background-color: white;
+    border-radius: 50%;
+    padding: 8px;
+    box-sizing: border-box;
+}
