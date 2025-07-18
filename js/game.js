@@ -131,6 +131,10 @@ function World() {
 		var up = 38;
 		var right = 39;
 		var p = 80;
+		// WASD keys
+		var a = 65;
+		var w = 87;
+		var d = 68;
 		
 		keysAllowed = {};
 		document.addEventListener(
@@ -159,19 +163,19 @@ function World() {
 								"variable-content").innerHTML = 
 								"Game is paused. Press any key to resume.";
 						}
-						if (key == up && !paused) {
+						if ((key == up || key == w) && !paused) {
 							character.onUpKeyPressed();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
 							}
 						}
-						if (key == left && !paused) {
+						if ((key == left || key == a) && !paused) {
 							character.onLeftKeyPressed();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
 							}
 						}
-						if (key == right && !paused) {
+						if ((key == right || key == d) && !paused) {
 							character.onRightKeyPressed();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
