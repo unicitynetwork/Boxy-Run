@@ -193,3 +193,73 @@ td:nth-child(2) {
     padding: 8px;
     box-sizing: border-box;
 }
+
+.player-info {
+    margin-top: 2em;
+    text-align: center;
+}
+
+.player-info label {
+    text-transform: uppercase;
+    letter-spacing: 0.25em;
+    font-size: 0.8em;
+    display: block;
+    margin-bottom: 0.5em;
+}
+
+.player-info p {
+    font-family: 'Playfair Display';
+    font-size: 1.2em;
+    margin: 0.5em 0;
+}
+
+.player-info button,
+#nickname-input button {
+    background-color: #1976D2;
+    color: white;
+    border: none;
+    padding: 0.5em 1em;
+    margin-top: 0.5em;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.7em;
+    border-radius: 4px;
+}
+
+.player-info button:hover,
+#nickname-input button:hover {
+    background-color: #1560bd;
+}
+
+#nickname-input {
+    margin-top: 1em;
+    text-align: center;
+}
+
+#nickname-input label {
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.9em;
+    margin-bottom: 1em;
+}
+
+#nickname-field {
+    width: 80%;
+    padding: 0.5em;
+    margin-bottom: 1em;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 1em;
+}
+
+#nickname-skip {
+    background-color: #666;
+    margin-left: 0.5em;
+}
+
+#nickname-skip:hover {
+    background-color: #555;
+}

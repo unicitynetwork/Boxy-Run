@@ -29,6 +29,7 @@ var deg2Rad = Math.PI / 180;
 
 // Make a new world when the page is loaded.
 window.addEventListener('load', function(){
+	PlayerData.init();
 	new World();
 });
 
@@ -326,10 +327,8 @@ function World() {
     				row.insertCell(1).innerHTML = rankNames[7];
     			}
 
-    			// Generate QR code for NFT claiming
-    			generateQRCode(coinCount, score);
-    			document.getElementById('nft-coins').innerHTML = coinCount;
-    			document.getElementById('qr-container').style.display = 'block';
+    			// Show nickname input first
+    			showNicknameInput(score, coinCount);
 
 			}
 
@@ -904,3 +903,220 @@ function generateQRCode(coins, score) {
         correctLevel: QRCode.CorrectLevel.H
     });
 }
+
+/**
+ * Shows nickname input and handles score submission
+ */
+function showNicknameInput(finalScore, finalCoins) {
+    // If backend is not available, skip directly to QR code
+    if (!backendAvailable) {
+        showQRCode(finalScore, finalCoins);
+        return;
+    }
+    
+    var nicknameInput = document.getElementById('nickname-input');
+    var nicknameField = document.getElementById('nickname-field');
+    
+    nicknameInput.style.display = 'block';
+    nicknameField.value = PlayerData.getNickname() || '';
+    nicknameField.focus();
+    
+    // Handle submit button
+    document.getElementById('nickname-submit').onclick = function() {
+        var nickname = nicknameField.value.trim();
+        if (!nickname || !/^[a-zA-Z0-9_-]{3,20}$/.test(nickname)) {
+            nickname = PlayerData.generateRandomNickname();
+        }
+        PlayerData.setNickname(nickname);
+        submitScore(nickname, finalScore, finalCoins);
+        showQRCode(finalScore, finalCoins);
+    };
+    
+    // Handle skip button
+    document.getElementById('nickname-skip').onclick = function() {
+        var nickname = PlayerData.getNickname() || PlayerData.generateRandomNickname();
+        PlayerData.setNickname(nickname);
+        submitScore(nickname, finalScore, finalCoins);
+        showQRCode(finalScore, finalCoins);
+    };
+    
+    // Handle enter key
+    nicknameField.onkeypress = function(e) {
+        if (e.keyCode === 13) {
+            document.getElementById('nickname-submit').click();
+        }
+    };
+}
+
+/**
+ * Shows QR code after nickname submission
+ */
+function showQRCode(score, coins) {
+    document.getElementById('nickname-input').style.display = 'none';
+    generateQRCode(coins, score);
+    document.getElementById('nft-coins').innerHTML = coins;
+    document.getElementById('qr-container').style.display = 'block';
+}
+
+/**
+ * Submits score to backend if it's a new high score
+ */
+function submitScore(nickname, score, coins) {
+    // Don't submit if backend is not available
+    if (!backendAvailable) {
+        return;
+    }
+    
+    var highScore = PlayerData.getHighScore();
+    
+    // Only submit if it's a new high score
+    if (score > highScore.score) {
+        PlayerData.setHighScore(score, coins);
+        
+        // Submit to backend
+        fetch('https://api.example.com/v1/boxyrun/scores', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                nickname: nickname,
+                score: score,
+                coins: coins
+            })
+        })
+        .then(function(response) {
+            return response.json();
+        })
+        .then(function(data) {
+            console.log('Score submitted:', data);
+        })
+        .catch(function(error) {
+            console.error('Error submitting score:', error);
+            // Don't show error to user, game continues normally
+        });
+    }
+}
+
+/**
+ * Backend availability flag
+ */
+var backendAvailable = false;
+
+/**
+ * Check if backend is available
+ */
+function checkBackendAvailability() {
+    // Try to ping the backend
+    fetch('https://api.example.com/v1/boxyrun/leaderboard/daily?limit=1', {
+        method: 'GET'
+    })
+    .then(function(response) {
+        if (response.ok) {
+            backendAvailable = true;
+            console.log('Backend is available');
+            showScoreFeatures();
+        } else {
+            hideScoreFeatures();
+        }
+    })
+    .catch(function(error) {
+        console.log('Backend not available, hiding score features');
+        hideScoreFeatures();
+    });
+}
+
+/**
+ * Show score-related UI elements when backend is available
+ */
+function showScoreFeatures() {
+    // Show player info section
+    var playerInfo = document.querySelector('.player-info');
+    if (playerInfo) {
+        playerInfo.style.display = 'block';
+    }
+    
+    // Initialize player data
+    var nickname = PlayerData.getNickname();
+    if (!nickname) {
+        nickname = PlayerData.generateRandomNickname();
+        PlayerData.setNickname(nickname);
+    } else {
+        var nicknameElement = document.getElementById('current-nickname');
+        if (nicknameElement) {
+            nicknameElement.textContent = nickname;
+        }
+    }
+    
+    // Setup nickname change button
+    var changeButton = document.getElementById('change-nickname');
+    if (changeButton) {
+        changeButton.addEventListener('click', function() {
+            var newNickname = prompt('Enter new nickname (3-20 characters, alphanumeric only):', PlayerData.getNickname());
+            if (newNickname && /^[a-zA-Z0-9_-]{3,20}$/.test(newNickname)) {
+                PlayerData.setNickname(newNickname);
+            } else if (newNickname) {
+                alert('Invalid nickname. Please use 3-20 alphanumeric characters.');
+            }
+        });
+    }
+}
+
+/**
+ * Hide all score-related UI elements
+ */
+function hideScoreFeatures() {
+    backendAvailable = false;
+    
+    // Hide player info section
+    var playerInfo = document.querySelector('.player-info');
+    if (playerInfo) {
+        playerInfo.style.display = 'none';
+    }
+    
+    // Hide nickname input (will be handled in game over)
+    var nicknameInput = document.getElementById('nickname-input');
+    if (nicknameInput) {
+        nicknameInput.style.display = 'none';
+    }
+}
+
+/**
+ * Player data management functions
+ */
+var PlayerData = {
+    getNickname: function() {
+        return localStorage.getItem('boxyrun_nickname') || null;
+    },
+    
+    setNickname: function(nickname) {
+        localStorage.setItem('boxyrun_nickname', nickname);
+        var nicknameElement = document.getElementById('current-nickname');
+        if (nicknameElement) {
+            nicknameElement.textContent = nickname;
+        }
+    },
+    
+    generateRandomNickname: function() {
+        return 'Player-' + Date.now();
+    },
+    
+    getHighScore: function() {
+        var data = localStorage.getItem('boxyrun_highscore');
+        return data ? JSON.parse(data) : { score: 0, coins: 0, timestamp: null };
+    },
+    
+    setHighScore: function(score, coins) {
+        var data = {
+            score: score,
+            coins: coins,
+            timestamp: new Date().toISOString()
+        };
+        localStorage.setItem('boxyrun_highscore', JSON.stringify(data));
+    },
+    
+    init: function() {
+        // Check backend availability
+        checkBackendAvailability();
+    }
+};

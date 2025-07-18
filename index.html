@@ -21,6 +21,11 @@
 				<label>Coins</label>
 				<p id="coins">0</p>
 			</div>
+			<div class="player-info" style="display: none;">
+				<label>Player</label>
+				<p id="current-nickname">Guest</p>
+				<button id="change-nickname">Change</button>
+			</div>
 			<table id="controls">
 			  	<tr>
 			    	<td>Up:</td>
@@ -41,6 +46,12 @@
 			</table>
 			<table id="ranks"></table>
 			<div class="animate-flicker" id="variable-content">Press any button to begin</div>
+			<div id="nickname-input" style="display: none;">
+				<label>Enter your nickname:</label>
+				<input type="text" id="nickname-field" maxlength="20" placeholder="Player-123456">
+				<button id="nickname-submit">Submit Score</button>
+				<button id="nickname-skip">Skip</button>
+			</div>
 			<div id="qr-container" style="display: none;">
 				<div id="qrcode-wrapper">
 					<div id="qrcode"></div>
