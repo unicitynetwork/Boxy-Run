@@ -55,7 +55,7 @@ function World() {
 	var element, scene, camera, character, renderer, light,
 		objects, paused, keysAllowed, score, difficulty,
 		treePresenceProb, maxTreeSize, fogDistance, gameOver,
-		coins, coinCount, gameStartTime, gameplayEvents;
+		coins, coinCount, gameStartTime, gameplayEvents, lastTreeRowZ;
 
 	// Initialize the world.
 	init();
@@ -112,13 +112,16 @@ function World() {
 		maxTreeSize = 0.5;
 		for (var i = 10; i < 40; i++) {
 			createRowOfTrees(i * -3000, treePresenceProb, 0.5, maxTreeSize);
-			createCoins(i * -3000 + 1500, 0.3);
+			if (i % 2 === 0) { // Only create coins every other row
+				createCoins(i * -3000 + 1500, 0.3);
+			}
 		}
 
 		// The game is paused to begin with and the game is not over.
 		gameOver = false;
 		paused = true;
 		gameplayEvents = [];
+		lastTreeRowZ = -120000; // Track last tree row position
 
 		// Start receiving feedback from the player.
 		var left = 37;
@@ -155,19 +158,19 @@ function World() {
 						}
 						if (key == up && !paused) {
 							character.onUpKeyPressed();
-							if (gameStartTime) {
+							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
 							}
 						}
 						if (key == left && !paused) {
 							character.onLeftKeyPressed();
-							if (gameStartTime) {
+							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
 							}
 						}
 						if (key == right && !paused) {
 							character.onRightKeyPressed();
-							if (gameStartTime) {
+							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
 							}
 						}
@@ -208,7 +211,20 @@ function World() {
 		if (!paused) {
 
 			// Add more trees and increase the difficulty.
-			if ((objects[objects.length - 1].mesh.position.z) % 3000 == 0) {
+			// Check if we need to spawn a new row (when last row has moved 3000 units)
+			var shouldSpawnNewRow = false;
+			if (objects.length === 0) {
+				// No trees left, spawn immediately
+				shouldSpawnNewRow = true;
+			} else {
+				// Check if the last tree has moved far enough
+				var lastTreeZ = objects[objects.length - 1].mesh.position.z;
+				if (lastTreeZ > lastTreeRowZ + 3000) {
+					shouldSpawnNewRow = true;
+				}
+			}
+			
+			if (shouldSpawnNewRow) {
 				difficulty += 1;
 				var levelLength = 30;
 				if (difficulty % levelLength == 0) {
@@ -249,7 +265,11 @@ function World() {
 					fogDistance -= (5000 / levelLength);
 				}
 				createRowOfTrees(-120000, treePresenceProb, 0.5, maxTreeSize);
-				createCoins(-120000 + 1500, 0.3);
+				lastTreeRowZ = -120000; // Update last spawn position
+				// Only spawn coins occasionally to reduce object count
+				if (Math.random() < 0.5) {
+					createCoins(-120000 + 1500, 0.2); // Reduced probability
+				}
 				scene.fog.far = fogDistance;
 			}
 
@@ -261,7 +281,7 @@ function World() {
 			// Move the coins closer to the character and rotate them.
 			coins.forEach(function(coin) {
 				coin.mesh.position.z += 100;
-				coin.mesh.rotation.y += 0.05;
+				coin.mesh.rotation.y += 0.02; // Reduced rotation speed
 			});
 
 			// Remove trees that are outside of the world.
@@ -340,7 +360,7 @@ function World() {
     			}
 
     			// Show nickname input first
-    			showNicknameInput(score, coinCount);
+    			showNicknameInput(score, coinCount, gameplayEvents, gameStartTime);
 
 			}
 
@@ -441,8 +461,10 @@ function World() {
 				scene.remove(coins[i].mesh);
 				coinCount++;
 				document.getElementById("coins").innerHTML = coinCount;
-				// Track coin collection event
-				gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});
+				// Track coin collection event (limit array size)
+				if (gameplayEvents.length < 1000) {
+					gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});
+				}
 			}
 		}
 	}
@@ -921,7 +943,7 @@ function generateQRCode(coins, score) {
 /**
  * Shows nickname input and handles score submission
  */
-function showNicknameInput(finalScore, finalCoins) {
+function showNicknameInput(finalScore, finalCoins, gameplayEvents, gameStartTime) {
     // If backend is not available, skip directly to QR code
     if (!backendAvailable) {
         showQRCode(finalScore, finalCoins);
@@ -942,7 +964,7 @@ function showNicknameInput(finalScore, finalCoins) {
             nickname = PlayerData.generateRandomNickname();
         }
         PlayerData.setNickname(nickname);
-        submitScore(nickname, finalScore, finalCoins);
+        submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
         showQRCode(finalScore, finalCoins);
     };
     
@@ -950,7 +972,7 @@ function showNicknameInput(finalScore, finalCoins) {
     document.getElementById('nickname-skip').onclick = function() {
         var nickname = PlayerData.getNickname() || PlayerData.generateRandomNickname();
         PlayerData.setNickname(nickname);
-        submitScore(nickname, finalScore, finalCoins);
+        submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
         showQRCode(finalScore, finalCoins);
     };
     
@@ -975,7 +997,7 @@ function showQRCode(score, coins) {
 /**
  * Submits score to backend if it's a new high score
  */
-function submitScore(nickname, score, coins) {
+function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
     // Don't submit if backend is not available
     if (!backendAvailable) {
         return;
@@ -987,8 +1009,8 @@ function submitScore(nickname, score, coins) {
     if (score > highScore.score) {
         PlayerData.setHighScore(score, coins);
         
-        // Generate gameplay proof
-        var gameplayHash = generateGameplayHash(score, coins);
+        // Generate gameplay proof with actual events
+        var gameplayHash = generateGameplayHash(score, coins, gameplayEvents || []);
         
         // Submit to backend
         fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/scores', {
@@ -1020,11 +1042,14 @@ function submitScore(nickname, score, coins) {
 /**
  * Generates a simple hash of gameplay to help verify legitimate play
  */
-function generateGameplayHash(score, coins) {
+function generateGameplayHash(score, coins, events) {
+    // Use provided events or empty array
+    events = events || [];
+    
     // Count different event types
     var eventCounts = { jump: 0, left: 0, right: 0, coin: 0 };
-    for (var i = 0; i < gameplayEvents.length; i++) {
-        var eventType = gameplayEvents[i].e;
+    for (var i = 0; i < events.length; i++) {
+        var eventType = events[i].e;
         if (eventCounts[eventType] !== undefined) {
             eventCounts[eventType]++;
         }
@@ -1034,7 +1059,7 @@ function generateGameplayHash(score, coins) {
     var hashData = [
         score,
         coins,
-        gameplayEvents.length,
+        events.length,
         eventCounts.jump,
         eventCounts.left,
         eventCounts.right,
@@ -1042,9 +1067,9 @@ function generateGameplayHash(score, coins) {
     ].join('-');
     
     // Add timing data from first and last events
-    if (gameplayEvents.length > 0) {
-        var firstEvent = gameplayEvents[0];
-        var lastEvent = gameplayEvents[gameplayEvents.length - 1];
+    if (events.length > 0) {
+        var firstEvent = events[0];
+        var lastEvent = events[events.length - 1];
         hashData += '-' + Math.floor(firstEvent.t / 1000) + '-' + Math.floor(lastEvent.t / 1000);
     }
     
