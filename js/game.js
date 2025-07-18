@@ -122,6 +122,7 @@ function World() {
 		paused = true;
 		gameplayEvents = [];
 		lastTreeRowZ = -120000; // Track last tree row position
+		gameStartTime = null; // Reset game start time
 
 		// Start receiving feedback from the player.
 		var left = 37;
@@ -1015,15 +1016,17 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
     
     var highScore = PlayerData.getHighScore();
     
-    // Only submit if it's a new high score
+    // Update local high score if needed
     if (score > highScore.score) {
         PlayerData.setHighScore(score, coins);
-        
-        // Generate gameplay proof with actual events
-        var gameplayHash = generateGameplayHash(score, coins, gameplayEvents || []);
-        
-        // Submit to backend
-        fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/scores', {
+    }
+    
+    // Always submit to backend - the backend will decide if it's a daily high score
+    // Generate gameplay proof with actual events
+    var gameplayHash = generateGameplayHash(score, coins, gameplayEvents || []);
+    
+    // Submit to backend
+    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/scores', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1046,7 +1049,6 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
             console.error('Error submitting score:', error);
             // Don't show error to user, game continues normally
         });
-    }
 }
 
 /**

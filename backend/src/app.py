@@ -205,16 +205,18 @@ def handle_get_player_stats(nickname):
 
 def validate_score(score, coins, duration, gameplay_hash):
     """Validate submitted score"""
-    # Allow very short games (10+ seconds)
-    if duration < 5:
+    # Allow very short games (2+ seconds for testing)
+    if duration < 2:
         return False, "Game too short"
     
     # Score must be divisible by 10
     if score % 10 != 0:
         return False, "Invalid score increment"
     
-    # Maximum theoretical score (100 points per second is very generous)
-    if score > duration * 100:
+    # Maximum theoretical score (10 points per frame at 60 FPS = 600 points/second)
+    # Allow significant leeway for performance variations and high refresh rate monitors
+    # Some systems may run faster than 60 FPS (e.g., 120Hz, 144Hz monitors)
+    if score > duration * 1500:
         return False, "Score impossible for duration"
     
     # Coins can't exceed reasonable spawn rate
