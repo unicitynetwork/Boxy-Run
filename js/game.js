@@ -55,7 +55,7 @@ function World() {
 	var element, scene, camera, character, renderer, light,
 		objects, paused, keysAllowed, score, difficulty,
 		treePresenceProb, maxTreeSize, fogDistance, gameOver,
-		coins, coinCount;
+		coins, coinCount, gameStartTime, gameplayEvents;
 
 	// Initialize the world.
 	init();
@@ -118,6 +118,7 @@ function World() {
 		// The game is paused to begin with and the game is not over.
 		gameOver = false;
 		paused = true;
+		gameplayEvents = [];
 
 		// Start receiving feedback from the player.
 		var left = 37;
@@ -140,6 +141,8 @@ function World() {
 							"variable-content").style.visibility = "hidden";
 						document.getElementById(
 							"controls").style.display = "none";
+						// Start game timer
+						gameStartTime = Date.now();
 					} else {
 						if (key == p) {
 							paused = true;
@@ -152,12 +155,21 @@ function World() {
 						}
 						if (key == up && !paused) {
 							character.onUpKeyPressed();
+							if (gameStartTime) {
+								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
+							}
 						}
 						if (key == left && !paused) {
 							character.onLeftKeyPressed();
+							if (gameStartTime) {
+								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
+							}
 						}
 						if (key == right && !paused) {
 							character.onRightKeyPressed();
+							if (gameStartTime) {
+								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
+							}
 						}
 					}
 				}
@@ -429,6 +441,8 @@ function World() {
 				scene.remove(coins[i].mesh);
 				coinCount++;
 				document.getElementById("coins").innerHTML = coinCount;
+				// Track coin collection event
+				gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});
 			}
 		}
 	}
@@ -973,6 +987,9 @@ function submitScore(nickname, score, coins) {
     if (score > highScore.score) {
         PlayerData.setHighScore(score, coins);
         
+        // Generate gameplay proof
+        var gameplayHash = generateGameplayHash(score, coins);
+        
         // Submit to backend
         fetch('https://api.example.com/v1/boxyrun/scores', {
             method: 'POST',
@@ -982,7 +999,9 @@ function submitScore(nickname, score, coins) {
             body: JSON.stringify({
                 nickname: nickname,
                 score: score,
-                coins: coins
+                coins: coins,
+                gameplay_hash: gameplayHash,
+                game_duration: gameStartTime ? Math.floor((Date.now() - gameStartTime) / 1000) : 0
             })
         })
         .then(function(response) {
@@ -996,6 +1015,48 @@ function submitScore(nickname, score, coins) {
             // Don't show error to user, game continues normally
         });
     }
+}
+
+/**
+ * Generates a simple hash of gameplay to help verify legitimate play
+ */
+function generateGameplayHash(score, coins) {
+    // Count different event types
+    var eventCounts = { jump: 0, left: 0, right: 0, coin: 0 };
+    for (var i = 0; i < gameplayEvents.length; i++) {
+        var eventType = gameplayEvents[i].e;
+        if (eventCounts[eventType] !== undefined) {
+            eventCounts[eventType]++;
+        }
+    }
+    
+    // Build hash data with more gameplay information
+    var hashData = [
+        score,
+        coins,
+        gameplayEvents.length,
+        eventCounts.jump,
+        eventCounts.left,
+        eventCounts.right,
+        eventCounts.coin
+    ].join('-');
+    
+    // Add timing data from first and last events
+    if (gameplayEvents.length > 0) {
+        var firstEvent = gameplayEvents[0];
+        var lastEvent = gameplayEvents[gameplayEvents.length - 1];
+        hashData += '-' + Math.floor(firstEvent.t / 1000) + '-' + Math.floor(lastEvent.t / 1000);
+    }
+    
+    // Simple hash function
+    var hash = 0;
+    for (var i = 0; i < hashData.length; i++) {
+        var char = hashData.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    
+    return Math.abs(hash).toString(16);
 }
 
 /**
