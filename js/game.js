@@ -1132,6 +1132,15 @@ function showScoreFeatures() {
         playerInfo.style.display = 'block';
     }
     
+    // Show leaderboard
+    var leaderboard = document.getElementById('leaderboard');
+    if (leaderboard) {
+        leaderboard.style.display = 'block';
+        fetchAndDisplayLeaderboard();
+        // Refresh leaderboard every 30 seconds
+        setInterval(fetchAndDisplayLeaderboard, 30000);
+    }
+    
     // Initialize player data
     var nickname = PlayerData.getNickname();
     if (!nickname) {
@@ -1168,6 +1177,12 @@ function hideScoreFeatures() {
     var playerInfo = document.querySelector('.player-info');
     if (playerInfo) {
         playerInfo.style.display = 'none';
+    }
+    
+    // Hide leaderboard
+    var leaderboard = document.getElementById('leaderboard');
+    if (leaderboard) {
+        leaderboard.style.display = 'none';
     }
     
     // Hide nickname input (will be handled in game over)
@@ -1216,3 +1231,84 @@ var PlayerData = {
         checkBackendAvailability();
     }
 };
+
+/**
+ * Fetch and display the daily leaderboard
+ */
+function fetchAndDisplayLeaderboard() {
+    if (!backendAvailable) return;
+    
+    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/leaderboard/daily?limit=10', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(function(response) {
+        if (!response.ok) {
+            throw new Error('Failed to fetch leaderboard');
+        }
+        return response.json();
+    })
+    .then(function(data) {
+        displayLeaderboard(data);
+    })
+    .catch(function(error) {
+        console.error('Error fetching leaderboard:', error);
+        var tbody = document.getElementById('leaderboard-body');
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="4">Failed to load leaderboard</td></tr>';
+        }
+    });
+}
+
+/**
+ * Display leaderboard data in the table
+ */
+function displayLeaderboard(data) {
+    var tbody = document.getElementById('leaderboard-body');
+    if (!tbody) return;
+    
+    // Clear existing rows
+    tbody.innerHTML = '';
+    
+    if (!data.leaderboard || data.leaderboard.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">No scores yet today!</td></tr>';
+        return;
+    }
+    
+    // Add leaderboard entries
+    data.leaderboard.forEach(function(entry) {
+        var row = tbody.insertRow();
+        
+        // Rank
+        var rankCell = row.insertCell(0);
+        rankCell.textContent = entry.rank;
+        
+        // Player name
+        var nameCell = row.insertCell(1);
+        nameCell.textContent = entry.nickname;
+        
+        // Score
+        var scoreCell = row.insertCell(2);
+        scoreCell.textContent = entry.score.toLocaleString();
+        
+        // Coins
+        var coinsCell = row.insertCell(3);
+        coinsCell.textContent = entry.coins;
+        
+        // Highlight current player
+        if (entry.nickname === PlayerData.getNickname()) {
+            row.style.backgroundColor = '#e3f2fd';
+            row.style.fontWeight = 'bold';
+        }
+    });
+    
+    // Update reset time if available
+    if (data.reset_time) {
+        var resetTime = new Date(data.reset_time);
+        var now = new Date();
+        var hoursUntilReset = Math.floor((resetTime - now) / (1000 * 60 * 60));
+        console.log('Leaderboard resets in', hoursUntilReset, 'hours');
+    }
+}

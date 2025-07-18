@@ -237,6 +237,60 @@ td:nth-child(2) {
     text-align: center;
 }
 
+/* Leaderboard styles */
+#leaderboard {
+    margin-top: 2em;
+    text-align: center;
+}
+
+#leaderboard h3 {
+    font-family: 'Playfair Display';
+    font-size: 1.3em;
+    margin-bottom: 0.5em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+#leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.5em;
+}
+
+#leaderboard-table th,
+#leaderboard-table td {
+    padding: 0.4em;
+    text-align: left;
+    font-size: 0.85em;
+}
+
+#leaderboard-table th {
+    background-color: #f0f0f0;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 0.75em;
+    letter-spacing: 0.05em;
+}
+
+#leaderboard-table tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+#leaderboard-table tr:first-child td {
+    font-weight: bold;
+    color: #FFD700; /* Gold for 1st place */
+}
+
+#leaderboard-table tr:nth-child(2) td {
+    font-weight: bold;
+    color: #C0C0C0; /* Silver for 2nd place */
+}
+
+#leaderboard-table tr:nth-child(3) td {
+    font-weight: bold;
+    color: #CD7F32; /* Bronze for 3rd place */
+}
+
 #nickname-input label {
     display: block;
     text-transform: uppercase;

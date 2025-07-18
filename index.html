@@ -46,6 +46,22 @@
 			</table>
 			<table id="ranks"></table>
 			<div class="animate-flicker" id="variable-content">Press any button to begin</div>
+			<div id="leaderboard" style="display: none;">
+				<h3>Daily Leaderboard</h3>
+				<table id="leaderboard-table">
+					<thead>
+						<tr>
+							<th>Rank</th>
+							<th>Player</th>
+							<th>Score</th>
+							<th>Coins</th>
+						</tr>
+					</thead>
+					<tbody id="leaderboard-body">
+						<tr><td colspan="4">Loading...</td></tr>
+					</tbody>
+				</table>
+			</div>
 			<div id="nickname-input" style="display: none;">
 				<label>Enter your nickname:</label>
 				<input type="text" id="nickname-field" maxlength="20" placeholder="Player-123456">
