@@ -574,10 +574,6 @@ function Character() {
 				case "up":
 					self.isJumping = true;
 					self.jumpStartTime = new Date() / 1000;
-					// Clear any additional queued jumps
-					self.queuedActions = self.queuedActions.filter(function(action) {
-						return action !== "up";
-					});
 					break;
 				case "left":
 					if (self.currentLane != -1) {
@@ -662,7 +658,9 @@ function Character() {
 	  * Handles character activity when the up key is pressed.
 	  */
 	this.onUpKeyPressed = function() {
-		if (!self.isJumping) {
+		// Allow queuing one jump if not already queued
+		var hasQueuedJump = self.queuedActions.indexOf("up") !== -1;
+		if (!hasQueuedJump) {
 			self.queuedActions.push("up");
 		}
 	}
