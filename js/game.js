@@ -55,7 +55,8 @@ function World() {
 	var element, scene, camera, character, renderer, light,
 		objects, paused, keysAllowed, score, difficulty,
 		treePresenceProb, maxTreeSize, fogDistance, gameOver,
-		coins, coinCount, gameStartTime, gameplayEvents, lastTreeRowZ;
+		coins, coinCount, gameStartTime, gameplayEvents, lastTreeRowZ,
+		lastFrameTime, targetFPS = 60, moveSpeed = 10000;
 
 	// Initialize the world.
 	init();
@@ -123,6 +124,7 @@ function World() {
 		gameplayEvents = [];
 		lastTreeRowZ = -120000; // Track last tree row position
 		gameStartTime = null; // Reset game start time
+		lastFrameTime = performance.now(); // Initialize frame timing
 
 		// Start receiving feedback from the player.
 		var left = 37;
@@ -207,6 +209,13 @@ function World() {
 	  * The main animation loop.
 	  */
 	function loop() {
+		// Calculate delta time
+		var currentTime = performance.now();
+		var deltaTime = (currentTime - lastFrameTime) / 1000; // Convert to seconds
+		lastFrameTime = currentTime;
+		
+		// Cap delta time to prevent large jumps
+		deltaTime = Math.min(deltaTime, 0.1); // Max 100ms per frame
 
 		// Update the game.
 		if (!paused) {
@@ -275,14 +284,15 @@ function World() {
 			}
 
 			// Move the trees closer to the character.
+			var moveDistance = moveSpeed * deltaTime; // Units per second * seconds
 			objects.forEach(function(object) {
-				object.mesh.position.z += 100;
+				object.mesh.position.z += moveDistance;
 			});
 
 			// Move the coins closer to the character and rotate them.
 			coins.forEach(function(coin) {
-				coin.mesh.position.z += 100;
-				coin.mesh.rotation.y += 0.02; // Reduced rotation speed
+				coin.mesh.position.z += moveDistance;
+				coin.mesh.rotation.y += 1.2 * deltaTime; // ~1.2 radians per second
 			});
 
 			// Remove trees that are outside of the world.
@@ -296,7 +306,7 @@ function World() {
 			});
 
 			// Make the character move according to the controls.
-			character.update();
+			character.update(deltaTime);
 
 			// Check for coin collection.
 			checkCoinCollection();
@@ -365,8 +375,8 @@ function World() {
 
 			}
 
-			// Update the scores.
-			score += 10;
+			// Update the scores (600 points per second to match old 60fps * 10 points)
+			score += Math.floor(600 * deltaTime);
 			document.getElementById("score").innerHTML = score;
 
 		}
@@ -563,8 +573,8 @@ function Character() {
 		self.isSwitchingLeft = false;
 		self.isSwitchingRight = false;
 		self.currentLane = 0;
-		self.runningStartTime = new Date() / 1000;
-		self.pauseStartTime = new Date() / 1000;
+		self.runningStartTime = performance.now() / 1000;
+		self.pauseStartTime = performance.now() / 1000;
 		self.stepFreq = 2;
 		self.queuedActions = [];
 
@@ -595,10 +605,10 @@ function Character() {
 	/**
 	 * A method called on the character when time moves forward.
 	 */
-	this.update = function() {
+	this.update = function(deltaTime) {
 
-		// Obtain the curren time for future calculations.
-		var currentTime = new Date() / 1000;
+		// Obtain the current time for future calculations.
+		var currentTime = performance.now() / 1000;
 
 		// Apply actions to the character if none are currently being
 		// carried out.
@@ -609,7 +619,7 @@ function Character() {
 			switch(self.queuedActions.shift()) {
 				case "up":
 					self.isJumping = true;
-					self.jumpStartTime = new Date() / 1000;
+					self.jumpStartTime = performance.now() / 1000;
 					break;
 				case "left":
 					if (self.currentLane != -1) {
@@ -662,19 +672,21 @@ function Character() {
 				self.stepFreq, -130, 5, 60, runningClock) * deg2Rad;
 
 			// If the character is not jumping, it may be switching lanes.
+			// Lane switch speed: 4000 units per second (to maintain ~200ms lane switch at 60fps)
+			var laneSwitchSpeed = 4000;
 			if (self.isSwitchingLeft) {
-				self.element.position.x -= 200;
-				var offset = self.currentLane * 800 - self.element.position.x;
-				if (offset > 800) {
+				self.element.position.x -= laneSwitchSpeed * deltaTime;
+				var targetX = (self.currentLane - 1) * 800;
+				if (self.element.position.x <= targetX) {
 					self.currentLane -= 1;
 					self.element.position.x = self.currentLane * 800;
 					self.isSwitchingLeft = false;
 				}
 			}
 			if (self.isSwitchingRight) {
-				self.element.position.x += 200;
-				var offset = self.element.position.x - self.currentLane * 800;
-				if (offset > 800) {
+				self.element.position.x += laneSwitchSpeed * deltaTime;
+				var targetX = (self.currentLane + 1) * 800;
+				if (self.element.position.x >= targetX) {
 					self.currentLane += 1;
 					self.element.position.x = self.currentLane * 800;
 					self.isSwitchingRight = false;
@@ -712,7 +724,7 @@ function Character() {
 	  * Handles character activity when the game is paused.
 	  */
 	this.onPause = function() {
-		self.pauseStartTime = new Date() / 1000;
+		self.pauseStartTime = performance.now() / 1000;
 	}
 
 	/**

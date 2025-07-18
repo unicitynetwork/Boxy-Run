@@ -230,10 +230,9 @@ def validate_score(score, coins, duration, gameplay_hash):
     if score % 10 != 0:
         return False, "Invalid score increment"
     
-    # Maximum theoretical score (10 points per frame at 60 FPS = 600 points/second)
-    # Allow significant leeway for performance variations and high refresh rate monitors
-    # Some systems may run faster than 60 FPS (e.g., 120Hz, 144Hz monitors)
-    if score > duration * 1500:
+    # Maximum theoretical score (normalized to 600 points/second)
+    # Allow 10% leeway for timing variations and rounding
+    if score > duration * 660:
         return False, "Score impossible for duration"
     
     # Coins can't exceed reasonable spawn rate
