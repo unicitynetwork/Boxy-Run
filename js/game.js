@@ -359,7 +359,7 @@ function World() {
     				row.insertCell(1).innerHTML = rankNames[7];
     			}
 
-    			// Show nickname input first
+    			// Submit score (will prompt for nickname only if first time)
     			showNicknameInput(score, coinCount, gameplayEvents, gameStartTime);
 
 			}
@@ -950,11 +950,21 @@ function showNicknameInput(finalScore, finalCoins, gameplayEvents, gameStartTime
         return;
     }
     
+    // Check if player already has a nickname
+    var existingNickname = PlayerData.getNickname();
+    if (existingNickname) {
+        // Auto-submit score with existing nickname
+        submitScore(existingNickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
+        showQRCode(finalScore, finalCoins);
+        return;
+    }
+    
+    // First time player - show nickname input
     var nicknameInput = document.getElementById('nickname-input');
     var nicknameField = document.getElementById('nickname-field');
     
     nicknameInput.style.display = 'block';
-    nicknameField.value = PlayerData.getNickname() || '';
+    nicknameField.value = '';
     nicknameField.focus();
     
     // Handle submit button
