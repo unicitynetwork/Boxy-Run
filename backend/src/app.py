@@ -77,12 +77,29 @@ def handle_submit_score(event):
                 }
             })
         
+        # First, delete any existing score for this player today
+        # Query for existing entries
+        existing_response = table.query(
+            KeyConditionExpression=Key('pk').eq(f"DAILY#{today}") & Key('sk').begins_with('SCORE#'),
+            FilterExpression='nickname = :nickname',
+            ExpressionAttributeValues={':nickname': nickname}
+        )
+        
+        # Delete existing entries for this player
+        for existing_item in existing_response.get('Items', []):
+            table.delete_item(
+                Key={
+                    'pk': existing_item['pk'],
+                    'sk': existing_item['sk']
+                }
+            )
+        
         # Save the new high score
         timestamp = datetime.now(timezone.utc).isoformat()
         ttl = int((datetime.now(timezone.utc) + timedelta(days=7)).timestamp())
         
         # Create sortable score key (pad score with zeros for proper sorting)
-        score_key = f"SCORE#{str(score).zfill(9)}#{nickname}"
+        score_key = f"SCORE#{str(score).zfill(9)}#{nickname}#{timestamp}"
         
         item = {
             'pk': f"DAILY#{today}",
