@@ -56,7 +56,7 @@ function World() {
 		objects, paused, keysAllowed, score, difficulty,
 		treePresenceProb, maxTreeSize, fogDistance, gameOver,
 		coins, coinCount, gameStartTime, gameplayEvents, lastTreeRowZ,
-		lastFrameTime, targetFPS = 60, moveSpeed = 10000;
+		lastFrameTime, targetFPS = 60, moveSpeed = 10000, spawnDistance = 4500;
 
 	// Initialize the world.
 	init();
@@ -81,7 +81,7 @@ function World() {
 
 		// Initialize the scene.
 		scene = new THREE.Scene();
-		fogDistance = 40000;
+		fogDistance = 60000;
 		scene.fog = new THREE.Fog(0xbadbe4, 1, fogDistance);
 
 		// Initialize the camera with field of view, aspect ratio,
@@ -233,7 +233,7 @@ function World() {
 			} else {
 				// Check if the last tree has moved far enough
 				var lastTreeZ = objects[objects.length - 1].mesh.position.z;
-				if (lastTreeZ > lastTreeRowZ + 3000) {
+				if (lastTreeZ > lastTreeRowZ + spawnDistance) {
 					shouldSpawnNewRow = true;
 				}
 			}
@@ -274,9 +274,9 @@ function World() {
 					}
 				}
 				if ((difficulty >= 5 * levelLength && difficulty < 6 * levelLength)) {
-					fogDistance -= (25000 / levelLength);
+					fogDistance -= (15000 / levelLength);
 				} else if (difficulty >= 8 * levelLength && difficulty < 9 * levelLength) {
-					fogDistance -= (5000 / levelLength);
+					fogDistance -= (3000 / levelLength);
 				}
 				createRowOfTrees(-120000, treePresenceProb, 0.5, maxTreeSize);
 				lastTreeRowZ = -120000; // Update last spawn position
