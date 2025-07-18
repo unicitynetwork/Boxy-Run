@@ -1,0 +1,337 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8">
+	<title>Boxy Run - Leaderboards</title>
+	<meta name="viewport" content="width=device-width">
+	<link rel="stylesheet" type="text/css" href="style.css">
+	<style>
+		body {
+			background-color: #f0f0f0;
+			font-family: 'Helvetica', 'Arial', sans-serif;
+			margin: 0;
+			padding: 20px;
+		}
+		
+		.container {
+			max-width: 1200px;
+			margin: 0 auto;
+		}
+		
+		h1 {
+			font-family: 'Playfair Display', serif;
+			text-align: center;
+			color: #333;
+			margin-bottom: 30px;
+		}
+		
+		.back-to-game {
+			text-align: center;
+			margin-bottom: 30px;
+		}
+		
+		.back-to-game a {
+			color: #1976D2;
+			text-decoration: none;
+			font-weight: bold;
+			padding: 10px 20px;
+			border: 2px solid #1976D2;
+			border-radius: 4px;
+			display: inline-block;
+			transition: all 0.3s;
+		}
+		
+		.back-to-game a:hover {
+			background-color: #1976D2;
+			color: white;
+		}
+		
+		.leaderboard-grid {
+			display: grid;
+			grid-template-columns: 1fr 2fr;
+			gap: 30px;
+			margin-top: 30px;
+		}
+		
+		.leaderboard-section {
+			background: white;
+			padding: 20px;
+			border-radius: 8px;
+			box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+		}
+		
+		.leaderboard-section h2 {
+			margin-top: 0;
+			color: #333;
+			border-bottom: 2px solid #f0f0f0;
+			padding-bottom: 10px;
+		}
+		
+		.date-selector {
+			margin-bottom: 20px;
+			text-align: center;
+		}
+		
+		.date-selector input[type="date"] {
+			padding: 8px;
+			font-size: 16px;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+		}
+		
+		.leaderboard-table {
+			width: 100%;
+			border-collapse: collapse;
+		}
+		
+		.leaderboard-table th,
+		.leaderboard-table td {
+			padding: 10px;
+			text-align: left;
+			border-bottom: 1px solid #f0f0f0;
+		}
+		
+		.leaderboard-table th {
+			background-color: #f8f8f8;
+			font-weight: bold;
+		}
+		
+		.leaderboard-table tr:nth-child(1) td {
+			color: #FFD700;
+			font-weight: bold;
+		}
+		
+		.leaderboard-table tr:nth-child(2) td {
+			color: #C0C0C0;
+			font-weight: bold;
+		}
+		
+		.leaderboard-table tr:nth-child(3) td {
+			color: #CD7F32;
+			font-weight: bold;
+		}
+		
+		.loading {
+			text-align: center;
+			color: #666;
+			padding: 20px;
+		}
+		
+		.error {
+			text-align: center;
+			color: #d32f2f;
+			padding: 20px;
+		}
+		
+		.pagination {
+			text-align: center;
+			margin-top: 20px;
+		}
+		
+		.pagination button {
+			padding: 8px 16px;
+			margin: 0 5px;
+			border: 1px solid #ddd;
+			background: white;
+			cursor: pointer;
+			border-radius: 4px;
+		}
+		
+		.pagination button:hover:not(:disabled) {
+			background: #f0f0f0;
+		}
+		
+		.pagination button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
+		
+		@media (max-width: 768px) {
+			.leaderboard-grid {
+				grid-template-columns: 1fr;
+			}
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>Boxy Run Leaderboards</h1>
+		
+		<div class="back-to-game">
+			<a href="index.html">← Back to Game</a>
+		</div>
+		
+		<div class="leaderboard-grid">
+			<!-- All-Time Top 5 -->
+			<div class="leaderboard-section">
+				<h2>All-Time Top 5</h2>
+				<div id="alltime-content">
+					<div class="loading">Loading...</div>
+				</div>
+			</div>
+			
+			<!-- Daily Leaderboard -->
+			<div class="leaderboard-section">
+				<h2>Daily Leaderboard</h2>
+				<div class="date-selector">
+					<label for="date-picker">Select Date: </label>
+					<input type="date" id="date-picker" />
+				</div>
+				<div id="daily-content">
+					<div class="loading">Loading...</div>
+				</div>
+				<div class="pagination">
+					<button id="prev-page" disabled>Previous</button>
+					<span id="page-info">Page 1</span>
+					<button id="next-page">Next</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	<script>
+		// API endpoint
+		const API_BASE = 'https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod';
+		
+		// State
+		let currentDate = new Date().toISOString().split('T')[0];
+		let currentPage = 1;
+		const pageSize = 20;
+		
+		// Initialize date picker
+		document.getElementById('date-picker').value = currentDate;
+		document.getElementById('date-picker').max = currentDate;
+		
+		// Event listeners
+		document.getElementById('date-picker').addEventListener('change', function(e) {
+			currentDate = e.target.value;
+			currentPage = 1;
+			loadDailyLeaderboard();
+		});
+		
+		document.getElementById('prev-page').addEventListener('click', function() {
+			if (currentPage > 1) {
+				currentPage--;
+				loadDailyLeaderboard();
+			}
+		});
+		
+		document.getElementById('next-page').addEventListener('click', function() {
+			currentPage++;
+			loadDailyLeaderboard();
+		});
+		
+		// Load all-time top 5
+		async function loadAllTimeTop5() {
+			const content = document.getElementById('alltime-content');
+			try {
+				const response = await fetch(`${API_BASE}/leaderboard/alltime?limit=5`);
+				const data = await response.json();
+				
+				if (data.leaderboard && data.leaderboard.length > 0) {
+					content.innerHTML = `
+						<table class="leaderboard-table">
+							<thead>
+								<tr>
+									<th>Rank</th>
+									<th>Player</th>
+									<th>Score</th>
+									<th>Date</th>
+								</tr>
+							</thead>
+							<tbody>
+								${data.leaderboard.map((entry, idx) => `
+									<tr>
+										<td>${idx + 1}</td>
+										<td>${entry.nickname}</td>
+										<td>${entry.score.toLocaleString()}</td>
+										<td>${new Date(entry.timestamp).toLocaleDateString()}</td>
+									</tr>
+								`).join('')}
+							</tbody>
+						</table>
+					`;
+				} else {
+					content.innerHTML = '<div class="error">No scores yet!</div>';
+				}
+			} catch (error) {
+				content.innerHTML = '<div class="error">Failed to load all-time scores</div>';
+			}
+		}
+		
+		// Load daily leaderboard
+		async function loadDailyLeaderboard() {
+			const content = document.getElementById('daily-content');
+			const prevBtn = document.getElementById('prev-page');
+			const nextBtn = document.getElementById('next-page');
+			const pageInfo = document.getElementById('page-info');
+			
+			content.innerHTML = '<div class="loading">Loading...</div>';
+			
+			try {
+				const offset = (currentPage - 1) * pageSize;
+				let response;
+				
+				if (currentDate === new Date().toISOString().split('T')[0]) {
+					// Today's data
+					response = await fetch(`${API_BASE}/leaderboard/daily?limit=${pageSize}&offset=${offset}`);
+				} else {
+					// Historical data
+					response = await fetch(`${API_BASE}/leaderboard/history?date=${currentDate}&limit=${pageSize}&offset=${offset}`);
+				}
+				const data = await response.json();
+				
+				if (data.leaderboard && data.leaderboard.length > 0) {
+					content.innerHTML = `
+						<table class="leaderboard-table">
+							<thead>
+								<tr>
+									<th>Rank</th>
+									<th>Player</th>
+									<th>Score</th>
+									<th>Coins</th>
+									<th>Time</th>
+								</tr>
+							</thead>
+							<tbody>
+								${data.leaderboard.map(entry => `
+									<tr>
+										<td>${entry.rank}</td>
+										<td>${entry.nickname}</td>
+										<td>${entry.score.toLocaleString()}</td>
+										<td>${entry.coins}</td>
+										<td>${new Date(entry.timestamp).toLocaleTimeString()}</td>
+									</tr>
+								`).join('')}
+							</tbody>
+						</table>
+					`;
+					
+					// Update pagination
+					pageInfo.textContent = `Page ${currentPage}`;
+					prevBtn.disabled = currentPage === 1;
+					nextBtn.disabled = data.leaderboard.length < pageSize;
+					
+					// Show total players
+					if (data.total_players) {
+						const totalPages = Math.ceil(data.total_players / pageSize);
+						pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${data.total_players} players)`;
+					}
+				} else {
+					content.innerHTML = '<div class="error">No scores for this date</div>';
+					prevBtn.disabled = true;
+					nextBtn.disabled = true;
+				}
+			} catch (error) {
+				content.innerHTML = '<div class="error">Failed to load daily scores</div>';
+				prevBtn.disabled = true;
+				nextBtn.disabled = true;
+			}
+		}
+		
+		// Initial load
+		loadAllTimeTop5();
+		loadDailyLeaderboard();
+	</script>
+</body>
+</html>

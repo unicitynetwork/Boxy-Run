@@ -32,6 +32,10 @@ def lambda_handler(event, context):
             return handle_submit_score(event)
         elif path == '/leaderboard/daily' and method == 'GET':
             return handle_get_leaderboard(event)
+        elif path == '/leaderboard/alltime' and method == 'GET':
+            return handle_get_alltime_leaderboard(event)
+        elif path == '/leaderboard/history' and method == 'GET':
+            return handle_get_historical_leaderboard(event)
         elif path.startswith('/scores/') and method == 'GET':
             nickname = event['pathParameters']['nickname']
             return handle_get_player_stats(nickname)
@@ -115,6 +119,9 @@ def handle_submit_score(event):
         }
         
         table.put_item(Item=item)
+        
+        # Check and update all-time high score
+        update_alltime_score(nickname, score, coins, timestamp, today)
         
         # Get player's rank
         rank = get_player_rank(today, score)
@@ -277,3 +284,165 @@ def respond(status_code, body):
         'headers': CORS_HEADERS,
         'body': json.dumps(body, default=str)
     }
+
+def handle_get_alltime_leaderboard(event):
+    """Get all-time top scores"""
+    try:
+        # Get query parameters
+        params = event.get('queryStringParameters') or {}
+        limit = min(int(params.get('limit', 5)), 20)  # Max 20 for all-time
+        
+        # Query all-time scores
+        response = table.query(
+            KeyConditionExpression=Key('pk').eq('ALLTIME'),
+            ScanIndexForward=False,  # Sort descending
+            Limit=limit
+        )
+        
+        items = response['Items']
+        
+        # Format leaderboard
+        leaderboard = []
+        for idx, item in enumerate(items):
+            leaderboard.append({
+                'rank': idx + 1,
+                'nickname': item['nickname'],
+                'score': int(item['score']),
+                'coins': int(item.get('coins', 0)),
+                'date': item.get('date', 'Unknown'),
+                'timestamp': item['timestamp']
+            })
+        
+        return respond(200, {
+            'leaderboard': leaderboard
+        })
+        
+    except Exception as e:
+        print(f"Error getting all-time leaderboard: {str(e)}")
+        return respond(500, {'error': 'Internal server error'})
+
+def handle_get_historical_leaderboard(event):
+    """Get leaderboard for a specific date"""
+    try:
+        # Get query parameters
+        params = event.get('queryStringParameters') or {}
+        date = params.get('date')
+        limit = min(int(params.get('limit', 10)), 100)
+        offset = int(params.get('offset', 0))
+        
+        if not date:
+            return respond(400, {'error': 'Date parameter is required'})
+        
+        # Validate date format
+        try:
+            datetime.strptime(date, '%Y-%m-%d')
+        except ValueError:
+            return respond(400, {'error': 'Invalid date format. Use YYYY-MM-DD'})
+        
+        # Query historical scores
+        response = table.query(
+            KeyConditionExpression=Key('pk').eq(f"DAILY#{date}"),
+            ScanIndexForward=False,  # Sort descending
+            Limit=limit + offset
+        )
+        
+        items = response['Items'][offset:offset + limit]
+        
+        # Format leaderboard
+        leaderboard = []
+        for idx, item in enumerate(items):
+            leaderboard.append({
+                'rank': offset + idx + 1,
+                'nickname': item['nickname'],
+                'score': int(item['score']),
+                'coins': int(item['coins']),
+                'timestamp': item['timestamp']
+            })
+        
+        # Get total players count for that date
+        total_response = table.query(
+            KeyConditionExpression=Key('pk').eq(f"DAILY#{date}"),
+            Select='COUNT'
+        )
+        
+        return respond(200, {
+            'date': date,
+            'total_players': total_response['Count'],
+            'leaderboard': leaderboard
+        })
+        
+    except Exception as e:
+        print(f"Error getting historical leaderboard: {str(e)}")
+        return respond(500, {'error': 'Internal server error'})
+
+def update_alltime_score(nickname, score, coins, timestamp, date):
+    """Update all-time high score if this score qualifies"""
+    try:
+        # Check if this player already has an all-time entry
+        existing_alltime = table.query(
+            KeyConditionExpression=Key('pk').eq('ALLTIME'),
+            FilterExpression='nickname = :nickname',
+            ExpressionAttributeValues={':nickname': nickname}
+        )
+        
+        # If player has existing all-time score, check if new score is higher
+        if existing_alltime['Items']:
+            existing_score = int(existing_alltime['Items'][0]['score'])
+            if score <= existing_score:
+                return  # Not a new all-time high for this player
+            
+            # Delete old all-time entry
+            for item in existing_alltime['Items']:
+                table.delete_item(
+                    Key={
+                        'pk': item['pk'],
+                        'sk': item['sk']
+                    }
+                )
+        
+        # Check if score qualifies for top 100 all-time
+        # Get current top 100
+        top_scores = table.query(
+            KeyConditionExpression=Key('pk').eq('ALLTIME'),
+            ScanIndexForward=False,
+            Limit=100
+        )
+        
+        # If less than 100 scores or score beats the lowest, add it
+        if len(top_scores['Items']) < 100 or (top_scores['Items'] and score > int(top_scores['Items'][-1]['score'])):
+            # Create all-time entry
+            alltime_item = {
+                'pk': 'ALLTIME',
+                'sk': f"SCORE#{str(score).zfill(9)}#{nickname}#{timestamp}",
+                'nickname': nickname,
+                'score': score,
+                'coins': coins,
+                'timestamp': timestamp,
+                'date': date
+                # No TTL for all-time scores
+            }
+            
+            table.put_item(Item=alltime_item)
+            
+            # If we now have more than 100 scores, remove the lowest
+            if len(top_scores['Items']) >= 100:
+                # Get the new top 100 to find which to remove
+                new_top = table.query(
+                    KeyConditionExpression=Key('pk').eq('ALLTIME'),
+                    ScanIndexForward=False,
+                    Limit=101
+                )
+                
+                if len(new_top['Items']) > 100:
+                    # Delete the 101st entry
+                    to_delete = new_top['Items'][100]
+                    table.delete_item(
+                        Key={
+                            'pk': to_delete['pk'],
+                            'sk': to_delete['sk']
+                        }
+                    )
+        
+    except Exception as e:
+        print(f"Error updating all-time score: {str(e)}")
+        # Don't fail the main request if all-time update fails
