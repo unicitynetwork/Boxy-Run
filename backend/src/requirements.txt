@@ -1,0 +1,1 @@
+# AWS SDK is included in Lambda runtime, no additional dependencies needed

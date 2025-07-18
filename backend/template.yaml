@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Boxy Run Game Leaderboard Backend
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: "https://unicitynetwork.github.io"
+    Description: Allowed CORS origin (GitHub Pages domain)
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.9
+    Environment:
+      Variables:
+        SCORES_TABLE: !Ref ScoresTable
+        ALLOWED_ORIGIN: !Ref AllowedOrigin
+
+Resources:
+  # DynamoDB Table for daily scores
+  ScoresTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BoxyRunScores
+      BillingMode: PAY_PER_REQUEST  # Cost-effective for sporadic usage
+      AttributeDefinitions:
+        - AttributeName: pk  # "DAILY#2024-07-16" for daily partitioning
+          AttributeType: S
+        - AttributeName: sk  # "SCORE#00015420#Player-123456" for sorting
+          AttributeType: S
+        - AttributeName: nickname
+          AttributeType: S
+        - AttributeName: date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # GSI for querying by nickname and date
+        - IndexName: nickname-date-index
+          KeySchema:
+            - AttributeName: nickname
+              KeyType: HASH
+            - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true  # Auto-delete old records after 7 days
+
+  # Lambda function for the API
+  LeaderboardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScoresTable
+      Events:
+        SubmitScore:
+          Type: Api
+          Properties:
+            Path: /scores
+            Method: POST
+            RestApiId: !Ref LeaderboardApi
+        GetDailyLeaderboard:
+          Type: Api
+          Properties:
+            Path: /leaderboard/daily
+            Method: GET
+            RestApiId: !Ref LeaderboardApi
+        GetPlayerStats:
+          Type: Api
+          Properties:
+            Path: /scores/{nickname}
+            Method: GET
+            RestApiId: !Ref LeaderboardApi
+        HealthCheck:
+          Type: Api
+          Properties:
+            Path: /health
+            Method: GET
+            RestApiId: !Ref LeaderboardApi
+
+  # API Gateway
+  LeaderboardApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowOrigin: !Sub "'${AllowedOrigin}'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${LeaderboardFunction}
+      RetentionInDays: 7  # Keep logs for 7 days to save costs
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${LeaderboardApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref ScoresTable
