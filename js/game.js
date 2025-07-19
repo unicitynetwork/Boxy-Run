@@ -379,8 +379,8 @@ function World() {
 
 			}
 
-			// Update the scores (600 points per second to match old 60fps * 10 points)
-			score += Math.floor(600 * deltaTime);
+			// Update the scores (scale with movement speed: 600 * (moveSpeed/6000))
+			score += Math.floor(600 * (moveSpeed / 6000) * deltaTime);
 			document.getElementById("score").innerHTML = score;
 
 		}
