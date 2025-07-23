@@ -735,11 +735,20 @@ function World() {
 		var charMaxY = character.element.position.y + 320;
 		var charMinZ = character.element.position.z - 40;
 		var charMaxZ = character.element.position.z + 40;
-		for (var i = 0; i < coins.length; i++) {
-			if (coins[i].collides(charMinX, charMaxX, charMinY,
+		
+		// Process coins in reverse order so we can safely remove them
+		for (var i = coins.length - 1; i >= 0; i--) {
+			var coin = coins[i];
+			if (coin.collected) continue;
+			
+			// Check if coin is in collection range or if we passed through it
+			var coinZ = coin.mesh.position.z;
+			var coinInRange = coinZ >= charMinZ - 100 && coinZ <= charMaxZ + 100;
+			
+			if (coinInRange && coin.collides(charMinX, charMaxX, charMinY,
 					charMaxY, charMinZ, charMaxZ)) {
-				coins[i].collected = true;
-				scene.remove(coins[i].mesh);
+				coin.collected = true;
+				scene.remove(coin.mesh);
 				coinCount++;
 				document.getElementById("coins").innerHTML = coinCount;
 				SoundSystem.playCoin();
@@ -747,6 +756,8 @@ function World() {
 				if (gameplayEvents.length < 1000) {
 					gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});
 				}
+				// Remove the coin from the array immediately
+				coins.splice(i, 1);
 			}
 		}
 	}
@@ -1086,8 +1097,8 @@ function Coin(x, y, z) {
     	var coinMaxX = self.mesh.position.x + 80;
     	var coinMinY = self.mesh.position.y - 80;
     	var coinMaxY = self.mesh.position.y + 80;
-    	var coinMinZ = self.mesh.position.z - 20;
-    	var coinMaxZ = self.mesh.position.z + 20;
+    	var coinMinZ = self.mesh.position.z - 100;
+    	var coinMaxZ = self.mesh.position.z + 100;
     	return coinMinX <= maxX && coinMaxX >= minX
     		&& coinMinY <= maxY && coinMaxY >= minY
     		&& coinMinZ <= maxZ && coinMaxZ >= minZ;
