@@ -27,10 +27,274 @@ var Colors = {
 
 var deg2Rad = Math.PI / 180;
 
+// Sound system using Web Audio API
+var SoundSystem = {
+	audioContext: null,
+	enabled: true,
+	
+	init: function() {
+		try {
+			this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+			// Resume context on first user interaction (required for some browsers)
+			document.addEventListener('click', () => {
+				if (this.audioContext.state === 'suspended') {
+					this.audioContext.resume();
+				}
+			}, { once: true });
+			document.addEventListener('keydown', () => {
+				if (this.audioContext.state === 'suspended') {
+					this.audioContext.resume();
+				}
+			}, { once: true });
+		} catch (e) {
+			console.log('Web Audio API not supported');
+			this.enabled = false;
+		}
+	},
+	
+	playJump: function() {
+		if (!this.enabled || !this.audioContext) return;
+		
+		// Create oscillator for jump sound
+		var oscillator = this.audioContext.createOscillator();
+		var gainNode = this.audioContext.createGain();
+		
+		oscillator.connect(gainNode);
+		gainNode.connect(this.audioContext.destination);
+		
+		// Jump sound: rising pitch
+		oscillator.type = 'square';
+		oscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
+		oscillator.frequency.exponentialRampToValueAtTime(600, this.audioContext.currentTime + 0.1);
+		
+		// Fade out
+		gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+		gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.1);
+		
+		oscillator.start(this.audioContext.currentTime);
+		oscillator.stop(this.audioContext.currentTime + 0.1);
+	},
+	
+	playCoin: function() {
+		if (!this.enabled || !this.audioContext) return;
+		
+		// Create multiple oscillators for metallic harmonics
+		var fundamental = 1568; // G6 - metallic ring frequency
+		var harmonics = [1, 2.76, 5.4, 8.93]; // Metallic harmonic ratios
+		var oscillators = [];
+		var gainNodes = [];
+		
+		// Master gain
+		var masterGain = this.audioContext.createGain();
+		masterGain.connect(this.audioContext.destination);
+		
+		// Create oscillators for each harmonic
+		for (var i = 0; i < harmonics.length; i++) {
+			var osc = this.audioContext.createOscillator();
+			var gain = this.audioContext.createGain();
+			
+			osc.type = 'sine';
+			osc.frequency.setValueAtTime(fundamental * harmonics[i], this.audioContext.currentTime);
+			
+			// Higher harmonics are quieter
+			var harmGain = 0.3 / (i + 1);
+			gain.gain.setValueAtTime(harmGain, this.audioContext.currentTime);
+			
+			osc.connect(gain);
+			gain.connect(masterGain);
+			
+			oscillators.push(osc);
+			gainNodes.push(gain);
+		}
+		
+		// Add a noise burst for the initial "clink"
+		var noiseBuffer = this.audioContext.createBuffer(1, 0.05 * this.audioContext.sampleRate, this.audioContext.sampleRate);
+		var noiseData = noiseBuffer.getChannelData(0);
+		for (var i = 0; i < noiseData.length; i++) {
+			noiseData[i] = (Math.random() * 2 - 1) * 0.1;
+		}
+		
+		var noiseSource = this.audioContext.createBufferSource();
+		var noiseFilter = this.audioContext.createBiquadFilter();
+		var noiseGain = this.audioContext.createGain();
+		
+		noiseSource.buffer = noiseBuffer;
+		noiseFilter.type = 'highpass';
+		noiseFilter.frequency.setValueAtTime(5000, this.audioContext.currentTime);
+		
+		noiseSource.connect(noiseFilter);
+		noiseFilter.connect(noiseGain);
+		noiseGain.connect(masterGain);
+		
+		var time = this.audioContext.currentTime;
+		
+		// Noise envelope (quick burst)
+		noiseGain.gain.setValueAtTime(0.3, time);
+		noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.02);
+		
+		// Master envelope (metallic ring with decay)
+		masterGain.gain.setValueAtTime(0.4, time);
+		masterGain.gain.exponentialRampToValueAtTime(0.01, time + 0.3);
+		
+		// Start all sounds
+		noiseSource.start(time);
+		noiseSource.stop(time + 0.05);
+		
+		for (var i = 0; i < oscillators.length; i++) {
+			oscillators[i].start(time);
+			oscillators[i].stop(time + 0.3);
+		}
+	},
+	
+	playGameOver: function() {
+		if (!this.enabled || !this.audioContext) return;
+		
+		// Randomly choose between sad trombone and funeral march
+		if (Math.random() < 0.5) {
+			this.playSadTrombone();
+		} else {
+			this.playFuneralMarch();
+		}
+	},
+	
+	playSadTrombone: function() {
+		// Create oscillator for sad trombone sound
+		var oscillator = this.audioContext.createOscillator();
+		var gainNode = this.audioContext.createGain();
+		var filter = this.audioContext.createBiquadFilter();
+		
+		// Use sawtooth wave for brass-like sound
+		oscillator.type = 'sawtooth';
+		
+		// Connect through filter for more trombone-like quality
+		oscillator.connect(filter);
+		filter.connect(gainNode);
+		gainNode.connect(this.audioContext.destination);
+		
+		// Low-pass filter to make it more mellow/brass-like
+		filter.type = 'lowpass';
+		filter.frequency.setValueAtTime(1500, this.audioContext.currentTime);
+		filter.Q.setValueAtTime(2, this.audioContext.currentTime);
+		
+		var time = this.audioContext.currentTime;
+		
+		// Three descending notes: "wah wah waaah" (slower timing)
+		// Start at D3, then C3, then G2
+		oscillator.frequency.setValueAtTime(146.83, time); // D3
+		oscillator.frequency.setValueAtTime(146.83, time + 0.4);
+		oscillator.frequency.exponentialRampToValueAtTime(130.81, time + 0.5); // C3
+		oscillator.frequency.setValueAtTime(130.81, time + 0.9);
+		oscillator.frequency.exponentialRampToValueAtTime(98, time + 1.0); // G2
+		oscillator.frequency.setValueAtTime(98, time + 1.6);
+		
+		// Volume envelope with "wah" effect (slower)
+		gainNode.gain.setValueAtTime(0, time);
+		// First "wah"
+		gainNode.gain.linearRampToValueAtTime(0.3, time + 0.1);
+		gainNode.gain.exponentialRampToValueAtTime(0.1, time + 0.4);
+		gainNode.gain.linearRampToValueAtTime(0, time + 0.5);
+		// Second "wah"
+		gainNode.gain.linearRampToValueAtTime(0.3, time + 0.6);
+		gainNode.gain.exponentialRampToValueAtTime(0.1, time + 0.9);
+		gainNode.gain.linearRampToValueAtTime(0, time + 1.0);
+		// Third "waaah" (longer)
+		gainNode.gain.linearRampToValueAtTime(0.3, time + 1.1);
+		gainNode.gain.setValueAtTime(0.3, time + 1.4);
+		gainNode.gain.exponentialRampToValueAtTime(0.01, time + 2.0);
+		
+		// Add slight vibrato for more realistic trombone
+		var vibrato = this.audioContext.createOscillator();
+		var vibratoGain = this.audioContext.createGain();
+		vibrato.frequency.setValueAtTime(5, time);
+		vibratoGain.gain.setValueAtTime(3, time);
+		vibrato.connect(vibratoGain);
+		vibratoGain.connect(oscillator.frequency);
+		
+		oscillator.start(time);
+		vibrato.start(time);
+		oscillator.stop(time + 2.0);
+		vibrato.stop(time + 2.0);
+	},
+	
+	playFuneralMarch: function() {
+		// Simple death march: just deep "BOOM... BOOM... BOOM..." like a slow heartbeat stopping
+		var time = this.audioContext.currentTime;
+		
+		// Three deep, slow drum beats getting quieter
+		var beats = [
+			{start: 0, volume: 0.5, freq: 55},      // First boom - A1
+			{start: 0.8, volume: 0.4, freq: 55},    // Second boom
+			{start: 1.6, volume: 0.3, freq: 55},    // Third boom
+			{start: 2.6, volume: 0.2, freq: 49},    // Final boom - G1 (lower and quieter)
+		];
+		
+		beats.forEach(function(beat) {
+			// Create oscillator for the tone
+			var oscillator = this.audioContext.createOscillator();
+			var gainNode = this.audioContext.createGain();
+			
+			oscillator.type = 'sine';
+			oscillator.frequency.setValueAtTime(beat.freq, time + beat.start);
+			
+			// Create sub-bass oscillator for extra depth
+			var subOsc = this.audioContext.createOscillator();
+			subOsc.type = 'sine';
+			subOsc.frequency.setValueAtTime(beat.freq / 2, time + beat.start);
+			
+			oscillator.connect(gainNode);
+			subOsc.connect(gainNode);
+			gainNode.connect(this.audioContext.destination);
+			
+			// Drum-like envelope
+			gainNode.gain.setValueAtTime(0, time + beat.start);
+			gainNode.gain.linearRampToValueAtTime(beat.volume, time + beat.start + 0.02);
+			gainNode.gain.setValueAtTime(beat.volume * 0.8, time + beat.start + 0.1);
+			gainNode.gain.exponentialRampToValueAtTime(0.01, time + beat.start + 0.6);
+			
+			oscillator.start(time + beat.start);
+			subOsc.start(time + beat.start);
+			oscillator.stop(time + beat.start + 0.7);
+			subOsc.stop(time + beat.start + 0.7);
+			
+			// Add click sound for realism
+			var click = this.audioContext.createOscillator();
+			var clickGain = this.audioContext.createGain();
+			
+			click.type = 'square';
+			click.frequency.setValueAtTime(200, time + beat.start);
+			click.connect(clickGain);
+			clickGain.connect(this.audioContext.destination);
+			
+			clickGain.gain.setValueAtTime(beat.volume * 0.3, time + beat.start);
+			clickGain.gain.exponentialRampToValueAtTime(0.01, time + beat.start + 0.01);
+			
+			click.start(time + beat.start);
+			click.stop(time + beat.start + 0.02);
+		}.bind(this));
+	}
+};
+
 // Make a new world when the page is loaded.
 window.addEventListener('load', function(){
 	PlayerData.init();
+	SoundSystem.init();
 	new World();
+	
+	// Set up sound toggle button
+	var soundToggle = document.getElementById('sound-toggle');
+	var soundOnIcon = document.getElementById('sound-on');
+	var soundOffIcon = document.getElementById('sound-off');
+	
+	soundToggle.addEventListener('click', function() {
+		SoundSystem.enabled = !SoundSystem.enabled;
+		if (SoundSystem.enabled) {
+			soundOnIcon.style.display = 'block';
+			soundOffIcon.style.display = 'none';
+		} else {
+			soundOnIcon.style.display = 'none';
+			soundOffIcon.style.display = 'block';
+		}
+	});
 });
 
 /** 
@@ -165,6 +429,7 @@ function World() {
 						}
 						if ((key == up || key == w) && !paused) {
 							character.onUpKeyPressed();
+							SoundSystem.playJump();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
 							}
@@ -319,6 +584,7 @@ function World() {
 			if (collisionsDetected()) {
 				gameOver = true;
 				paused = true;
+				SoundSystem.playGameOver();
 				document.addEventListener(
         			'keydown',
         			function(e) {
@@ -476,6 +742,7 @@ function World() {
 				scene.remove(coins[i].mesh);
 				coinCount++;
 				document.getElementById("coins").innerHTML = coinCount;
+				SoundSystem.playCoin();
 				// Track coin collection event (limit array size)
 				if (gameplayEvents.length < 1000) {
 					gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});

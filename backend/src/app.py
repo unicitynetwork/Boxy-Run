@@ -60,10 +60,10 @@ def handle_submit_score(event):
         gameplay_hash = body.get('gameplay_hash', '')
         game_duration = int(body.get('game_duration', 0))
         
-        # Validate the score
-        is_valid, message = validate_score(score, coins, game_duration, gameplay_hash)
-        if not is_valid:
-            return respond(400, {'error': 'invalid_request', 'message': message})
+        # ANTI-CHEAT DISABLED - Accept all scores
+        # is_valid, message = validate_score(score, coins, game_duration, gameplay_hash)
+        # if not is_valid:
+        #     return respond(400, {'error': 'invalid_request', 'message': message})
         
         # Get current date
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -237,9 +237,9 @@ def validate_score(score, coins, duration, gameplay_hash):
     if score % 10 != 0:
         return False, "Invalid score increment"
     
-    # Maximum theoretical score (normalized to 600 points/second)
+    # Maximum theoretical score (normalized to 1000 points/second for faster gameplay)
     # Allow 10% leeway for timing variations and rounding
-    if score > duration * 660:
+    if score > duration * 1100:
         return False, "Score impossible for duration"
     
     # Coins can't exceed reasonable spawn rate

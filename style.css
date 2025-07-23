@@ -13,6 +13,31 @@ html, body {
     background: linear-gradient(#badbe4, #aaf7e1);
 }
 
+#sound-toggle {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.3s ease;
+}
+
+#sound-toggle:hover {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#sound-toggle:active {
+    transform: scale(0.95);
+}
+
 #world {
   position: absolute;
   width:75%;
