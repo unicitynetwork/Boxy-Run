@@ -38,6 +38,32 @@ html, body {
     transform: scale(0.95);
 }
 
+#discord-button {
+    position: absolute;
+    top: 70px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: #5865F2;
+    cursor: pointer;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.3s ease;
+    text-decoration: none;
+}
+
+#discord-button:hover {
+    background: #4752C4;
+}
+
+#discord-button:active {
+    transform: scale(0.95);
+}
+
 #world {
   position: absolute;
   width:75%;
