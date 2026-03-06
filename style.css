@@ -198,6 +198,93 @@ td:nth-child(2) {
 }
 
 
+/* Sphere wallet section */
+#sphere-wallet-section {
+    margin-top: 1.5em;
+    text-align: center;
+}
+
+.sphere-btn {
+    display: block;
+    width: 100%;
+    padding: 0.8em 1em;
+    background-color: #f97316;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.85em;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.sphere-btn:hover:not(:disabled) {
+    background-color: #ea580c;
+}
+
+.sphere-btn:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+}
+
+.sphere-btn-small {
+    padding: 0.3em 0.8em;
+    background: none;
+    color: #9ca3af;
+    border: 1px solid #9ca3af;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.65em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 0.5em;
+    transition: all 0.2s;
+}
+
+.sphere-btn-small:hover {
+    color: #f97316;
+    border-color: #f97316;
+}
+
+#sphere-wallet-info {
+    margin: 0.8em 0;
+}
+
+.sphere-wallet-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3em 0;
+}
+
+.sphere-wallet-row label {
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.65em;
+    color: #9ca3af;
+}
+
+.sphere-wallet-row p {
+    font-family: 'Playfair Display';
+    font-size: 0.9em;
+    margin: 0;
+    text-align: right;
+    word-break: break-all;
+}
+
+#sphere-error {
+    margin-top: 0.5em;
+    padding: 0.5em;
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    color: #ef4444;
+    font-size: 0.75em;
+    text-align: center;
+}
+
 .player-info {
     margin-top: 2em;
     text-align: center;

@@ -409,12 +409,19 @@ function World() {
 					if (keysAllowed[key] === false) return;
 					keysAllowed[key] = false;
 					if (paused && !collisionsDetected() && key > 18) {
+						// Require Sphere wallet deposit before starting
+						if (window.SphereWallet && !window.SphereWallet.isDepositPaid) {
+							return;
+						}
 						paused = false;
 						character.onUnpause();
 						document.getElementById(
 							"variable-content").style.visibility = "hidden";
 						document.getElementById(
 							"controls").style.display = "none";
+						if (window.SphereWallet) {
+							window.SphereWallet.updateUI('playing');
+						}
 						// Start game timer
 						gameStartTime = Date.now();
 					} else {
@@ -585,17 +592,28 @@ function World() {
 				gameOver = true;
 				paused = true;
 				SoundSystem.playGameOver();
-				document.addEventListener(
-        			'keydown',
-        			function(e) {
-        				if (e.keyCode == 40)
-            			document.location.reload(true);
-        			}
-    			);
+
     			var variableContent = document.getElementById("variable-content");
     			variableContent.style.visibility = "visible";
-    			variableContent.innerHTML = 
-    				"Game over! Press the down arrow to try again.";
+
+				// Trigger payout and show wallet-aware game over UI
+				if (window.SphereWallet && window.SphereWallet.isConnected) {
+					variableContent.innerHTML =
+						"Game over! You earned <strong>" + coinCount + " UCT</strong>";
+					window.SphereWallet.requestPayout(coinCount);
+					window.SphereWallet.resetDeposit();
+					window.SphereWallet.updateUI('gameover');
+				} else {
+					variableContent.innerHTML =
+						"Game over! Press the down arrow to try again.";
+					document.addEventListener(
+						'keydown',
+						function(e) {
+							if (e.keyCode == 40)
+								document.location.reload(true);
+						}
+					);
+				}
     			var table = document.getElementById("ranks");
     			var rankNames = ["Typical Engineer", "Couch Potato", "Weekend Jogger", "Daily Runner",
     				"Local Prospect", "Regional Star", "National Champ", "Second Mo Farah"];

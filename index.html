@@ -1,10 +1,11 @@
 <html>
 	<head>
-		<title>Wan Fung Chui | Boxy Run</title>
+		<title>Boxy Run</title>
 		<link rel="icon" type="image/png" href="unicity-logo.png">
 		<link href="https://fonts.googleapis.com/css?family=Playfair+Display:400,700" rel="stylesheet">
 		<script type="text/javascript" src="js/three.min.js"></script>
-        <script type="text/javascript" src="js/game.js"></script>
+		<script type="text/javascript" src="js/sphere-connect.js"></script>
+		<script type="text/javascript" src="js/game.js"></script>
 		<link href="style.css" rel="stylesheet">
 	</head>
 	<body>
@@ -20,6 +21,22 @@
 			<div class="stat">
 				<label>Coins</label>
 				<p id="coins">0</p>
+			</div>
+			<div id="sphere-wallet-section">
+				<button id="sphere-connect-btn" class="sphere-btn">Connect Sphere Wallet</button>
+				<div id="sphere-wallet-info" style="display: none;">
+					<div class="sphere-wallet-row">
+						<label>Wallet</label>
+						<p id="sphere-address">-</p>
+					</div>
+					<div class="sphere-wallet-row">
+						<label>Balance</label>
+						<p id="sphere-balance">-</p>
+					</div>
+					<button id="sphere-disconnect-btn" class="sphere-btn-small" style="display: none;">Disconnect</button>
+				</div>
+				<button id="sphere-deposit-btn" class="sphere-btn" style="display: none;">Play (10 UCT)</button>
+				<div id="sphere-error" style="display: none;"></div>
 			</div>
 			<div class="player-info" style="display: none;">
 				<label>Player</label>
@@ -45,7 +62,7 @@
 			  	</tr>
 			</table>
 			<table id="ranks"></table>
-			<div class="animate-flicker" id="variable-content">Press any button to begin</div>
+			<div class="animate-flicker" id="variable-content">Connect your Sphere wallet to play</div>
 			<div id="leaderboard" style="display: none;">
 				<h3>Daily Leaderboard</h3>
 				<a href="leaderboard.html" style="display: block; text-align: center; margin: 10px 0; color: #1976D2;">View Full Leaderboard →</a>
