@@ -1,0 +1,72 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+  workflow_dispatch:
+  delete:
+
+permissions:
+  contents: write
+
+jobs:
+  # Clean up subfolder when a branch is deleted
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch' && github.event.ref != 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+
+      - name: Remove branch directory
+        run: |
+          BRANCH="${{ github.event.ref }}"
+          SAFE_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          if [ -d "$SAFE_BRANCH" ]; then
+            git rm -rf "$SAFE_BRANCH"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "Remove deployment for deleted branch $BRANCH"
+            git push
+          fi
+
+  deploy:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Stage site files
+        run: |
+          mkdir _site
+          cp index.html display.html leaderboard.html style.css _site/
+          cp unicity-logo.png _site/ 2>/dev/null || true
+          cp -r js _site/js
+
+      - name: Determine deploy destination
+        id: dest
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/master" ]; then
+            echo "dir=" >> "$GITHUB_OUTPUT"
+          else
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            SAFE_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
+            echo "dir=$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          destination_dir: ${{ steps.dest.outputs.dir }}
+          keep_files: true
