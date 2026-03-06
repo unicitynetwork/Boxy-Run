@@ -1209,48 +1209,17 @@ function createCylinder(radiusTop, radiusBottom, height, radialSegments,
 }
 
 /**
- * Generates a QR code for claiming NFT with collected coins
- *
- * @param {number} coins Number of coins collected
- * @param {number} score Player's final score
- */
-function generateQRCode(coins, score) {
-    // Build game data string with score
-    var gameData = 'Score: ' + score;
-    
-    // Build URL - coins as amount, score in gameData
-    var url = 'nfcwallet://mint-request?token=BoxyRun&amount=' + coins + '&tokenData=' + encodeURIComponent(gameData);
-    
-    // Clear previous QR code
-    document.getElementById('qrcode').innerHTML = '';
-    
-    // Generate QR code
-    var qrcode = new QRCode(document.getElementById('qrcode'), {
-        text: url,
-        width: 256,
-        height: 256,
-        colorDark: '#000000',
-        colorLight: '#FFFFFF',
-        correctLevel: QRCode.CorrectLevel.H
-    });
-}
-
-/**
  * Shows nickname input and handles score submission
  */
 function showNicknameInput(finalScore, finalCoins, gameplayEvents, gameStartTime) {
-    // If backend is not available, skip directly to QR code
     if (!backendAvailable) {
-        showQRCode(finalScore, finalCoins);
         return;
     }
     
     // Check if player already has a nickname
     var existingNickname = PlayerData.getNickname();
     if (existingNickname) {
-        // Auto-submit score with existing nickname
         submitScore(existingNickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
-        showQRCode(finalScore, finalCoins);
         return;
     }
     
@@ -1270,15 +1239,15 @@ function showNicknameInput(finalScore, finalCoins, gameplayEvents, gameStartTime
         }
         PlayerData.setNickname(nickname);
         submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
-        showQRCode(finalScore, finalCoins);
+        nicknameInput.style.display = 'none';
     };
-    
+
     // Handle skip button
     document.getElementById('nickname-skip').onclick = function() {
         var nickname = PlayerData.getNickname() || PlayerData.generateRandomNickname();
         PlayerData.setNickname(nickname);
         submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
-        showQRCode(finalScore, finalCoins);
+        nicknameInput.style.display = 'none';
     };
     
     // Handle enter key
@@ -1287,16 +1256,6 @@ function showNicknameInput(finalScore, finalCoins, gameplayEvents, gameStartTime
             document.getElementById('nickname-submit').click();
         }
     };
-}
-
-/**
- * Shows QR code after nickname submission
- */
-function showQRCode(score, coins) {
-    document.getElementById('nickname-input').style.display = 'none';
-    generateQRCode(coins, score);
-    document.getElementById('nft-coins').innerHTML = coins;
-    document.getElementById('qr-container').style.display = 'block';
 }
 
 /**
