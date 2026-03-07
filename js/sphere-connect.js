@@ -1192,14 +1192,11 @@ var SphereConnect = (() => {
     const depositBtn = document.getElementById("sphere-deposit-btn");
     const disconnectBtn = document.getElementById("sphere-disconnect-btn");
     connectBtn?.addEventListener("click", () => connect());
-    depositBtn?.addEventListener("click", () => {
-      if (state.isDepositPaid) {
-        depositAndRestart();
-      } else {
-        deposit();
-      }
-    });
+    depositBtn?.addEventListener("click", () => depositAndRestart());
     disconnectBtn?.addEventListener("click", () => disconnect());
+    if (sessionStorage.getItem(DEPOSIT_KEY)) {
+      state.isDepositPaid = true;
+    }
     const hasSession = isInIframe() || hasExtension() || sessionStorage.getItem(SESSION_KEY);
     if (hasSession) {
       connect();
