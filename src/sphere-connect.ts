@@ -417,15 +417,13 @@ window.addEventListener('load', () => {
   const disconnectBtn = document.getElementById('sphere-disconnect-btn');
 
   connectBtn?.addEventListener('click', () => connect());
-  depositBtn?.addEventListener('click', () => {
-    if (state.isDepositPaid) {
-      // "Play Again" after game over — deposit and restart
-      depositAndRestart();
-    } else {
-      deposit();
-    }
-  });
+  depositBtn?.addEventListener('click', () => depositAndRestart());
   disconnectBtn?.addEventListener('click', () => disconnect());
+
+  // Restore deposit state immediately so the game doesn't block on async reconnect
+  if (sessionStorage.getItem(DEPOSIT_KEY)) {
+    state.isDepositPaid = true;
+  }
 
   // Try auto-reconnect if we have a saved session
   const hasSession = isInIframe() || hasExtension() || sessionStorage.getItem(SESSION_KEY);
