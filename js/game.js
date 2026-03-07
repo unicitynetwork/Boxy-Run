@@ -1297,7 +1297,7 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
     var gameplayHash = generateGameplayHash(score, coins, gameplayEvents || []);
     
     // Submit to backend
-    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/scores', {
+    fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/scores', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1377,7 +1377,7 @@ var backendAvailable = false;
  */
 function checkBackendAvailability() {
     // Try to ping the backend
-    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/leaderboard/daily?limit=1', {
+    fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/leaderboard/daily?limit=1', {
         method: 'GET'
     })
     .then(function(response) {
@@ -1511,7 +1511,7 @@ var PlayerData = {
 function fetchAndDisplayLeaderboard() {
     if (!backendAvailable) return;
     
-    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/leaderboard/daily?limit=10', {
+    fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/leaderboard/daily?limit=10', {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json'
