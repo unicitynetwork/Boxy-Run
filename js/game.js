@@ -1227,53 +1227,16 @@ function createCylinder(radiusTop, radiusBottom, height, radialSegments,
 }
 
 /**
- * Shows nickname input and handles score submission
+ * Submits score using the player's Unicity ID from Sphere wallet
  */
 function showNicknameInput(finalScore, finalCoins, gameplayEvents, gameStartTime) {
     if (!backendAvailable) {
         return;
     }
-    
-    // Check if player already has a nickname
-    var existingNickname = PlayerData.getNickname();
-    if (existingNickname) {
-        submitScore(existingNickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
-        return;
+    var nickname = PlayerData.getNickname();
+    if (nickname) {
+        submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
     }
-    
-    // First time player - show nickname input
-    var nicknameInput = document.getElementById('nickname-input');
-    var nicknameField = document.getElementById('nickname-field');
-    
-    nicknameInput.style.display = 'block';
-    nicknameField.value = '';
-    nicknameField.focus();
-    
-    // Handle submit button
-    document.getElementById('nickname-submit').onclick = function() {
-        var nickname = nicknameField.value.trim();
-        if (!nickname || !/^[a-zA-Z0-9_-]{3,20}$/.test(nickname)) {
-            nickname = PlayerData.generateRandomNickname();
-        }
-        PlayerData.setNickname(nickname);
-        submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
-        nicknameInput.style.display = 'none';
-    };
-
-    // Handle skip button
-    document.getElementById('nickname-skip').onclick = function() {
-        var nickname = PlayerData.getNickname() || PlayerData.generateRandomNickname();
-        PlayerData.setNickname(nickname);
-        submitScore(nickname, finalScore, finalCoins, gameplayEvents, gameStartTime);
-        nicknameInput.style.display = 'none';
-    };
-    
-    // Handle enter key
-    nicknameField.onkeypress = function(e) {
-        if (e.keyCode === 13) {
-            document.getElementById('nickname-submit').click();
-        }
-    };
 }
 
 /**
@@ -1297,7 +1260,7 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
     var gameplayHash = generateGameplayHash(score, coins, gameplayEvents || []);
     
     // Submit to backend
-    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/scores', {
+    fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/scores', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1377,7 +1340,7 @@ var backendAvailable = false;
  */
 function checkBackendAvailability() {
     // Try to ping the backend
-    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/leaderboard/daily?limit=1', {
+    fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/leaderboard/daily?limit=1', {
         method: 'GET'
     })
     .then(function(response) {
@@ -1414,29 +1377,11 @@ function showScoreFeatures() {
         setInterval(fetchAndDisplayLeaderboard, 30000);
     }
     
-    // Initialize player data
+    // Display Unicity ID from Sphere wallet
     var nickname = PlayerData.getNickname();
-    if (!nickname) {
-        nickname = PlayerData.generateRandomNickname();
-        PlayerData.setNickname(nickname);
-    } else {
-        var nicknameElement = document.getElementById('current-nickname');
-        if (nicknameElement) {
-            nicknameElement.textContent = nickname;
-        }
-    }
-    
-    // Setup nickname change button
-    var changeButton = document.getElementById('change-nickname');
-    if (changeButton) {
-        changeButton.addEventListener('click', function() {
-            var newNickname = prompt('Enter new nickname (3-20 characters, alphanumeric only):', PlayerData.getNickname());
-            if (newNickname && /^[a-zA-Z0-9_-]{3,20}$/.test(newNickname)) {
-                PlayerData.setNickname(newNickname);
-            } else if (newNickname) {
-                alert('Invalid nickname. Please use 3-20 alphanumeric characters.');
-            }
-        });
+    var nicknameElement = document.getElementById('current-nickname');
+    if (nicknameElement) {
+        nicknameElement.textContent = nickname || '—';
     }
 }
 
@@ -1458,11 +1403,6 @@ function hideScoreFeatures() {
         leaderboard.style.display = 'none';
     }
     
-    // Hide nickname input (will be handled in game over)
-    var nicknameInput = document.getElementById('nickname-input');
-    if (nicknameInput) {
-        nicknameInput.style.display = 'none';
-    }
 }
 
 /**
@@ -1470,19 +1410,10 @@ function hideScoreFeatures() {
  */
 var PlayerData = {
     getNickname: function() {
-        return localStorage.getItem('boxyrun_nickname') || null;
-    },
-    
-    setNickname: function(nickname) {
-        localStorage.setItem('boxyrun_nickname', nickname);
-        var nicknameElement = document.getElementById('current-nickname');
-        if (nicknameElement) {
-            nicknameElement.textContent = nickname;
+        if (window.SphereWallet && window.SphereWallet.identity) {
+            return window.SphereWallet.identity.nametag || null;
         }
-    },
-    
-    generateRandomNickname: function() {
-        return 'Player-' + Date.now();
+        return null;
     },
     
     getHighScore: function() {
@@ -1511,7 +1442,7 @@ var PlayerData = {
 function fetchAndDisplayLeaderboard() {
     if (!backendAvailable) return;
     
-    fetch('https://41qd87u5g0.execute-api.me-central-1.amazonaws.com/prod/leaderboard/daily?limit=10', {
+    fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/leaderboard/daily?limit=10', {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json'

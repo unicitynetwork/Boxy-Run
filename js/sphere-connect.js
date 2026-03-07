@@ -957,6 +957,11 @@ var SphereConnect = (() => {
         state.identity = result.identity;
         sessionStorage.setItem(SESSION_KEY, result.sessionId);
       }
+      if (!state.identity?.nametag) {
+        state.error = "No Unicity ID found. Please register a Unicity ID in Sphere to play.";
+        updateUI("connected");
+        return;
+      }
       await refreshBalance();
       state.error = null;
       if (sessionStorage.getItem(DEPOSIT_KEY)) {
@@ -1015,6 +1020,11 @@ var SphereConnect = (() => {
   async function deposit() {
     if (!client || !state.isConnected) {
       state.error = "Not connected";
+      return false;
+    }
+    if (!state.identity?.nametag) {
+      state.error = "Unicity ID required to play. Please register one in Sphere.";
+      updateUI("connected");
       return false;
     }
     if (state.balance !== null && state.balance < ENTRY_FEE) {
@@ -1131,14 +1141,21 @@ var SphereConnect = (() => {
       case "connected":
         if (walletInfo) walletInfo.style.display = "block";
         if (disconnectBtn) disconnectBtn.style.display = "inline-block";
-        if (depositBtn) {
-          depositBtn.style.display = "block";
-          depositBtn.textContent = "Play (" + ENTRY_FEE + " " + COIN_ID + ")";
-          depositBtn.disabled = false;
-        }
-        if (variableContent) {
-          variableContent.style.visibility = "visible";
-          variableContent.innerHTML = "Deposit " + ENTRY_FEE + " " + COIN_ID + " to start playing";
+        if (state.identity?.nametag) {
+          if (depositBtn) {
+            depositBtn.style.display = "block";
+            depositBtn.textContent = "Play (" + ENTRY_FEE + " " + COIN_ID + ")";
+            depositBtn.disabled = false;
+          }
+          if (variableContent) {
+            variableContent.style.visibility = "visible";
+            variableContent.innerHTML = "Deposit " + ENTRY_FEE + " " + COIN_ID + " to start playing";
+          }
+        } else {
+          if (variableContent) {
+            variableContent.style.visibility = "visible";
+            variableContent.innerHTML = "Unicity ID required to play";
+          }
         }
         break;
       case "depositing":
