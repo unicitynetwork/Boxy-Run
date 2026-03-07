@@ -18,6 +18,8 @@ const WALLET_URL = 'https://sphere.unicity.network';
 const GAME_WALLET_ADDRESS = '@boxyrun'; // Game operator's Unicity nametag
 const ENTRY_FEE = 10;
 const COIN_ID = 'UCT';
+const UCT_COIN_ID_HEX = '455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89';
+const UCT_DECIMALS = 18;
 const FAUCET_URL = 'https://faucet.unicity.network/api/v1/faucet/request';
 const SESSION_KEY = 'boxyrun-sphere-session';
 const DEPOSIT_KEY = 'boxyrun-deposit-paid';
@@ -34,6 +36,8 @@ interface WalletState {
 let client: ConnectClient | null = null;
 let transport: ConnectTransport | null = null;
 let popupWindow: Window | null = null;
+let uctCoinId: string | null = null; // hex coinId resolved from wallet
+let uctDecimals: number = 0;
 
 const state: WalletState = {
   isConnected: false,
@@ -179,30 +183,23 @@ async function disconnect(): Promise<void> {
 async function refreshBalance(): Promise<void> {
   if (!client) return;
   try {
-    const result = await client.query<Record<string, unknown>>('sphere_getBalance');
-    // The balance response contains coin balances — look for UCT
-    if (result && typeof result === 'object') {
-      // Try common response shapes
-      const balances = (result as any).balances || result;
-      if (Array.isArray(balances)) {
-        const uct = balances.find((b: any) => b.coinId === COIN_ID || b.symbol === COIN_ID);
-        state.balance = uct ? parseFloat(uct.balance ?? uct.amount ?? '0') : 0;
-      } else if (typeof balances === 'object') {
-        state.balance = parseFloat((balances as any)[COIN_ID] ?? '0');
+    // getBalance returns Asset[] with { coinId (hex), symbol, totalAmount (smallest units), decimals }
+    const assets = await client.query<any[]>('sphere_getBalance');
+    if (Array.isArray(assets)) {
+      const uct = assets.find((a: any) => a.symbol === COIN_ID);
+      if (uct) {
+        uctCoinId = uct.coinId;
+        uctDecimals = uct.decimals || UCT_DECIMALS;
+        state.balance = Number(uct.totalAmount) / Math.pow(10, uctDecimals);
+      } else {
+        uctCoinId = UCT_COIN_ID_HEX;
+        uctDecimals = UCT_DECIMALS;
+        state.balance = 0;
       }
     }
   } catch (err) {
     console.error('Failed to fetch balance:', err);
-    // Try getAssets as fallback
-    try {
-      const assets = await client.query<any[]>('sphere_getAssets');
-      if (Array.isArray(assets)) {
-        const uct = assets.find((a: any) => a.coinId === COIN_ID || a.symbol === COIN_ID);
-        state.balance = uct ? parseFloat(uct.balance ?? uct.amount ?? '0') : 0;
-      }
-    } catch {
-      state.balance = null;
-    }
+    state.balance = null;
   }
 }
 
@@ -220,10 +217,14 @@ async function deposit(): Promise<boolean> {
 
   try {
     updateUI('depositing');
+    if (!uctCoinId) {
+      uctCoinId = UCT_COIN_ID_HEX;
+      uctDecimals = UCT_DECIMALS;
+    }
     await client.intent(INTENT_ACTIONS.SEND, {
       to: GAME_WALLET_ADDRESS,
       amount: ENTRY_FEE,
-      coinId: COIN_ID,
+      coinId: uctCoinId,
       memo: 'Boxy Run entry fee',
     });
 
