@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 # Default values
 STACK_NAME="boxy-run-backend"
 # Get region from AWS config or environment
-REGION=$(aws configure get region 2>/dev/null || echo ${AWS_REGION:-"me-central-1"})
+REGION=$(aws configure get region 2>/dev/null || echo ${AWS_REGION:-"eu-west-1"})
 DELETE_BUCKET=true
 
 # Parse command line arguments

@@ -52,7 +52,7 @@ After deployment, update your `game.js`:
 fetch('https://api.example.com/v1/boxyrun/scores', {
 
 // With your actual endpoint:
-fetch('https://YOUR-API-ID.execute-api.me-central-1.amazonaws.com/prod/scores', {
+fetch('https://YOUR-API-ID.execute-api.eu-west-1.amazonaws.com/prod/scores', {
 ```
 
 ## API Endpoints
@@ -123,5 +123,5 @@ CloudWatch Logs are retained for 7 days. Monitor:
 If you prefer AWS CLI:
 
 ```bash
-aws cloudformation delete-stack --stack-name boxy-run-backend --region me-central-1
+aws cloudformation delete-stack --stack-name boxy-run-backend --region eu-west-1
 ```

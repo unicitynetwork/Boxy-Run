@@ -91,11 +91,7 @@ if ! aws s3 ls "s3://$BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
     echo "Bucket $BUCKET_NAME already exists"
 else
     echo "Creating bucket $BUCKET_NAME..."
-    if [ "$REGION" == "me-central-1" ]; then
-        aws s3 mb "s3://$BUCKET_NAME" --region $REGION
-    else
-        aws s3 mb "s3://$BUCKET_NAME" --region $REGION --create-bucket-configuration LocationConstraint=$REGION
-    fi
+    aws s3 mb "s3://$BUCKET_NAME" --region $REGION --create-bucket-configuration LocationConstraint=$REGION
     echo -e "${GREEN}✓ Bucket created${NC}"
 fi
 echo ""
