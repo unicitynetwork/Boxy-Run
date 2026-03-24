@@ -917,22 +917,19 @@ var SphereConnect = (() => {
     description: "A 3D endless runner game on Unicity",
     url: location.origin
   };
+  var dappPermissions = [
+    PERMISSION_SCOPES.IDENTITY_READ,
+    PERMISSION_SCOPES.BALANCE_READ,
+    PERMISSION_SCOPES.TRANSFER_REQUEST
+  ];
   async function connect() {
     updateUI("connecting");
     try {
+      let resumeSessionId;
       if (isInIframe()) {
         transport = PostMessageTransport.forClient();
-        client = new ConnectClient({ transport, dapp: dappMeta });
-        const result = await client.connect();
-        state.isConnected = true;
-        state.identity = result.identity;
-        sessionStorage.setItem(SESSION_KEY, result.sessionId);
       } else if (hasExtension()) {
         transport = ExtensionTransport.forClient();
-        client = new ConnectClient({ transport, dapp: dappMeta });
-        const result = await client.connect();
-        state.isConnected = true;
-        state.identity = result.identity;
       } else {
         if (!popupWindow || popupWindow.closed) {
           popupWindow = window.open(
@@ -950,11 +947,18 @@ var SphereConnect = (() => {
           targetOrigin: WALLET_URL
         });
         await waitForHostReady();
-        const resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? void 0;
-        client = new ConnectClient({ transport, dapp: dappMeta, resumeSessionId });
-        const result = await client.connect();
-        state.isConnected = true;
-        state.identity = result.identity;
+        resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? void 0;
+      }
+      client = new ConnectClient({
+        transport,
+        dapp: dappMeta,
+        permissions: [...dappPermissions],
+        resumeSessionId
+      });
+      const result = await client.connect();
+      state.isConnected = true;
+      state.identity = result.identity;
+      if (result.sessionId) {
         sessionStorage.setItem(SESSION_KEY, result.sessionId);
       }
       if (!state.identity?.nametag) {
