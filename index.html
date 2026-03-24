@@ -1,5 +1,6 @@
 <html>
 	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 		<title>Boxy Run</title>
 		<script async src="https://www.googletagmanager.com/gtag/js?id=G-GDPMNZ80YY"></script>
 		<script>
@@ -17,6 +18,7 @@
 	</head>
 	<body>
 		<div class="panel">
+			<button id="mobile-panel-close" aria-label="Close">&times;</button>
 			<div class="game-title">
 				<div class="title">boxy run</div>
 				<div class="byline">by <a target="_blank" href="https://wanfungchui.github.io/">wan fung chui</a></div>
@@ -87,7 +89,19 @@
 				</table>
 			</div>
 			</div>
-		<div id="world"></div>
+		<!-- Mobile: hamburger button, backdrop, floating HUD -->
+	<button id="mobile-menu-btn" aria-label="Menu"><span></span><span></span><span></span></button>
+	<div id="mobile-backdrop"></div>
+	<div id="mobile-hud">
+		<div id="mobile-score"><span>Score</span><strong>0</strong></div>
+		<div id="mobile-coins"><span>Coins</span><strong>0</strong></div>
+	</div>
+	<button id="mobile-start-btn" style="display:none;">Tap to Start</button>
+	<button id="mobile-restart-btn" style="display:none;">Play Again</button>
+	<div id="mobile-gameover" style="display:none;">
+		<div id="mobile-gameover-text"></div>
+	</div>
+	<div id="world"></div>
 		<button id="sound-toggle" title="Toggle Sound">
 			<svg width="20" height="20" viewBox="0 0 24 24" fill="white">
 				<path id="sound-on" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
