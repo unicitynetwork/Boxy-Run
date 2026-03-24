@@ -3,6 +3,7 @@ import {
   HOST_READY_TYPE,
   HOST_READY_TIMEOUT,
   INTENT_ACTIONS,
+  PERMISSION_SCOPES,
 } from '@unicitylabs/sphere-sdk/connect';
 import {
   PostMessageTransport,
@@ -93,24 +94,23 @@ const dappMeta = {
   url: location.origin,
 } as const;
 
+const dappPermissions = [
+  PERMISSION_SCOPES.IDENTITY_READ,
+  PERMISSION_SCOPES.BALANCE_READ,
+  PERMISSION_SCOPES.TRANSFER_REQUEST,
+] as const;
+
 // ── Wallet operations ──────────────────────────────────────────────────────
 async function connect(): Promise<void> {
   updateUI('connecting');
 
   try {
+    // Set up transport based on environment
+    let resumeSessionId: string | undefined;
     if (isInIframe()) {
       transport = PostMessageTransport.forClient();
-      client = new ConnectClient({ transport, dapp: dappMeta });
-      const result = await client.connect();
-      state.isConnected = true;
-      state.identity = result.identity;
-      sessionStorage.setItem(SESSION_KEY, result.sessionId);
     } else if (hasExtension()) {
       transport = ExtensionTransport.forClient();
-      client = new ConnectClient({ transport, dapp: dappMeta });
-      const result = await client.connect();
-      state.isConnected = true;
-      state.identity = result.identity;
     } else {
       // Popup mode
       if (!popupWindow || popupWindow.closed) {
@@ -131,12 +131,17 @@ async function connect(): Promise<void> {
       });
 
       await waitForHostReady();
+      resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? undefined;
+    }
 
-      const resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? undefined;
-      client = new ConnectClient({ transport, dapp: dappMeta, resumeSessionId });
-      const result = await client.connect();
-      state.isConnected = true;
-      state.identity = result.identity;
+    // Connect via the resolved transport
+    client = new ConnectClient({
+      transport, dapp: dappMeta, permissions: [...dappPermissions], resumeSessionId,
+    });
+    const result = await client.connect();
+    state.isConnected = true;
+    state.identity = result.identity;
+    if (result.sessionId) {
       sessionStorage.setItem(SESSION_KEY, result.sessionId);
     }
 
