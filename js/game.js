@@ -46,6 +46,11 @@ var SoundSystem = {
 					this.audioContext.resume();
 				}
 			}, { once: true });
+			document.addEventListener('touchstart', () => {
+				if (this.audioContext.state === 'suspended') {
+					this.audioContext.resume();
+				}
+			}, { once: true });
 		} catch (e) {
 			console.log('Web Audio API not supported');
 			this.enabled = false;
@@ -470,6 +475,150 @@ function World() {
 			}
 		);
 
+		// ===== Mobile touch controls =====
+		var isMobile = window.matchMedia('(max-width: 768px)').matches;
+
+		if (isMobile) {
+			var touchStartX = 0;
+			var touchStartY = 0;
+			var touchStartTime = 0;
+			var SWIPE_THRESHOLD = 30;
+			var TAP_THRESHOLD = 200; // ms
+
+			var mobileStartBtn = document.getElementById('mobile-start-btn');
+			var mobileRestartBtn = document.getElementById('mobile-restart-btn');
+			var mobileGameover = document.getElementById('mobile-gameover');
+			var mobileGameoverText = document.getElementById('mobile-gameover-text');
+			var mobileMenuBtn = document.getElementById('mobile-menu-btn');
+			var mobileBackdrop = document.getElementById('mobile-backdrop');
+			var panel = document.querySelector('.panel');
+
+			// --- Hamburger menu toggle ---
+			function openPanel() {
+				panel.classList.remove('mobile-hidden');
+				mobileBackdrop.classList.add('visible');
+			}
+			function closePanel() {
+				panel.classList.add('mobile-hidden');
+				mobileBackdrop.classList.remove('visible');
+			}
+			var mobileCloseBtn = document.getElementById('mobile-panel-close');
+			mobileMenuBtn.addEventListener('click', function(e) {
+				e.preventDefault();
+				if (panel.classList.contains('mobile-hidden')) {
+					openPanel();
+				} else {
+					closePanel();
+				}
+			});
+			mobileCloseBtn.addEventListener('click', function(e) {
+				e.preventDefault();
+				closePanel();
+			});
+			mobileBackdrop.addEventListener('click', function() {
+				closePanel();
+			});
+
+			// Show start button when deposit is paid (or immediately if no wallet)
+			function showMobileStartBtn() {
+				if (paused && !gameOver) {
+					if (!window.SphereWallet || window.SphereWallet.isDepositPaid) {
+						mobileStartBtn.style.display = 'block';
+					}
+				}
+			}
+			showMobileStartBtn();
+
+			// Observe deposit state changes from sphere-connect
+			var origUpdateUI = window.SphereWallet && window.SphereWallet.updateUI;
+			if (window.SphereWallet) {
+				var _origUpdateUI = window.SphereWallet.updateUI.bind(window.SphereWallet);
+				window.SphereWallet.updateUI = function(phase) {
+					_origUpdateUI(phase);
+					if (phase === 'deposited') showMobileStartBtn();
+				};
+			}
+
+			function mobileUnpause() {
+				if (paused && !gameOver && !collisionsDetected()) {
+					if (window.SphereWallet && !window.SphereWallet.isDepositPaid) return;
+					paused = false;
+					character.onUnpause();
+					document.getElementById("variable-content").style.visibility = "hidden";
+					document.getElementById("controls").style.display = "none";
+					mobileStartBtn.style.display = 'none';
+					// Hide panel when game starts
+					closePanel();
+					if (window.SphereWallet) window.SphereWallet.updateUI('playing');
+					gameStartTime = Date.now();
+				}
+			}
+
+			mobileStartBtn.addEventListener('click', function(e) {
+				e.preventDefault();
+				mobileUnpause();
+			});
+
+			mobileRestartBtn.addEventListener('click', function(e) {
+				e.preventDefault();
+				document.location.reload(true);
+			});
+
+			// Prevent scrolling/zooming during gameplay
+			document.addEventListener('touchmove', function(e) {
+				if (!paused) e.preventDefault();
+			}, { passive: false });
+
+			document.addEventListener('touchstart', function(e) {
+				if (gameOver || paused) return;
+				var touch = e.touches[0];
+				touchStartX = touch.clientX;
+				touchStartY = touch.clientY;
+				touchStartTime = Date.now();
+			}, { passive: true });
+
+			document.addEventListener('touchend', function(e) {
+				if (gameOver || paused) return;
+				var touch = e.changedTouches[0];
+				var dx = touch.clientX - touchStartX;
+				var dy = touch.clientY - touchStartY;
+				var elapsed = Date.now() - touchStartTime;
+
+				var absDx = Math.abs(dx);
+				var absDy = Math.abs(dy);
+
+				if (absDx < SWIPE_THRESHOLD && absDy < SWIPE_THRESHOLD && elapsed < TAP_THRESHOLD) {
+					// Tap → jump
+					character.onUpKeyPressed();
+					SoundSystem.playJump();
+					if (gameStartTime && gameplayEvents.length < 1000) {
+						gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
+					}
+				} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
+					// Swipe up → jump
+					character.onUpKeyPressed();
+					SoundSystem.playJump();
+					if (gameStartTime && gameplayEvents.length < 1000) {
+						gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
+					}
+				} else if (absDx > absDy) {
+					if (dx < -SWIPE_THRESHOLD) {
+						// Swipe left
+						character.onLeftKeyPressed();
+						if (gameStartTime && gameplayEvents.length < 1000) {
+							gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
+						}
+					} else if (dx > SWIPE_THRESHOLD) {
+						// Swipe right
+						character.onRightKeyPressed();
+						if (gameStartTime && gameplayEvents.length < 1000) {
+							gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
+						}
+					}
+				}
+			}, { passive: true });
+		}
+
 		// Initialize the scores and difficulty.
 		score = 0;
 		difficulty = 0;
@@ -614,6 +763,18 @@ function World() {
 						}
 					);
 				}
+
+				// Mobile game-over UI
+				var mobileGO = document.getElementById('mobile-gameover');
+				var mobileGOText = document.getElementById('mobile-gameover-text');
+				var mobileRestart = document.getElementById('mobile-restart-btn');
+				if (mobileGO && window.matchMedia('(max-width: 768px)').matches) {
+					mobileGOText.innerHTML = (window.SphereWallet && window.SphereWallet.isConnected)
+						? "Game over! You earned " + coinCount + " UCT"
+						: "Game over! Score: " + score;
+					mobileGO.style.display = 'block';
+					mobileRestart.style.display = 'block';
+				}
     			var table = document.getElementById("ranks");
     			var rankNames = ["Typical Engineer", "Couch Potato", "Weekend Jogger", "Daily Runner",
     				"Local Prospect", "Regional Star", "National Champ", "Second Mo Farah"];
@@ -666,6 +827,8 @@ function World() {
 			// Update the scores (scale with movement speed: 600 * (moveSpeed/6000))
 			score += Math.floor(600 * (moveSpeed / 6000) * deltaTime);
 			document.getElementById("score").innerHTML = score;
+			var mobileScoreEl = document.getElementById("mobile-score");
+			if (mobileScoreEl) mobileScoreEl.querySelector('strong').innerHTML = score;
 
 		}
 
@@ -769,6 +932,8 @@ function World() {
 				scene.remove(coin.mesh);
 				coinCount++;
 				document.getElementById("coins").innerHTML = coinCount;
+				var mobileCoinsEl = document.getElementById("mobile-coins");
+				if (mobileCoinsEl) mobileCoinsEl.querySelector('strong').innerHTML = coinCount;
 				SoundSystem.playCoin();
 				// Track coin collection event (limit array size)
 				if (gameplayEvents.length < 1000) {
