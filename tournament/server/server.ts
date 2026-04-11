@@ -29,7 +29,7 @@ import {
 } from '../protocol/messages';
 
 const PORT = parseInt(process.env.PORT || '7101', 10);
-const LOBBY_CAPACITY = 32;
+const LOBBY_CAPACITY = parseInt(process.env.LOBBY_CAPACITY || '32', 10);
 
 /**
  * For v0 MVP we run a single hardcoded tournament. Real deployment
