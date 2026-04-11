@@ -8,6 +8,31 @@
  */
 
 /**
+ * Deterministic PRNG (mulberry32). All sim-affecting randomness goes
+ * through a game-local instance of this so matches are reproducible from
+ * {seed, inputs}. Audio/cosmetic randomness can keep using Math.random.
+ */
+function mulberry32(seed) {
+	var s = seed >>> 0;
+	return function() {
+		s = (s + 0x6D2B79F5) >>> 0;
+		var t = s;
+		t = Math.imul(t ^ (t >>> 15), t | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+/**
+ * Fixed-step simulation constants. Sim logic runs at TICK_HZ regardless
+ * of render frame rate so gameplay is deterministic given a seed and an
+ * input list. TICK_SECONDS is the per-tick delta used wherever the old
+ * code used wall-clock deltaTime.
+ */
+var TICK_HZ = 60;
+var TICK_SECONDS = 1 / TICK_HZ;
+
+/**
  * Constants used in this game.
  */
 var Colors = {
@@ -325,7 +350,8 @@ function World() {
 		objects, paused, keysAllowed, score, difficulty,
 		treePresenceProb, maxTreeSize, fogDistance, gameOver,
 		coins, coinCount, gameStartTime, gameplayEvents, lastTreeRowZ,
-		lastFrameTime, targetFPS = 60, moveSpeed = 10000, spawnDistance = 4500;
+		lastFrameTime, targetFPS = 60, moveSpeed = 10000, spawnDistance = 4500,
+		seed, rng, currentTick, tickAccumulator, scorePerTick;
 
 	// Initialize the world.
 	init();
@@ -374,6 +400,22 @@ function World() {
 
 		var ground = createBox(3000, 20, 120000, Colors.sand, 0, -400, -60000);
 		scene.add(ground);
+
+		// Initialize deterministic RNG. Seed can be set via ?seed=N URL
+		// param for reproducible runs; otherwise randomized.
+		var urlParams = new URLSearchParams(window.location.search);
+		var seedParam = urlParams.get('seed');
+		seed = seedParam
+			? (parseInt(seedParam, 10) >>> 0)
+			: ((Math.random() * 0xFFFFFFFF) >>> 0);
+		rng = mulberry32(seed);
+		console.log('Boxy Run seed:', seed);
+
+		// Initialize tick state. currentTick advances only while the game
+		// is unpaused, so pause handling is implicit.
+		currentTick = 0;
+		tickAccumulator = 0;
+		scorePerTick = Math.floor(600 * (moveSpeed / 6000) / TICK_HZ);
 
 		objects = [];
 		coins = [];
@@ -443,19 +485,19 @@ function World() {
 							character.onUpKeyPressed();
 							SoundSystem.playJump();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
-								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
+								gameplayEvents.push({tick: currentTick, e: 'jump'});
 							}
 						}
 						if ((key == left || key == a) && !paused) {
 							character.onLeftKeyPressed();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
-								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
+								gameplayEvents.push({tick: currentTick, e: 'left'});
 							}
 						}
 						if ((key == right || key == d) && !paused) {
 							character.onRightKeyPressed();
 							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
-								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
+								gameplayEvents.push({tick: currentTick, e: 'right'});
 							}
 						}
 					}
@@ -592,27 +634,27 @@ function World() {
 					character.onUpKeyPressed();
 					SoundSystem.playJump();
 					if (gameStartTime && gameplayEvents.length < 1000) {
-						gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
+						gameplayEvents.push({tick: currentTick, e: 'jump'});
 					}
 				} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
 					// Swipe up → jump
 					character.onUpKeyPressed();
 					SoundSystem.playJump();
 					if (gameStartTime && gameplayEvents.length < 1000) {
-						gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
+						gameplayEvents.push({tick: currentTick, e: 'jump'});
 					}
 				} else if (absDx > absDy) {
 					if (dx < -SWIPE_THRESHOLD) {
 						// Swipe left
 						character.onLeftKeyPressed();
 						if (gameStartTime && gameplayEvents.length < 1000) {
-							gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
+							gameplayEvents.push({tick: currentTick, e: 'left'});
 						}
 					} else if (dx > SWIPE_THRESHOLD) {
 						// Swipe right
 						character.onRightKeyPressed();
 						if (gameStartTime && gameplayEvents.length < 1000) {
-							gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
+							gameplayEvents.push({tick: currentTick, e: 'right'});
 						}
 					}
 				}
@@ -631,113 +673,137 @@ function World() {
 	}
 	
 	/**
-	  * The main animation loop.
+	  * The main animation loop. Drives a fixed-step simulation: sim logic
+	  * runs in tick() at TICK_HZ regardless of render framerate, and
+	  * rendering happens once per rAF after all due ticks have been
+	  * applied. See PROTOCOL.md for why this matters for tournament mode.
 	  */
 	function loop() {
 		// Calculate delta time
 		var currentTime = performance.now();
 		var deltaTime = (currentTime - lastFrameTime) / 1000; // Convert to seconds
 		lastFrameTime = currentTime;
-		
-		// Cap delta time to prevent large jumps
+
+		// Cap delta time to prevent large jumps (e.g., tab was backgrounded)
 		deltaTime = Math.min(deltaTime, 0.1); // Max 100ms per frame
 
-		// Update the game.
+		// Run fixed-step sim updates. tick() may set paused=true on game
+		// over, in which case we stop advancing ticks for the rest of the
+		// frame.
 		if (!paused) {
+			tickAccumulator += deltaTime;
+			while (tickAccumulator >= TICK_SECONDS && !paused) {
+				tick();
+				tickAccumulator -= TICK_SECONDS;
+			}
+		}
 
-			// Add more trees and increase the difficulty.
-			// Check if we need to spawn a new row (when last row has moved 3000 units)
-			var shouldSpawnNewRow = false;
-			if (objects.length === 0) {
-				// No trees left, spawn immediately
+		// Render the page and repeat.
+		renderer.render(scene, camera);
+		requestAnimationFrame(loop);
+	}
+
+	/**
+	 * One fixed-step simulation update. Contains every state mutation
+	 * that needs to be deterministic given (seed, inputs, currentTick).
+	 * DOM updates for the HUD stay here as side effects — they don't
+	 * affect the deterministic state and will be split out when the sim
+	 * is extracted for headless replay.
+	 */
+	function tick() {
+		// Add more trees and increase the difficulty.
+		// Check if we need to spawn a new row (when last row has moved 3000 units)
+		var shouldSpawnNewRow = false;
+		if (objects.length === 0) {
+			// No trees left, spawn immediately
+			shouldSpawnNewRow = true;
+		} else {
+			// Check if the last tree has moved far enough
+			var lastTreeZ = objects[objects.length - 1].mesh.position.z;
+			if (lastTreeZ > lastTreeRowZ + spawnDistance) {
 				shouldSpawnNewRow = true;
-			} else {
-				// Check if the last tree has moved far enough
-				var lastTreeZ = objects[objects.length - 1].mesh.position.z;
-				if (lastTreeZ > lastTreeRowZ + spawnDistance) {
-					shouldSpawnNewRow = true;
+			}
+		}
+
+		if (shouldSpawnNewRow) {
+			difficulty += 1;
+			var levelLength = 30;
+			if (difficulty % levelLength == 0) {
+				var level = difficulty / levelLength;
+				switch (level) {
+					case 1:
+						treePresenceProb = 0.35;
+						maxTreeSize = 0.5;
+						break;
+					case 2:
+						treePresenceProb = 0.35;
+						maxTreeSize = 0.85;
+						break;
+					case 3:
+						treePresenceProb = 0.5;
+						maxTreeSize = 0.85;
+						break;
+					case 4:
+						treePresenceProb = 0.5;
+						maxTreeSize = 1.1;
+						break;
+					case 5:
+						treePresenceProb = 0.5;
+						maxTreeSize = 1.1;
+						break;
+					case 6:
+						treePresenceProb = 0.55;
+						maxTreeSize = 1.1;
+						break;
+					default:
+						treePresenceProb = 0.55;
+						maxTreeSize = 1.25;
 				}
 			}
-			
-			if (shouldSpawnNewRow) {
-				difficulty += 1;
-				var levelLength = 30;
-				if (difficulty % levelLength == 0) {
-					var level = difficulty / levelLength;
-					switch (level) {
-						case 1:
-							treePresenceProb = 0.35;
-							maxTreeSize = 0.5;
-							break;
-						case 2:
-							treePresenceProb = 0.35;
-							maxTreeSize = 0.85;
-							break;
-						case 3:
-							treePresenceProb = 0.5;
-							maxTreeSize = 0.85;
-							break;
-						case 4:
-							treePresenceProb = 0.5;
-							maxTreeSize = 1.1;
-							break;
-						case 5:
-							treePresenceProb = 0.5;
-							maxTreeSize = 1.1;
-							break;
-						case 6:
-							treePresenceProb = 0.55;
-							maxTreeSize = 1.1;
-							break;
-						default:
-							treePresenceProb = 0.55;
-							maxTreeSize = 1.25;
-					}
-				}
-				if ((difficulty >= 5 * levelLength && difficulty < 6 * levelLength)) {
-					fogDistance -= (15000 / levelLength);
-				} else if (difficulty >= 8 * levelLength && difficulty < 9 * levelLength) {
-					fogDistance -= (3000 / levelLength);
-				}
-				createRowOfTrees(-120000, treePresenceProb, 0.5, maxTreeSize);
-				lastTreeRowZ = -120000; // Update last spawn position
-				// Only spawn coins occasionally to reduce object count
-				if (Math.random() < 0.5) {
-					createCoins(-120000 + 1500, 0.2); // Reduced probability
-				}
-				scene.fog.far = fogDistance;
+			if ((difficulty >= 5 * levelLength && difficulty < 6 * levelLength)) {
+				fogDistance -= (15000 / levelLength);
+			} else if (difficulty >= 8 * levelLength && difficulty < 9 * levelLength) {
+				fogDistance -= (3000 / levelLength);
 			}
+			createRowOfTrees(-120000, treePresenceProb, 0.5, maxTreeSize);
+			lastTreeRowZ = -120000; // Update last spawn position
+			// Only spawn coins occasionally to reduce object count
+			if (rng() < 0.5) {
+				createCoins(-120000 + 1500, 0.2); // Reduced probability
+			}
+			scene.fog.far = fogDistance;
+		}
 
-			// Move the trees closer to the character.
-			var moveDistance = moveSpeed * deltaTime; // Units per second * seconds
-			objects.forEach(function(object) {
-				object.mesh.position.z += moveDistance;
-			});
+		// Move the trees closer to the character.
+		var moveDistance = moveSpeed * TICK_SECONDS; // Units per second * seconds per tick
+		objects.forEach(function(object) {
+			object.mesh.position.z += moveDistance;
+		});
 
-			// Move the coins closer to the character and rotate them.
-			coins.forEach(function(coin) {
-				coin.mesh.position.z += moveDistance;
-				coin.mesh.rotation.y += 1.2 * deltaTime; // ~1.2 radians per second
-			});
+		// Move the coins closer to the character and rotate them.
+		coins.forEach(function(coin) {
+			coin.mesh.position.z += moveDistance;
+			coin.mesh.rotation.y += 1.2 * TICK_SECONDS; // ~1.2 radians per second
+		});
 
-			// Remove trees that are outside of the world.
-			objects = objects.filter(function(object) {
-				return object.mesh.position.z < 0;
-			});
+		// Remove trees that are outside of the world.
+		objects = objects.filter(function(object) {
+			return object.mesh.position.z < 0;
+		});
 
-			// Remove coins that are outside of the world.
-			coins = coins.filter(function(coin) {
-				return coin.mesh.position.z < 0;
-			});
+		// Remove coins that are outside of the world.
+		coins = coins.filter(function(coin) {
+			return coin.mesh.position.z < 0;
+		});
 
-			// Make the character move according to the controls.
-			character.update(deltaTime);
+		// Make the character move according to the controls.
+		character.update(currentTick);
 
-			// Check for coin collection.
-			checkCoinCollection();
+		// Check for coin collection.
+		checkCoinCollection();
 
-			// Check for collisions between the character and objects.
-			if (collisionsDetected()) {
+		// Check for collisions between the character and objects.
+		if (collisionsDetected()) {
 				gameOver = true;
 				paused = true;
 				SoundSystem.playGameOver();
@@ -822,19 +888,16 @@ function World() {
     			// Submit score (will prompt for nickname only if first time)
     			showNicknameInput(score, coinCount, gameplayEvents, gameStartTime);
 
-			}
-
-			// Update the scores (scale with movement speed: 600 * (moveSpeed/6000))
-			score += Math.floor(600 * (moveSpeed / 6000) * deltaTime);
-			document.getElementById("score").innerHTML = score;
-			var mobileScoreEl = document.getElementById("mobile-score");
-			if (mobileScoreEl) mobileScoreEl.querySelector('strong').innerHTML = score;
-
 		}
 
-		// Render the page and repeat.
-		renderer.render(scene, camera);
-		requestAnimationFrame(loop);
+		// Update the scores. Fixed per-tick integer increment so replays
+		// produce bit-identical scores.
+		score += scorePerTick;
+		document.getElementById("score").innerHTML = score;
+		var mobileScoreEl = document.getElementById("mobile-score");
+		if (mobileScoreEl) mobileScoreEl.querySelector('strong').innerHTML = score;
+
+		currentTick++;
 	}
 
 	/**
@@ -859,9 +922,9 @@ function World() {
 	 */
 	function createRowOfTrees(position, probability, minScale, maxScale) {
 		for (var lane = -1; lane < 2; lane++) {
-			var randomNumber = Math.random();
+			var randomNumber = rng();
 			if (randomNumber < probability) {
-				var scale = minScale + (maxScale - minScale) * Math.random();
+				var scale = minScale + (maxScale - minScale) * rng();
 				var tree = new Tree(lane * 800, -400, position, scale);
 				objects.push(tree);
 				scene.add(tree.mesh);
@@ -877,7 +940,7 @@ function World() {
 	 */
 	function createCoins(position, probability) {
 		for (var lane = -1; lane < 2; lane++) {
-			var randomNumber = Math.random();
+			var randomNumber = rng();
 			if (randomNumber < probability) {
 				var coin = new Coin(lane * 800, 200, position);
 				coins.push(coin);
@@ -937,14 +1000,38 @@ function World() {
 				SoundSystem.playCoin();
 				// Track coin collection event (limit array size)
 				if (gameplayEvents.length < 1000) {
-					gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});
+					gameplayEvents.push({tick: currentTick, e: 'coin'});
 				}
 				// Remove the coin from the array immediately
 				coins.splice(i, 1);
 			}
 		}
 	}
-	
+
+	// Debug state exposure for manual determinism verification.
+	// Load the game with ?seed=N twice and call
+	// window.__boxyDebug.rngFingerprint(100) in the devtools console —
+	// both runs must return identical arrays. If they don't, the seeded
+	// RNG is broken. A full programmatic sim replay is deferred to the
+	// headless-extraction phase (Phase 1); for now this is the smallest
+	// assertion that catches the most likely regression.
+	window.__boxyDebug = {
+		get seed() { return seed; },
+		get currentTick() { return currentTick; },
+		get score() { return score; },
+		get coinCount() { return coinCount; },
+		get gameplayEvents() { return gameplayEvents; },
+		get objectCount() { return objects.length; },
+		get coinsInWorld() { return coins.length; },
+		rngFingerprint: function(n) {
+			n = n || 100;
+			var testRng = mulberry32(seed);
+			var out = [];
+			for (var i = 0; i < n; i++) out.push(testRng());
+			return out;
+		}
+	};
+
 }
 
 /** 
@@ -1033,13 +1120,15 @@ function Character() {
 		self.element.add(self.leftLeg);
 		self.element.add(self.rightLeg);
 
-		// Initialize the player's changing parameters.
+		// Initialize the player's changing parameters. All timing is
+		// expressed in sim ticks so that character motion is deterministic
+		// given the game tick clock.
 		self.isJumping = false;
 		self.isSwitchingLeft = false;
 		self.isSwitchingRight = false;
 		self.currentLane = 0;
-		self.runningStartTime = performance.now() / 1000;
-		self.pauseStartTime = performance.now() / 1000;
+		self.runningStartTick = 0;
+		self.jumpStartTick = 0;
 		self.stepFreq = 2;
 		self.queuedActions = [];
 
@@ -1068,12 +1157,14 @@ function Character() {
 	}
 	
 	/**
-	 * A method called on the character when time moves forward.
+	 * A method called on the character when the sim tick advances.
+	 * Time in seconds is derived from the current tick so the character
+	 * animation and physics are deterministic given (seed, inputs).
 	 */
-	this.update = function(deltaTime) {
+	this.update = function(currentTick) {
 
-		// Obtain the current time for future calculations.
-		var currentTime = performance.now() / 1000;
+		// Current game time in seconds, derived from the tick clock.
+		var currentTime = currentTick / TICK_HZ;
 
 		// Apply actions to the character if none are currently being
 		// carried out.
@@ -1084,7 +1175,7 @@ function Character() {
 			switch(self.queuedActions.shift()) {
 				case "up":
 					self.isJumping = true;
-					self.jumpStartTime = performance.now() / 1000;
+					self.jumpStartTick = currentTick;
 					break;
 				case "left":
 					if (self.currentLane != -1) {
@@ -1102,17 +1193,23 @@ function Character() {
 		// If the character is jumping, update the height of the character.
 		// Otherwise, the character continues running.
 		if (self.isJumping) {
-			var jumpClock = currentTime - self.jumpStartTime;
+			var jumpStartSec = self.jumpStartTick / TICK_HZ;
+			var runningStartSec = self.runningStartTick / TICK_HZ;
+			var jumpClock = currentTime - jumpStartSec;
 			self.element.position.y = self.jumpHeight * Math.sin(
 				(1 / self.jumpDuration) * Math.PI * jumpClock) +
 				sinusoid(2 * self.stepFreq, 0, 20, 0,
-					self.jumpStartTime - self.runningStartTime);
+					jumpStartSec - runningStartSec);
 			if (jumpClock > self.jumpDuration) {
 				self.isJumping = false;
-				self.runningStartTime += self.jumpDuration;
+				// Advance the running clock by the jump duration in ticks
+				// so the sinusoid math for running picks up where it left
+				// off. Rounding to an integer tick keeps the clock aligned
+				// with the tick grid.
+				self.runningStartTick += Math.round(self.jumpDuration * TICK_HZ);
 			}
 		} else {
-			var runningClock = currentTime - self.runningStartTime;
+			var runningClock = currentTime - (self.runningStartTick / TICK_HZ);
 			self.element.position.y = sinusoid(
 				2 * self.stepFreq, 0, 20, 0, runningClock);
 			self.head.rotation.x = sinusoid(
@@ -1137,10 +1234,11 @@ function Character() {
 				self.stepFreq, -130, 5, 60, runningClock) * deg2Rad;
 
 			// If the character is not jumping, it may be switching lanes.
-			// Lane switch speed: 4000 units per second (to maintain ~200ms lane switch at 60fps)
-			var laneSwitchSpeed = 4000;
+			// Lane switch speed: 4000 units per second (to maintain ~200ms
+			// lane switch at 60 ticks/sec). Per-tick step is fixed.
+			var laneSwitchPerTick = 4000 * TICK_SECONDS;
 			if (self.isSwitchingLeft) {
-				self.element.position.x -= laneSwitchSpeed * deltaTime;
+				self.element.position.x -= laneSwitchPerTick;
 				var targetX = (self.currentLane - 1) * 800;
 				if (self.element.position.x <= targetX) {
 					self.currentLane -= 1;
@@ -1149,7 +1247,7 @@ function Character() {
 				}
 			}
 			if (self.isSwitchingRight) {
-				self.element.position.x += laneSwitchSpeed * deltaTime;
+				self.element.position.x += laneSwitchPerTick;
 				var targetX = (self.currentLane + 1) * 800;
 				if (self.element.position.x >= targetX) {
 					self.currentLane += 1;
@@ -1187,21 +1285,17 @@ function Character() {
 
 	/**
 	  * Handles character activity when the game is paused.
+	  * No-op under tick-based timing: currentTick doesn't advance while
+	  * paused, so the running/jump clocks freeze automatically.
 	  */
 	this.onPause = function() {
-		self.pauseStartTime = performance.now() / 1000;
 	}
 
 	/**
 	  * Handles character activity when the game is unpaused.
+	  * No-op under tick-based timing: see onPause.
 	  */
 	this.onUnpause = function() {
-		var currentTime = new Date() / 1000;
-		var pauseDuration = currentTime - self.pauseStartTime;
-		self.runningStartTime += pauseDuration;
-		if (self.isJumping) {
-			self.jumpStartTime += pauseDuration;
-		}
 	}
 
 }
