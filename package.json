@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "scripts": {
     "build:sdk": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020",
-    "build": "npm run build:sdk",
+    "build:game": "esbuild src/game/main.ts --bundle --outfile=js/game-new.js --format=iife --target=es2020",
+    "build": "npm run build:sdk && npm run build:game",
+    "typecheck": "tsc --noEmit",
     "watch": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020 --watch",
     "dev": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020 --watch=forever --servedir=."
   },

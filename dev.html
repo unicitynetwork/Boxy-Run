@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+		<title>Boxy Run — Dev (new sim+render)</title>
+		<link rel="icon" type="image/png" href="unicity-logo.png">
+		<link href="https://fonts.googleapis.com/css?family=Playfair+Display:400,700" rel="stylesheet">
+		<script type="text/javascript" src="js/three.min.js"></script>
+		<script type="text/javascript" src="js/game-new.js"></script>
+		<link href="style.css" rel="stylesheet">
+	</head>
+	<body>
+		<div class="panel">
+			<div class="game-title">
+				<div class="title">boxy run</div>
+				<div class="byline">dev build — new sim+render</div>
+			</div>
+			<div class="stat">
+				<label>Score</label>
+				<p id="score">0</p>
+			</div>
+			<div class="stat">
+				<label>Coins</label>
+				<p id="coins">0</p>
+			</div>
+			<div class="animate-flicker" id="variable-content">Press any key to start</div>
+			<table id="controls">
+				<tr><td>Up:</td><td>Jump</td></tr>
+				<tr><td>Left:</td><td>Left lane switch</td></tr>
+				<tr><td>Right:</td><td>Right lane switch</td></tr>
+				<tr><td>p:</td><td>Pause</td></tr>
+			</table>
+		</div>
+		<div id="world"></div>
+	</body>
+</html>
