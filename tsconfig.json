@@ -7,10 +7,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist",
+    "types": ["node"],
     "paths": {
       "@unicitylabs/sphere-sdk/connect": ["./node_modules/@unicitylabs/sphere-sdk/dist/connect/index.d.ts"],
       "@unicitylabs/sphere-sdk/connect/browser": ["./node_modules/@unicitylabs/sphere-sdk/dist/impl/browser/connect/index.d.ts"]
     }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "tournament/**/*.ts"]
 }
