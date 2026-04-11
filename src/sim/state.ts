@@ -34,6 +34,13 @@ export interface CharacterState {
 	x: number;
 	/** Vertical position. Changes while jumping; used for tree collision. */
 	y: number;
+	/**
+	 * Depth position. Constant at -4000 throughout a run in v0 — the
+	 * character does not move in z, the world moves toward it. Kept on
+	 * state (rather than hardcoded in collision) so the collision code
+	 * stays agnostic to whether z is fixed or dynamic.
+	 */
+	readonly z: number;
 	isJumping: boolean;
 	isSwitchingLeft: boolean;
 	isSwitchingRight: boolean;
