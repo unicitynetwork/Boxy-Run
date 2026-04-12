@@ -29,12 +29,14 @@ const ROUND_WINDOW_MS = parseInt(
 	10,
 );
 const TOURNAMENT_ID = process.env.TOURNAMENT_ID || 'boxyrun-alpha-1';
+const READY_RATE_LIMIT_MS = parseInt(process.env.READY_RATE_LIMIT_MS || '3000', 10);
 
 const tournament = new Tournament({
 	id: TOURNAMENT_ID,
 	capacity: LOBBY_CAPACITY,
 	minPlayers: MIN_PLAYERS,
 	roundWindowMs: ROUND_WINDOW_MS,
+	readyRateLimitMs: READY_RATE_LIMIT_MS,
 });
 
 /**

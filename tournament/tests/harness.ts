@@ -34,6 +34,7 @@ export async function startServer(
 		minPlayers?: number;
 		roundWindowMs?: number;
 		tournamentId?: string;
+		readyRateLimitMs?: number;
 	} = {},
 ): Promise<{
 	proc: ChildProcess;
@@ -57,6 +58,8 @@ export async function startServer(
 	if (options.tournamentId !== undefined) {
 		env.TOURNAMENT_ID = options.tournamentId;
 	}
+	// Default to 0 rate limit in tests for speed
+	env.READY_RATE_LIMIT_MS = String(options.readyRateLimitMs ?? 0);
 	const proc = spawn('node', [SERVER_BUNDLE], {
 		env,
 		stdio: ['ignore', 'pipe', 'pipe'],

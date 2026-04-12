@@ -87,6 +87,8 @@ export interface TournamentOptions {
 	minPlayers: number;
 	/** Milliseconds the round-open window stays open. */
 	roundWindowMs?: number;
+	/** Milliseconds between ready/unready toggles. Default 3000. Set to 0 for tests. */
+	readyRateLimitMs?: number;
 }
 
 export class Tournament {
@@ -106,6 +108,7 @@ export class Tournament {
 		this.capacity = opts.capacity;
 		this.minPlayers = opts.minPlayers;
 		this.roundWindowMs = opts.roundWindowMs ?? 24 * 60 * 60 * 1000;
+		this.readyRateLimitMs = opts.readyRateLimitMs ?? 3000;
 	}
 
 	// ── introspection ─────────────────────────────────────────────────
@@ -180,7 +183,7 @@ export class Tournament {
 	}
 
 	/** Minimum interval between ready/unready toggles per side (ms). */
-	private static readonly READY_RATE_LIMIT_MS = 3000;
+	readonly readyRateLimitMs: number;
 
 	/**
 	 * Handle a match-ready message. Sets the player's ready flag,
@@ -197,7 +200,7 @@ export class Tournament {
 
 		const now = Date.now();
 		const lastToggle = side === 'A' ? match.lastReadyToggleA : match.lastReadyToggleB;
-		if (now - lastToggle < Tournament.READY_RATE_LIMIT_MS) {
+		if (now - lastToggle < this.readyRateLimitMs) {
 			return [errorTo(nametag, 'rate_limited', 'ready toggle rate limited (3s)')];
 		}
 
@@ -234,7 +237,7 @@ export class Tournament {
 
 		const now = Date.now();
 		const lastToggle = side === 'A' ? match.lastReadyToggleA : match.lastReadyToggleB;
-		if (now - lastToggle < Tournament.READY_RATE_LIMIT_MS) {
+		if (now - lastToggle < this.readyRateLimitMs) {
 			return [errorTo(nametag, 'rate_limited', 'ready toggle rate limited (3s)')];
 		}
 

@@ -121,14 +121,15 @@ runTest('full 4-player tournament with round advancement', async () => {
 		}
 
 		// After both round-0 matches resolve, the two winners should
-		// receive round-open for round 1 (the final).
+		// receive round-open for round 1 (the final). Use a short
+		// timeout since losers won't get one — no point waiting 3s.
 		const round1Opens: RoundOpenMessage[] = [];
 		for (const c of allClients) {
 			try {
-				const ro = await c.nextMessage('round-open', 3000) as RoundOpenMessage;
+				const ro = await c.nextMessage('round-open', 300) as RoundOpenMessage;
 				round1Opens.push(ro);
 			} catch {
-				// Losers won't get a round-open
+				// Losers won't get a round-open — expected
 			}
 		}
 		assertEqual(round1Opens.length, 2, 'two players in the final');
@@ -180,10 +181,10 @@ runTest('full 4-player tournament with round advancement', async () => {
 		const tournamentEnds: TournamentEndMessage[] = [];
 		for (const c of allClients) {
 			try {
-				const te = await c.nextMessage('tournament-end', 3000) as TournamentEndMessage;
+				const te = await c.nextMessage('tournament-end', 500) as TournamentEndMessage;
 				tournamentEnds.push(te);
 			} catch {
-				// Some clients may have already closed
+				// Eliminated clients may have missed it
 			}
 		}
 		assert(tournamentEnds.length >= 2, 'at least finalists get tournament-end');
