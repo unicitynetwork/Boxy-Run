@@ -138,10 +138,16 @@ wss.on('connection', (ws, req) => {
 				break;
 			}
 			case 'input': {
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
+				if (!nametag) { console.log('[input] DROP: no nametag'); break; }
 				const t = manager.getTournament(nametag);
-				if (!t) break; // silently drop
-				deliverTournament(t.relayInput(nametag, msg.matchId, msg.tick, msg.payload));
+				if (!t) { console.log('[input] DROP: no tournament for', nametag); break; }
+				const inputDeliveries = t.relayInput(nametag, msg.matchId, msg.tick, msg.payload);
+				if (inputDeliveries.length > 0) {
+					const target = inputDeliveries[0].to;
+					const hasSocket = nametagToSocket.has(target);
+					if (!hasSocket) console.log('[input] DROP: no socket for', target);
+				}
+				deliverTournament(inputDeliveries);
 				break;
 			}
 			case 'result': {

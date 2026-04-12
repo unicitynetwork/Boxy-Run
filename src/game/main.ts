@@ -512,7 +512,12 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 					const myScore = myState.score;
 					const oppScore = opponentState?.score ?? 0;
 					const oppSide: 'A' | 'B' = mySide === 'A' ? 'B' : 'A';
-					const winner: 'A' | 'B' = myScore >= oppScore ? mySide : oppSide;
+					// Deterministic winner: higher score wins. Ties go to
+					// side A so both clients agree (>= from A's perspective
+					// would make both think they won).
+					const winner: 'A' | 'B' = myScore > oppScore ? mySide
+						: oppScore > myScore ? oppSide
+						: 'A';
 
 					const scores = {
 						A: mySide === 'A' ? myScore : oppScore,
