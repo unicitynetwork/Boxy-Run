@@ -775,8 +775,6 @@ main {
         <div style="display:flex;align-items:center;gap:10px">
           <span class="status-dot" id="ws-dot" style="margin:0"></span>
           <span id="wallet-display" style="font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--cyan);letter-spacing:0.05em"></span>
-          <span style="flex:1"></span>
-          <button class="btn btn-primary" id="btn-join-lobby">Enter Arena</button>
         </div>
       </div>
       <!-- Not connected view -->
@@ -1052,9 +1050,15 @@ document.getElementById('btn-connect-wallet').addEventListener('click', () => {
 // Poll for wallet connection (auto-reconnect or after user clicks connect)
 function checkWallet() {
   const w = window.SphereWallet;
-  if (w && w.isConnected && w.identity && w.identity.nametag && !myNametag) {
-    showConnectedIdentity(w.identity.nametag);
-    registerWithServer();
+  if (w && w.isConnected && w.identity && w.identity.nametag) {
+    if (!myNametag) {
+      console.log('[lobby] wallet detected:', w.identity.nametag);
+      showConnectedIdentity(w.identity.nametag);
+    }
+    // Keep retrying registration until it succeeds
+    if (!registered) {
+      registerWithServer();
+    }
   }
 }
 setInterval(checkWallet, 500);
@@ -1072,13 +1076,6 @@ document.getElementById('player-name').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('btn-dev-join').click();
 });
 
-// Enter Arena button (shown after wallet connects)
-document.getElementById('btn-join-lobby').addEventListener('click', () => {
-  if (!myNametag) return;
-  document.getElementById('btn-join-lobby').textContent = 'Joined';
-  document.getElementById('btn-join-lobby').disabled = true;
-  registerWithServer();
-});
 
 // ── Tab switching ──────────────────────────────────────────────
 document.querySelectorAll('.lobby-tab').forEach(tab => {
@@ -1160,6 +1157,7 @@ function handleServerMessage(msg) {
       console.log('[lobby] registered as', msg.nametag, '| online:', onlinePlayers);
       break;
     case 'player-online':
+      console.log('[lobby] player-online:', msg.nametag, msg.online);
       if (msg.online) { if (!onlinePlayers.includes(msg.nametag)) onlinePlayers.push(msg.nametag); }
       else { onlinePlayers = onlinePlayers.filter(n => n !== msg.nametag); }
       renderOnlinePlayers();
