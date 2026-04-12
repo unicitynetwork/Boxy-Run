@@ -180,6 +180,9 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 					`Game over! Score: ${state.score}, Coins: ${state.coinCount}. Reload to try again.`,
 				);
 			}
+			// Submit score to leaderboard API
+			const nickname = walletNametag() || 'anonymous';
+			submitScore(nickname, state.score, state.coinCount);
 		}
 		requestAnimationFrame(loop);
 	}
@@ -557,6 +560,17 @@ function removeDeathBanner(): void {
 		deathBannerEl.remove();
 		deathBannerEl = null;
 	}
+}
+
+/** Submit a score to the leaderboard API. Fire-and-forget. */
+function submitScore(nickname: string, score: number, coins: number): void {
+	fetch('/api/scores', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ nickname, score, coins }),
+	}).then((r) => r.json())
+		.then((d) => console.log('Score submitted:', d))
+		.catch((e) => console.log('Score submission failed (API may be offline):', e));
 }
 
 /**

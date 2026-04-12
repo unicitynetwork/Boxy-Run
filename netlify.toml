@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "."
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Netlify Functions v2 uses file-based routing with the config.path
+# export, so no explicit redirects needed for /api/* paths.
