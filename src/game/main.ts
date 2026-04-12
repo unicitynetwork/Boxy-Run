@@ -295,15 +295,16 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			matchId = msg.matchId;
 			lastOpponentName = msg.opponent;
 			showOverlay(
-				`Match ready! vs ${msg.opponent}<br>` +
-				`Press ENTER when ready`,
+				`Match ready! vs ${msg.opponent}<br><br>` +
+				readyButton(),
 			);
 		},
 
 		onOpponentReady: (msg) => {
-			if (msg.ready) {
+			if (msg.ready && matchId) {
 				showOverlay(
-					`Opponent is ready! Press ENTER to start`,
+					`Opponent is ready!<br><br>` +
+					readyButton(),
 				);
 			}
 		},
@@ -452,9 +453,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			}
 		},
 		onStart: () => {
-			if (matchId && !matchActive) {
-				client.ready(matchId);
-				showOverlay('Waiting for opponent...');
+			if (typeof (window as any).__ready === 'function') {
+				(window as any).__ready();
 			}
 		},
 		isPlaying: () => matchActive && !matchOver,
@@ -557,6 +557,14 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		requestAnimationFrame(loop);
 	}
+
+	// Ready up for a match
+	(window as any).__ready = () => {
+		if (matchId && !matchActive) {
+			client.ready(matchId);
+			showOverlay('Waiting for opponent...');
+		}
+	};
 
 	// Rematch: send a new challenge to the same opponent
 	(window as any).__rematch = () => {
@@ -748,6 +756,10 @@ function installTouchControls(opts: {
 		},
 		{ passive: true },
 	);
+}
+
+function readyButton(): string {
+	return '<button onclick="window.__ready()" style="padding:14px 40px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;letter-spacing:0.15em">READY</button>';
 }
 
 function rematchButton(): string {
