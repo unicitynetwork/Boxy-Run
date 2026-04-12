@@ -387,6 +387,10 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onError: (msg) => {
 			console.error('Tournament error:', msg);
+			showOverlay(
+				`Error: ${msg.message}<br><br>` +
+				rematchButton() + backToArenaLink(),
+			);
 		},
 	});
 
@@ -560,6 +564,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 	// Ready up for a match
 	(window as any).__ready = () => {
+		console.log('[game] __ready called, matchId=', matchId, 'matchActive=', matchActive);
 		if (matchId && !matchActive) {
 			client.ready(matchId);
 			showOverlay('Waiting for opponent...');
@@ -568,7 +573,15 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 	// Rematch: send a new challenge to the same opponent
 	(window as any).__rematch = () => {
-		if (!lastOpponentName || !client.isConnected()) return;
+		console.log('[game] __rematch called, opponent=', lastOpponentName, 'connected=', client.isConnected());
+		if (!lastOpponentName) {
+			showOverlay('No opponent to rematch.<br><br>' + backToArenaLink());
+			return;
+		}
+		if (!client.isConnected()) {
+			showOverlay('Disconnected from server.<br><br>' + backToArenaLink());
+			return;
+		}
 		showOverlay(`Sending rematch to ${lastOpponentName}...`);
 		// Reset match state so we can accept a new tournament
 		matchId = null;
