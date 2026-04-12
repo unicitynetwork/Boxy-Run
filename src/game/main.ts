@@ -311,19 +311,39 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			// Create fresh sims from the match seed
 			myState = makeInitialState(seed, config);
 			opponentState = makeInitialState(seed, config);
-			matchActive = true;
 			matchOver = false;
 			resultSubmitted = false;
 			opponentDeathNotified = false;
 			myDeathNotified = false;
-			lastFrameTime = performance.now();
-			tickAccumulator = 0;
 
-			// Add opponent character to the scene (cherry red shirt)
+			// Add opponent character to the scene
 			removeOpponentMesh(render, scene);
 			addOpponentMesh(render, scene);
 
-			hideOverlay();
+			// Render the world once so both characters are visible during countdown
+			syncRender(myState, render, scene, config);
+			if (opponentState) syncOpponent(opponentState, render, config);
+			renderFrame(scene);
+
+			// Countdown: 3... 2... 1... GO!
+			matchActive = false; // don't tick yet
+			let count = 3;
+			showOverlay(`<div style="font-size:64px;font-weight:bold">${count}</div>`);
+			const countdownInterval = setInterval(() => {
+				count--;
+				if (count > 0) {
+					showOverlay(`<div style="font-size:64px;font-weight:bold">${count}</div>`);
+				} else {
+					clearInterval(countdownInterval);
+					showOverlay(`<div style="font-size:64px;font-weight:bold;color:var(--cyan,#00e5ff)">GO!</div>`);
+					setTimeout(() => {
+						hideOverlay();
+						matchActive = true;
+						lastFrameTime = performance.now();
+						tickAccumulator = 0;
+					}, 500);
+				}
+			}, 1000);
 		},
 
 		onOpponentInput: (msg) => {
