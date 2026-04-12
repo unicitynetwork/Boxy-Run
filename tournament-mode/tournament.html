@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run Arena</title>
+<link rel="icon" type="image/png" href="unicity-logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #060a12;
+  --bg-mid: #0c1220;
+  --bg-card: rgba(12, 20, 38, 0.7);
+  --bg-card-solid: #0e1628;
+  --cyan: #00e5ff;
+  --cyan-dim: rgba(0, 229, 255, 0.15);
+  --cyan-glow: rgba(0, 229, 255, 0.4);
+  --orange: #f97316;
+  --orange-dim: rgba(249, 115, 22, 0.15);
+  --magenta: #ff2d7b;
+  --gold: #FFD700;
+  --silver: #C0C0C0;
+  --bronze: #CD7F32;
+  --text: #e2e8f0;
+  --text-dim: #64748b;
+  --text-muted: #475569;
+  --border: rgba(0, 229, 255, 0.08);
+  --border-bright: rgba(0, 229, 255, 0.2);
+  --radius: 6px;
+  --font-display: 'Orbitron', monospace;
+  --font-body: 'IBM Plex Mono', 'SF Mono', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-deep);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scanline overlay ─────────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+}
+
+/* ── Floating grid background ─────────────────────────────────── */
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(0, 229, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.02) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%);
+}
+
+/* ── Particle canvas ─────────────────────────────────────────── */
+#particles {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── Main layout ──────────────────────────────────────────────── */
+main {
+  position: relative;
+  z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ── HERO ─────────────────────────────────────────────────────── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+  padding: 60px 0;
+}
+
+.hero-logo {
+  width: 120px;
+  height: 120px;
+  border-radius: 20px;
+  margin-bottom: 32px;
+  animation: float 6s ease-in-out infinite;
+  filter: drop-shadow(0 0 30px var(--cyan-glow));
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
+.hero-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 16px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease forwards 0.2s;
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(42px, 8vw, 96px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-bottom: 20px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease forwards 0.4s;
+}
+
+.hero-title .word-boxy { color: var(--text); }
+.hero-title .word-run { color: var(--cyan); text-shadow: 0 0 40px var(--cyan-glow); }
+.hero-title .word-arena {
+  display: block;
+  font-size: 0.35em;
+  letter-spacing: 0.5em;
+  color: var(--text-dim);
+  margin-top: 8px;
+}
+
+.hero-sub {
+  font-size: 14px;
+  color: var(--text-dim);
+  max-width: 480px;
+  margin-bottom: 40px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease forwards 0.6s;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  opacity: 0;
+  animation: fadeUp 0.8s ease forwards 0.8s;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: 14px 32px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary {
+  background: var(--cyan);
+  color: var(--bg-deep);
+  box-shadow: 0 0 20px var(--cyan-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 40px var(--cyan-glow), 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border-bright);
+}
+.btn-ghost:hover {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+/* ── Scroll indicator ─────────────────────────────────────────── */
+.scroll-hint {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  animation: fadeUp 0.8s ease forwards 1.2s;
+  opacity: 0;
+}
+
+.scroll-hint .chevron {
+  width: 20px;
+  height: 20px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+  animation: bounce 2s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: rotate(45deg) translateY(0); }
+  50% { transform: rotate(45deg) translateY(6px); }
+}
+
+/* ── Section headings ─────────────────────────────────────────── */
+.section {
+  padding: 80px 0;
+}
+
+.section-head {
+  margin-bottom: 48px;
+}
+
+.section-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 10px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 36px);
+  font-weight: 800;
+  color: var(--text);
+}
+
+/* ── Cards ────────────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-header h3 {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.card-body { padding: 24px; }
+
+/* ── Live Tournament Section ──────────────────────────────────── */
+.tournament-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 24px;
+}
+
+.lobby-card .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan);
+  animation: pulse-dot 2s ease-in-out infinite;
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.lobby-card .status-dot.offline {
+  background: var(--text-muted);
+  animation: none;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--cyan-glow); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+}
+
+.lobby-count {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 900;
+  color: var(--cyan);
+  line-height: 1;
+}
+
+.lobby-count span {
+  font-size: 18px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.lobby-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 16px 0;
+  overflow: hidden;
+}
+
+.lobby-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--magenta));
+  border-radius: 2px;
+  transition: width 0.5s ease;
+  box-shadow: 0 0 10px var(--cyan-glow);
+}
+
+.lobby-players {
+  list-style: none;
+  margin: 16px 0;
+}
+
+.lobby-players li {
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.lobby-players li:last-child { border-bottom: none; }
+
+.join-form { margin-top: 20px; }
+.join-form input {
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  margin-bottom: 10px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.join-form input:focus {
+  border-color: var(--cyan);
+}
+.join-form .btn { width: 100%; text-align: center; display: block; }
+
+/* ── Bracket ──────────────────────────────────────────────────── */
+.bracket-container {
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bracket-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 60px 20px;
+}
+
+.bracket {
+  display: flex;
+  gap: 0;
+  align-items: center;
+  overflow-x: auto;
+  padding: 20px 0;
+}
+
+.bracket-round {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  min-width: 180px;
+  position: relative;
+}
+
+.bracket-round-label {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.match-box {
+  margin: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(0,0,0,0.3);
+  overflow: hidden;
+  font-size: 12px;
+  position: relative;
+}
+
+.match-box.active {
+  border-color: var(--cyan);
+  box-shadow: 0 0 15px var(--cyan-dim);
+  animation: glow-border 2s ease-in-out infinite;
+}
+
+@keyframes glow-border {
+  0%, 100% { box-shadow: 0 0 15px var(--cyan-dim); }
+  50% { box-shadow: 0 0 25px var(--cyan-glow); }
+}
+
+.match-box.resolved { border-color: rgba(0, 229, 255, 0.15); }
+
+.match-player {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-dim);
+  transition: all 0.3s;
+}
+
+.match-player:first-child { border-bottom: 1px solid var(--border); }
+
+.match-player.winner {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+.match-player .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.match-player .score { font-weight: 600; }
+
+.match-player.tbd { font-style: italic; color: var(--text-muted); }
+
+/* Connector lines between rounds */
+.bracket-connectors {
+  width: 32px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* ── Leaderboard Section ──────────────────────────────────────── */
+.lb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.lb-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.lb-table th {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-bright);
+}
+
+.lb-table th:last-child { text-align: right; }
+
+.lb-table td {
+  padding: 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.lb-table td:last-child { text-align: right; }
+
+.lb-table tr {
+  transition: background 0.2s;
+}
+
+.lb-table tr:hover {
+  background: rgba(0, 229, 255, 0.03);
+}
+
+.lb-rank {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  width: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lb-rank.gold { color: var(--gold); }
+.lb-rank.silver { color: var(--silver); }
+.lb-rank.bronze { color: var(--bronze); }
+
+.lb-medal {
+  font-size: 18px;
+  margin-right: 4px;
+}
+
+.lb-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.lb-score {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--cyan);
+}
+
+.lb-coins {
+  color: var(--gold);
+  font-size: 12px;
+}
+
+.lb-date-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lb-date-picker input[type="date"] {
+  padding: 6px 10px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+.lb-date-picker input[type="date"]:focus {
+  border-color: var(--cyan);
+}
+/* Fix the calendar icon color in dark mode */
+.lb-date-picker input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+.alltime-row-1 td {
+  padding: 16px 12px;
+}
+
+.alltime-row-1 .lb-score { font-size: 18px; }
+.alltime-row-1 .lb-name { font-size: 15px; }
+
+.lb-refresh {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.lb-refresh .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  margin-right: 6px;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.lb-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Footer ───────────────────────────────────────────────────── */
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 0;
+  margin-top: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.footer-brand img {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  opacity: 0.6;
+}
+
+.footer-links {
+  display: flex;
+  gap: 24px;
+}
+
+.footer-links a {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-decoration: none;
+  letter-spacing: 0.1em;
+  transition: color 0.2s;
+}
+
+.footer-links a:hover { color: var(--cyan); }
+
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .tournament-grid { grid-template-columns: 1fr; }
+  .lb-grid { grid-template-columns: 1fr; }
+  .bracket { flex-direction: column; align-items: stretch; }
+  .bracket-connectors { display: none; }
+  .bracket-round { min-width: unset; }
+}
+
+@media (max-width: 600px) {
+  main { padding: 0 16px; }
+  .section { padding: 48px 0; }
+  .hero { min-height: 90vh; padding: 40px 0; }
+  .footer { flex-direction: column; text-align: center; }
+}
+
+/* ── Animations on scroll ─────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<canvas id="particles"></canvas>
+
+<main>
+  <!-- ── HERO ──────────────────────────────────────────────── -->
+  <section class="hero">
+    <img src="logo.png" alt="Boxy Run" class="hero-logo">
+    <div class="hero-label">Single-Elimination Tournament</div>
+    <h1 class="hero-title">
+      <span class="word-boxy">BOXY</span> <span class="word-run">RUN</span>
+      <span class="word-arena">ARENA</span>
+    </h1>
+    <p class="hero-sub">Compete in real-time knockout tournaments. Same obstacles, same seed. First to fall loses. Powered by Unicity.</p>
+    <div class="hero-actions">
+      <a href="dev.html" class="btn btn-primary">Play Now</a>
+      <a href="#tournament" class="btn btn-ghost">View Tournament</a>
+    </div>
+    <div class="scroll-hint">
+      <span>Scroll</span>
+      <div class="chevron"></div>
+    </div>
+  </section>
+
+  <!-- ── LIVE TOURNAMENT ───────────────────────────────────── -->
+  <section id="tournament" class="section">
+    <div class="section-head reveal">
+      <div class="section-label">Live</div>
+      <div class="section-title">Tournament</div>
+    </div>
+    <div class="tournament-grid reveal">
+      <div class="card lobby-card">
+        <div class="card-header">
+          <h3><span class="status-dot offline" id="ws-dot"></span>Lobby</h3>
+          <span class="lb-refresh" id="ws-status">Connecting...</span>
+        </div>
+        <div class="card-body">
+          <div class="lobby-count" id="lobby-count">0<span> / 32</span></div>
+          <div class="lobby-bar"><div class="lobby-bar-fill" id="lobby-bar" style="width:0%"></div></div>
+          <ul class="lobby-players" id="lobby-players"></ul>
+          <div class="join-form">
+            <input type="text" id="join-name" placeholder="@your-nametag" value="@player">
+            <button class="btn btn-primary" id="btn-join" onclick="joinTournament()">Join Tournament</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>Bracket</h3>
+          <span class="lb-refresh" id="bracket-phase">Waiting for players</span>
+        </div>
+        <div class="card-body bracket-container" id="bracket-container">
+          <div class="bracket-empty">Tournament bracket will appear when the lobby fills.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── LEADERBOARDS ──────────────────────────────────────── -->
+  <section id="leaderboards" class="section">
+    <div class="section-head reveal">
+      <div class="section-label">Rankings</div>
+      <div class="section-title">Leaderboards</div>
+    </div>
+    <div class="lb-grid reveal">
+      <!-- ALL-TIME -->
+      <div class="card">
+        <div class="card-header">
+          <h3>All-Time</h3>
+          <span class="lb-refresh">Hall of Fame</span>
+        </div>
+        <div class="card-body" id="alltime-body">
+          <div class="lb-empty">Loading...</div>
+        </div>
+      </div>
+      <!-- DAILY -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Daily</h3>
+          <div class="lb-date-picker">
+            <input type="date" id="daily-date">
+            <span class="lb-refresh"><span class="dot"></span>Live</span>
+          </div>
+        </div>
+        <div class="card-body" id="daily-body">
+          <div class="lb-empty">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ────────────────────────────────────────────── -->
+  <footer class="footer reveal">
+    <div class="footer-brand">
+      <img src="unicity-logo.png" alt="Unicity">
+      <span>Powered by Unicity</span>
+    </div>
+    <div class="footer-links">
+      <a href="index.html">Game</a>
+      <a href="https://discord.gg/PGzNZT5uVp" target="_blank">Discord</a>
+      <a href="dev.html">Dev Build</a>
+    </div>
+  </footer>
+</main>
+
+<script>
+// ── Configuration ──────────────────────────────────────────────
+const API_BASE = '/api';
+const WS_PROTOCOL = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = `${WS_PROTOCOL}//${location.host}`;
+const TOURNAMENT_ID = 'boxyrun-alpha-1';
+
+// ── Particles ──────────────────────────────────────────────────
+(function initParticles() {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let w, h, particles = [];
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+  for (let i = 0; i < 40; i++) {
+    particles.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 1.5 + 0.5,
+      a: Math.random() * 0.3 + 0.05
+    });
+  }
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0) p.x = w;
+      if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h;
+      if (p.y > h) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0, 229, 255, ${p.a})`;
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ── Scroll reveal ──────────────────────────────────────────────
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// ── Leaderboard fetching ───────────────────────────────────────
+const medals = ['', '\u{1F947}', '\u{1F948}', '\u{1F949}'];
+
+function rankClass(i) {
+  return i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+}
+
+function buildTable(entries, showCoins, showDate) {
+  if (!entries || entries.length === 0) return '<div class="lb-empty">No scores yet</div>';
+  let html = '<table class="lb-table"><thead><tr><th>Rank</th><th>Player</th>';
+  if (showCoins) html += '<th>Coins</th>';
+  if (showDate) html += '<th>Date</th>';
+  html += '<th>Score</th></tr></thead><tbody>';
+  entries.forEach((e, i) => {
+    const rank = e.rank || i + 1;
+    const rowClass = i === 0 ? ' class="alltime-row-1"' : '';
+    html += `<tr${rowClass}>`;
+    html += `<td><span class="lb-rank ${rankClass(i)}">${medals[rank] || rank}</span></td>`;
+    html += `<td class="lb-name">${esc(e.nickname)}</td>`;
+    if (showCoins) html += `<td class="lb-coins">${e.coins ?? ''}</td>`;
+    if (showDate) html += `<td style="font-size:12px;color:var(--text-muted)">${e.date || new Date(e.timestamp).toLocaleDateString()}</td>`;
+    html += `<td class="lb-score">${Number(e.score).toLocaleString()}</td>`;
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function loadAllTime() {
+  const el = document.getElementById('alltime-body');
+  try {
+    const r = await fetch(`${API_BASE}/leaderboard/alltime?limit=10`);
+    const d = await r.json();
+    el.innerHTML = buildTable(d.leaderboard, false, true);
+  } catch { el.innerHTML = '<div class="lb-empty">Could not load all-time scores</div>'; }
+}
+
+async function loadDaily(date) {
+  const el = document.getElementById('daily-body');
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const isToday = !date || date === today;
+    const url = isToday
+      ? `${API_BASE}/leaderboard/daily?limit=10`
+      : `${API_BASE}/leaderboard/history?date=${date}&limit=10`;
+    const r = await fetch(url);
+    const d = await r.json();
+    el.innerHTML = buildTable(d.leaderboard, true, false);
+  } catch { el.innerHTML = '<div class="lb-empty">Could not load daily scores</div>'; }
+}
+
+// Date picker
+const datePicker = document.getElementById('daily-date');
+datePicker.value = new Date().toISOString().split('T')[0];
+datePicker.max = datePicker.value;
+datePicker.addEventListener('change', () => loadDaily(datePicker.value));
+
+// Initial load + refresh
+loadAllTime();
+loadDaily();
+setInterval(loadDaily, 30000);
+setInterval(loadAllTime, 60000);
+
+// ── Tournament WebSocket ───────────────────────────────────────
+let ws = null;
+let bracketData = null;
+
+function connectWS() {
+  const dot = document.getElementById('ws-dot');
+  const status = document.getElementById('ws-status');
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch {
+    dot.classList.add('offline');
+    status.textContent = 'Server offline';
+    return;
+  }
+  ws.onopen = () => {
+    dot.classList.remove('offline');
+    status.textContent = 'Connected';
+  };
+  ws.onclose = () => {
+    dot.classList.add('offline');
+    status.textContent = 'Disconnected';
+    ws = null;
+    setTimeout(connectWS, 5000);
+  };
+  ws.onerror = () => {
+    dot.classList.add('offline');
+    status.textContent = 'Server offline';
+  };
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      handleServerMessage(msg);
+    } catch {}
+  };
+}
+
+function handleServerMessage(msg) {
+  switch (msg.type) {
+    case 'lobby-state': updateLobby(msg); break;
+    case 'bracket': updateBracket(msg); break;
+    case 'round-open': case 'match-start': case 'match-end': case 'tournament-end':
+      // Re-render bracket with updated info if we have it
+      if (bracketData) renderBracket(bracketData);
+      if (msg.type === 'tournament-end') {
+        document.getElementById('bracket-phase').textContent = 'Complete';
+      }
+      break;
+  }
+}
+
+function updateLobby(msg) {
+  const count = msg.players.length;
+  const cap = msg.capacity;
+  document.getElementById('lobby-count').innerHTML = `${count}<span> / ${cap}</span>`;
+  document.getElementById('lobby-bar').style.width = `${(count / cap) * 100}%`;
+  const ul = document.getElementById('lobby-players');
+  ul.innerHTML = msg.players.map(p => `<li>${esc(p.nametag)}</li>`).join('');
+}
+
+function updateBracket(msg) {
+  bracketData = msg;
+  document.getElementById('bracket-phase').textContent = `Round ${msg.rounds.length} bracket`;
+  renderBracket(msg);
+}
+
+function renderBracket(msg) {
+  const container = document.getElementById('bracket-container');
+  if (!msg.rounds || msg.rounds.length === 0) {
+    container.innerHTML = '<div class="bracket-empty">Bracket not yet generated</div>';
+    return;
+  }
+  let html = '<div class="bracket">';
+  msg.rounds.forEach((round, ri) => {
+    if (ri > 0) html += '<div class="bracket-connectors"></div>';
+    const label = ri === msg.rounds.length - 1 ? 'Final' : `Round ${ri + 1}`;
+    html += `<div class="bracket-round"><div class="bracket-round-label">${label}</div>`;
+    round.forEach(match => {
+      const pA = match.playerA || 'TBD';
+      const pB = match.playerB || 'TBD';
+      const isBye = !match.playerA || !match.playerB;
+      const isTBD = pA === 'TBD' && pB === 'TBD';
+      let boxClass = 'match-box';
+      // Simple state detection from bracket data
+      if (isTBD) boxClass += '';
+      else if (isBye) boxClass += ' resolved';
+      else boxClass += ' active';
+
+      html += `<div class="${boxClass}">`;
+      html += `<div class="match-player ${pA === 'TBD' ? 'tbd' : ''}"><span class="name">${esc(pA)}</span></div>`;
+      html += `<div class="match-player ${pB === 'TBD' ? 'tbd' : ''}"><span class="name">${esc(pB)}</span></div>`;
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function joinTournament() {
+  const name = document.getElementById('join-name').value.trim() || '@player';
+  window.open(`dev.html?tournament=1&name=${encodeURIComponent(name)}&server=${encodeURIComponent(WS_URL)}`, '_blank');
+}
+
+connectWS();
+</script>
+</body>
+</html>
