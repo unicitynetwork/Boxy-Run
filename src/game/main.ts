@@ -172,6 +172,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	let matchActive = false;
 	let matchOver = false;
 	let resultSubmitted = false;
+	let opponentDeathNotified = false;
+	let myDeathNotified = false;
 
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
@@ -224,6 +226,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			matchActive = true;
 			matchOver = false;
 			resultSubmitted = false;
+			opponentDeathNotified = false;
+			myDeathNotified = false;
 			lastFrameTime = performance.now();
 			tickAccumulator = 0;
 
@@ -314,53 +318,70 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		if (matchActive && !matchOver) {
 			tickAccumulator += delta;
 			while (tickAccumulator >= TICK_SECONDS && !matchOver) {
+				// Advance both sims. tick() no-ops on a dead sim, so
+				// only the surviving player's sim keeps progressing.
 				tick(myState, config);
 				if (opponentState) tick(opponentState, config);
 
-				// Check if either sim ended
-				if (myState.gameOver || opponentState?.gameOver) {
-					matchOver = true;
-					matchActive = false;
+				// Notify when opponent dies (match continues — survivor keeps running)
+				if (opponentState?.gameOver && !opponentDeathNotified) {
+					opponentDeathNotified = true;
+					showDeathBanner(
+						'OPPONENT DOWN',
+						`Their final score: ${opponentState.score}. Keep running to beat it!`,
+					);
+				}
 
-					if (!resultSubmitted && matchId) {
-						resultSubmitted = true;
-						const myDead = myState.gameOver;
-						const oppDead = opponentState?.gameOver ?? false;
-
-						let winner: 'A' | 'B';
-						if (myDead && !oppDead) {
-							winner = mySide === 'A' ? 'B' : 'A';
-						} else if (!myDead && oppDead) {
-							winner = mySide;
-						} else {
-							// Both died on same tick — higher score wins
-							const myScore = myState.score;
-							const oppScore = opponentState?.score ?? 0;
-							winner = myScore >= oppScore ? mySide : (mySide === 'A' ? 'B' : 'A');
-						}
-
-						const scores = {
-							A: mySide === 'A' ? myState.score : (opponentState?.score ?? 0),
-							B: mySide === 'B' ? myState.score : (opponentState?.score ?? 0),
-						};
-
-						// Simple result hash: deterministic from shared data
-						const resultHash = `${myState.seed}-${myState.tick}-${scores.A}-${scores.B}-${winner}`;
-
-						client.submitResult(
-							matchId,
-							myState.tick,
-							scores,
-							winner,
-							'inputs-hash-stub',
-							resultHash,
-						);
-
-						const status = winner === mySide ? 'You win!' : 'You lose!';
-						showOverlay(
-							`${status}<br>Score: ${myState.score} vs ${opponentState?.score ?? 0}`,
+				// Notify when I die (match continues — I watch the opponent)
+				if (myState.gameOver && !myDeathNotified) {
+					myDeathNotified = true;
+					if (!opponentState?.gameOver) {
+						showDeathBanner(
+							'YOU DIED',
+							`Your score: ${myState.score}. Watching opponent...`,
 						);
 					}
+				}
+
+				// Match ends when BOTH are dead (or time cap)
+				const bothDead = myState.gameOver && (opponentState?.gameOver ?? true);
+				if (bothDead && !resultSubmitted && matchId) {
+					matchOver = true;
+					matchActive = false;
+					resultSubmitted = true;
+					removeDeathBanner();
+
+					const myScore = myState.score;
+					const oppScore = opponentState?.score ?? 0;
+					const oppSide: 'A' | 'B' = mySide === 'A' ? 'B' : 'A';
+					const winner: 'A' | 'B' = myScore >= oppScore ? mySide : oppSide;
+
+					const scores = {
+						A: mySide === 'A' ? myScore : oppScore,
+						B: mySide === 'B' ? myScore : oppScore,
+					};
+
+					// Use the higher tick as the finalTick (survivor ran longer)
+					const finalTick = Math.max(
+						myState.tick,
+						opponentState?.tick ?? 0,
+					);
+
+					const resultHash = `${myState.seed}-${finalTick}-${scores.A}-${scores.B}-${winner}`;
+
+					client.submitResult(
+						matchId,
+						finalTick,
+						scores,
+						winner,
+						'inputs-hash-stub',
+						resultHash,
+					);
+
+					const status = winner === mySide ? 'You win!' : 'You lose!';
+					showOverlay(
+						`${status}<br>Your score: ${myScore} vs Opponent: ${oppScore}`,
+					);
 					break;
 				}
 
@@ -448,6 +469,49 @@ function removeOpponentHud(): void {
 	if (opponentHudEl) {
 		opponentHudEl.remove();
 		opponentHudEl = null;
+	}
+}
+
+/** Mid-match death banner — shown when one player dies but the match continues. */
+let deathBannerEl: HTMLElement | null = null;
+
+function showDeathBanner(title: string, subtitle: string): void {
+	removeDeathBanner();
+	deathBannerEl = document.createElement('div');
+	deathBannerEl.style.cssText =
+		'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:150;' +
+		'background:rgba(0,0,0,0.8);color:#fff;' +
+		'padding:24px 40px;border-radius:8px;text-align:center;' +
+		'font-family:monospace;pointer-events:none;' +
+		'border:1px solid rgba(255,255,255,0.15);' +
+		'animation:fadeInBanner 0.3s ease;';
+	deathBannerEl.innerHTML =
+		`<div style="font-size:20px;font-weight:bold;margin-bottom:8px;letter-spacing:0.1em">${title}</div>` +
+		`<div style="font-size:13px;color:#94a3b8">${subtitle}</div>`;
+
+	// Add the animation keyframe if not already present
+	if (!document.getElementById('death-banner-style')) {
+		const style = document.createElement('style');
+		style.id = 'death-banner-style';
+		style.textContent = '@keyframes fadeInBanner{from{opacity:0;transform:translate(-50%,-50%) scale(0.95)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}';
+		document.head.appendChild(style);
+	}
+
+	document.body.appendChild(deathBannerEl);
+
+	// Auto-fade after 3 seconds so it doesn't block the view permanently
+	setTimeout(() => {
+		if (deathBannerEl) {
+			deathBannerEl.style.transition = 'opacity 0.5s';
+			deathBannerEl.style.opacity = '0.4';
+		}
+	}, 3000);
+}
+
+function removeDeathBanner(): void {
+	if (deathBannerEl) {
+		deathBannerEl.remove();
+		deathBannerEl = null;
 	}
 }
 
