@@ -98,7 +98,7 @@ export async function startServer(
 		});
 	});
 
-	return { proc, url: `ws://localhost:${port}`, port };
+	return { proc, url: `ws://127.0.0.1:${port}`, port };
 }
 
 /** Stop the server and wait for the process to fully exit. */

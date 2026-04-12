@@ -626,6 +626,18 @@ export class Tournament {
 		return deliveries;
 	}
 
+	// ── public state queries (for spectators / new connections) ──────
+
+	/** Build current lobby state for a new connection. Always available. */
+	buildPublicLobbyState(): LobbyStateMessage {
+		return this.buildLobbyState();
+	}
+
+	/** Build current bracket for a new connection. Null if not yet generated. */
+	buildPublicBracket(): BracketMessage | null {
+		return this.bracket ? this.buildBracket() : null;
+	}
+
 	// ── builders ──────────────────────────────────────────────────────
 
 	private buildLobbyState(): LobbyStateMessage {

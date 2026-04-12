@@ -139,9 +139,45 @@ export interface LeaveMessage extends MessageBase<'leave'> {
 	reason?: string;
 }
 
+// ─── Lobby system messages (multi-tournament) ──────────────────────────────
+
+/** Register with the server. Required before any lobby action. */
+export interface RegisterMessage extends MessageBase<'register'> {
+	identity: PublicIdentity;
+}
+
+/** Send a 1v1 challenge to a specific player. */
+export interface ChallengeMessage extends MessageBase<'challenge'> {
+	opponent: string;
+	/** UCT wager. 0 = friendly match. */
+	wager: number;
+}
+
+/** Accept an incoming challenge. */
+export interface ChallengeAcceptMessage extends MessageBase<'challenge-accept'> {
+	challengeId: string;
+}
+
+/** Decline an incoming challenge. */
+export interface ChallengeDeclineMessage extends MessageBase<'challenge-decline'> {
+	challengeId: string;
+}
+
+/** Join the rolling quick-match queue. */
+export interface QueueJoinMessage extends MessageBase<'queue-join'> {}
+
+/** Leave the rolling queue. */
+export interface QueueLeaveMessage extends MessageBase<'queue-leave'> {}
+
 export type ClientMessage =
 	| JoinMessage
 	| ResumeMessage
+	| RegisterMessage
+	| ChallengeMessage
+	| ChallengeAcceptMessage
+	| ChallengeDeclineMessage
+	| QueueJoinMessage
+	| QueueLeaveMessage
 	| MatchReadyMessage
 	| MatchUnreadyMessage
 	| InputMessage
@@ -229,6 +265,56 @@ export interface ErrorMessage extends MessageBase<'error'> {
 	matchId?: string;
 }
 
+// ─── Lobby system messages (multi-tournament) ──────────────────────────────
+
+export type TournamentType = 'challenge' | 'rolling' | 'grand-final';
+
+/** Sent after successful registration. */
+export interface RegisteredMessage extends MessageBase<'registered'> {
+	nametag: string;
+	/** List of other online players available for challenges. */
+	onlinePlayers: string[];
+}
+
+/** Broadcast when a player comes online or goes offline. */
+export interface PlayerOnlineMessage extends MessageBase<'player-online'> {
+	nametag: string;
+	online: boolean;
+}
+
+/** Sent to the challenged player. */
+export interface ChallengeReceivedMessage extends MessageBase<'challenge-received'> {
+	challengeId: string;
+	from: string;
+	wager: number;
+}
+
+/** Sent to the challenger when the challenge was delivered. */
+export interface ChallengeSentMessage extends MessageBase<'challenge-sent'> {
+	challengeId: string;
+	opponent: string;
+}
+
+/** Sent when the opponent declined. */
+export interface ChallengeDeclinedMessage extends MessageBase<'challenge-declined'> {
+	challengeId: string;
+	by: string;
+}
+
+/** Sent when a player is assigned to a tournament (from challenge or queue). */
+export interface TournamentAssignedMessage extends MessageBase<'tournament-assigned'> {
+	tournamentId: string;
+	tournamentType: TournamentType;
+}
+
+/** Rolling queue state update. */
+export interface QueueStateMessage extends MessageBase<'queue-state'> {
+	position: number;
+	total: number;
+	/** Epoch ms when the queue countdown expires and tournament starts. Null if not enough players. */
+	startsAt: number | null;
+}
+
 export type ServerMessage =
 	| LobbyStateMessage
 	| BracketMessage
@@ -238,4 +324,11 @@ export type ServerMessage =
 	| OpponentInputMessage
 	| MatchEndMessage
 	| TournamentEndMessage
-	| ErrorMessage;
+	| ErrorMessage
+	| RegisteredMessage
+	| PlayerOnlineMessage
+	| ChallengeReceivedMessage
+	| ChallengeSentMessage
+	| ChallengeDeclinedMessage
+	| TournamentAssignedMessage
+	| QueueStateMessage;
