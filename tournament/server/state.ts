@@ -16,11 +16,13 @@ import {
 	type BracketMessage,
 	type BracketSlot,
 	type LobbyStateMessage,
+	type MatchStartMessage,
+	type OpponentReadyMessage,
 	type PublicIdentity,
 	type RoundOpenMessage,
 	type ServerMessage,
 } from '../protocol/messages';
-import { generateBracket } from './bracket';
+import { generateBracket, hashString } from './bracket';
 
 export type TournamentPhase = 'LOBBY' | 'RUNNING' | 'PAYOUT' | 'DONE';
 
@@ -47,6 +49,16 @@ export interface MatchState {
 	playerB: string | null;
 	phase: MatchPhase;
 	winner: string | null;
+	/** Ready flags, keyed by nametag. Only meaningful in READY_WAIT. */
+	readyA: boolean;
+	readyB: boolean;
+	/** 8-hex-char seed computed at match-start, null until ACTIVE. */
+	seed: string | null;
+	/** Wall-clock epoch ms when the match started, null until ACTIVE. */
+	startedAt: number | null;
+	/** Last ready-toggle timestamp per side, for rate limiting. */
+	lastReadyToggleA: number;
+	lastReadyToggleB: number;
 }
 
 export interface Delivery {
@@ -158,6 +170,120 @@ export class Tournament {
 		return [];
 	}
 
+	/** Minimum interval between ready/unready toggles per side (ms). */
+	private static readonly READY_RATE_LIMIT_MS = 3000;
+
+	/**
+	 * Handle a match-ready message. Sets the player's ready flag,
+	 * notifies the opponent, and if both are ready, starts the match.
+	 */
+	setReady(nametag: string, matchId: string): Delivery[] {
+		const match = this.matches.get(matchId);
+		if (!match) return [errorTo(nametag, 'unknown_match', `no such match: ${matchId}`)];
+		if (match.phase !== 'READY_WAIT') {
+			return [errorTo(nametag, 'not_ready_wait', `match ${matchId} is not in READY_WAIT`)];
+		}
+		const side = this.sideOf(nametag, match);
+		if (!side) return [errorTo(nametag, 'not_in_match', 'you are not in this match')];
+
+		const now = Date.now();
+		const lastToggle = side === 'A' ? match.lastReadyToggleA : match.lastReadyToggleB;
+		if (now - lastToggle < Tournament.READY_RATE_LIMIT_MS) {
+			return [errorTo(nametag, 'rate_limited', 'ready toggle rate limited (3s)')];
+		}
+
+		if (side === 'A') { match.readyA = true; match.lastReadyToggleA = now; }
+		else { match.readyB = true; match.lastReadyToggleB = now; }
+
+		const opponent = side === 'A' ? match.playerB! : match.playerA!;
+		const deliveries: Delivery[] = [];
+
+		const readyMsg: OpponentReadyMessage = {
+			type: 'opponent-ready', v: PROTOCOL_VERSION,
+			matchId, ready: true,
+		};
+		deliveries.push({ to: opponent, message: readyMsg });
+
+		if (match.readyA && match.readyB) {
+			deliveries.push(...this.startMatch(match));
+		}
+		return deliveries;
+	}
+
+	/**
+	 * Handle a match-unready message. Clears the player's ready flag
+	 * and notifies the opponent. Only valid in READY_WAIT phase.
+	 */
+	setUnready(nametag: string, matchId: string): Delivery[] {
+		const match = this.matches.get(matchId);
+		if (!match) return [errorTo(nametag, 'unknown_match', `no such match: ${matchId}`)];
+		if (match.phase !== 'READY_WAIT') {
+			return [errorTo(nametag, 'not_ready_wait', `match ${matchId} is not in READY_WAIT`)];
+		}
+		const side = this.sideOf(nametag, match);
+		if (!side) return [errorTo(nametag, 'not_in_match', 'you are not in this match')];
+
+		const now = Date.now();
+		const lastToggle = side === 'A' ? match.lastReadyToggleA : match.lastReadyToggleB;
+		if (now - lastToggle < Tournament.READY_RATE_LIMIT_MS) {
+			return [errorTo(nametag, 'rate_limited', 'ready toggle rate limited (3s)')];
+		}
+
+		if (side === 'A') { match.readyA = false; match.lastReadyToggleA = now; }
+		else { match.readyB = false; match.lastReadyToggleB = now; }
+
+		const opponent = side === 'A' ? match.playerB! : match.playerA!;
+		const readyMsg: OpponentReadyMessage = {
+			type: 'opponent-ready', v: PROTOCOL_VERSION,
+			matchId, ready: false,
+		};
+		return [{ to: opponent, message: readyMsg }];
+	}
+
+	private sideOf(nametag: string, match: MatchState): 'A' | 'B' | null {
+		if (match.playerA === nametag) return 'A';
+		if (match.playerB === nametag) return 'B';
+		return null;
+	}
+
+	/**
+	 * Transition a match from READY_WAIT to ACTIVE. Computes the match
+	 * seed from (tournamentId, round, slot, sortedPubkeys) and emits
+	 * match-start to both players with a 3-second countdown.
+	 */
+	private startMatch(match: MatchState): Delivery[] {
+		match.phase = 'ACTIVE';
+		const now = Date.now();
+		match.startedAt = now;
+		const startsAt = now + 3000;
+
+		const pA = this.players.get(match.playerA!)!;
+		const pB = this.players.get(match.playerB!)!;
+		const sortedPubkeys = [pA.identity.pubkey, pB.identity.pubkey].sort();
+		const seedInput = `${this.id}|${match.roundIndex}|${match.slotIndex}|${sortedPubkeys[0]}|${sortedPubkeys[1]}`;
+		const seedNum = hashString(seedInput);
+		match.seed = seedNum.toString(16).padStart(8, '0');
+
+		const timeCapTicks = 60 * 60 * 10; // 10 minutes at 60 Hz
+
+		const msgA: MatchStartMessage = {
+			type: 'match-start', v: PROTOCOL_VERSION,
+			matchId: match.matchId, seed: match.seed,
+			opponent: match.playerB!, youAre: 'A', startsAt, timeCapTicks,
+			protocol: { heartbeatIntervalMs: 5000, inputAckMode: 'none' },
+		};
+		const msgB: MatchStartMessage = {
+			type: 'match-start', v: PROTOCOL_VERSION,
+			matchId: match.matchId, seed: match.seed,
+			opponent: match.playerA!, youAre: 'B', startsAt, timeCapTicks,
+			protocol: { heartbeatIntervalMs: 5000, inputAckMode: 'none' },
+		};
+		return [
+			{ to: match.playerA!, message: msgA },
+			{ to: match.playerB!, message: msgB },
+		];
+	}
+
 	// ── internal state transitions ────────────────────────────────────
 
 	private start(): Delivery[] {
@@ -186,6 +312,12 @@ export class Tournament {
 					playerB: slot.playerB,
 					phase,
 					winner: null,
+					readyA: false,
+					readyB: false,
+					seed: null,
+					startedAt: null,
+					lastReadyToggleA: 0,
+					lastReadyToggleB: 0,
 				});
 			}
 		}

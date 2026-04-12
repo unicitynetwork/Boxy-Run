@@ -77,6 +77,16 @@ wss.on('connection', (ws, req) => {
 			case 'join':
 				handleJoin(ws, msg);
 				break;
+			case 'match-ready':
+			case 'match-unready': {
+				const nametag = socketToNametag.get(ws);
+				if (!nametag) { sendError(ws, 'not_joined', 'join first'); break; }
+				const deliveries = msg.type === 'match-ready'
+					? tournament.setReady(nametag, msg.matchId)
+					: tournament.setUnready(nametag, msg.matchId);
+				deliver(deliveries);
+				break;
+			}
 			case 'leave':
 				ws.close(1000, 'client leave');
 				break;
