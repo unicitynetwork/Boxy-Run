@@ -74,6 +74,8 @@ export interface MatchState {
 	/** Result hashes submitted by each side, null until received. */
 	resultA: { finalTick: number; score: Record<string, number>; winner: string; inputsHash: string; resultHash: string } | null;
 	resultB: { finalTick: number; score: Record<string, number>; winner: string; inputsHash: string; resultHash: string } | null;
+	/** When the first result was submitted (for timeout). */
+	firstResultAt: number | null;
 }
 
 export interface Delivery {
@@ -319,6 +321,7 @@ export class Tournament {
 		// Move to AWAIT_HASHES on first result
 		if (match.phase === 'ACTIVE') {
 			match.phase = 'AWAIT_HASHES';
+			match.firstResultAt = Date.now();
 		}
 
 		// If both results are in, try to resolve
@@ -615,6 +618,7 @@ export class Tournament {
 					inputsB: [],
 					resultA: null,
 					resultB: null,
+					firstResultAt: null,
 					readyWaitStartedAt: Date.now(),
 				});
 			}
@@ -770,18 +774,13 @@ export class Tournament {
 			}
 
 			// ── Result timeout: one player submitted, the other didn't ──
-			if (match.phase === 'AWAIT_HASHES') {
-				const firstResult = match.resultA || match.resultB;
-				if (firstResult) {
-					// Check time since the match started (we use startedAt as a proxy)
-					const matchDuration = now - (match.startedAt ?? now);
-					if (matchDuration > Tournament.RESULT_TIMEOUT_MS + 600_000) {
-						// 10 min match + 30s grace — way past any reasonable match
-						if (match.resultA && !match.resultB) {
-							deliveries.push(...this.forfeitResolve(match, 'A'));
-						} else if (!match.resultA && match.resultB) {
-							deliveries.push(...this.forfeitResolve(match, 'B'));
-						}
+			if (match.phase === 'AWAIT_HASHES' && match.firstResultAt) {
+				const elapsed = now - match.firstResultAt;
+				if (elapsed > Tournament.RESULT_TIMEOUT_MS) {
+					if (match.resultA && !match.resultB) {
+						deliveries.push(...this.forfeitResolve(match, 'A'));
+					} else if (!match.resultA && match.resultB) {
+						deliveries.push(...this.forfeitResolve(match, 'B'));
 					}
 				}
 			}
