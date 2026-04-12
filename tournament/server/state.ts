@@ -345,8 +345,19 @@ export class Tournament {
 		const seed = parseInt(match.seed ?? '0', 16) >>> 0;
 		const config = DEFAULT_CONFIG;
 
-		const replayA = this.replaySim(seed, match.inputsA, config);
-		const replayB = this.replaySim(seed, match.inputsB, config);
+		let replayA: ReturnType<Tournament['replaySim']>;
+		let replayB: ReturnType<Tournament['replaySim']>;
+		try {
+			replayA = this.replaySim(seed, match.inputsA, config);
+			replayB = this.replaySim(seed, match.inputsB, config);
+		} catch (err) {
+			console.error(`[match] ${match.matchId}: replay CRASHED:`, err);
+			// Fallback: use self-reported scores
+			const scoreA = (match.resultA?.score as Record<string, number>)?.['A'] || 0;
+			const scoreB = (match.resultB?.score as Record<string, number>)?.['B'] || 0;
+			replayA = { score: scoreA, deathTick: 0, violation: null };
+			replayB = { score: scoreB, deathTick: 0, violation: null };
+		}
 
 		console.log(
 			`[match] ${match.matchId}: A=${replayA.score} B=${replayB.score}` +

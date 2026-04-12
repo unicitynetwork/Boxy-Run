@@ -153,14 +153,22 @@ wss.on('connection', (ws, req) => {
 			case 'result': {
 				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
 				const t = manager.getTournament(nametag);
-				if (!t) break;
-				const d = t.submitResult(
-					nametag, msg.matchId, msg.finalTick,
-					msg.score as Record<string, number>,
-					msg.winner, msg.inputsHash, msg.resultHash,
-				);
-				deliverTournament(d);
-				// Clean up finished tournaments
+				if (!t) {
+					console.log(`[result] DROP: no tournament for ${nametag}`);
+					break;
+				}
+				try {
+					console.log(`[result] ${nametag} submitting for ${msg.matchId}`);
+					const d = t.submitResult(
+						nametag, msg.matchId, msg.finalTick,
+						msg.score as Record<string, number>,
+						msg.winner, msg.inputsHash, msg.resultHash,
+					);
+					console.log(`[result] ${nametag}: ${d.length} deliveries`);
+					deliverTournament(d);
+				} catch (err) {
+					console.error(`[result] EXCEPTION during submitResult:`, err);
+				}
 				manager.cleanupDone();
 				break;
 			}
