@@ -785,7 +785,8 @@ export class Tournament {
 			}
 
 			// ── Result timeout: one player submitted, the other didn't ──
-			if (match.phase === 'AWAIT_HASHES' && match.firstResultAt) {
+			// Only check if still in AWAIT_HASHES (not already resolved)
+			if (match.phase === 'AWAIT_HASHES' && match.firstResultAt && !match.resultA !== !match.resultB) {
 				const elapsed = now - match.firstResultAt;
 				if (elapsed > Tournament.RESULT_TIMEOUT_MS) {
 					if (match.resultA && !match.resultB) {
