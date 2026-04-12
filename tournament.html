@@ -778,7 +778,7 @@ main {
       </div>
       <!-- Not connected view -->
       <div id="identity-disconnected" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-primary" id="btn-connect-wallet" style="padding:12px 24px">Connect Sphere Wallet</button>
+        <button class="btn btn-primary" id="btn-connect-wallet" style="padding:12px 24px">Connecting...</button>
         <span style="color:var(--text-muted);font-size:12px">or</span>
         <input type="text" id="player-name" placeholder="@nametag"
                style="flex:1;min-width:140px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border-bright);border-radius:var(--radius);color:var(--text);font-family:var(--font-display);font-size:15px;font-weight:600;outline:none;letter-spacing:0.05em;transition:border-color 0.2s"
@@ -1036,10 +1036,27 @@ function showConnectedIdentity(nametag) {
   document.getElementById('wallet-display').textContent = nametag;
 }
 
-// Connect Sphere Wallet button
-document.getElementById('btn-connect-wallet').addEventListener('click', () => {
+// Connect Sphere Wallet button — starts as "Connecting..." while
+// the wallet auto-reconnects from a saved session. After 2 seconds
+// if no auto-connect, change to a clickable "Connect Sphere Wallet".
+const connectBtn = document.getElementById('btn-connect-wallet') as HTMLButtonElement;
+connectBtn.disabled = true;
+connectBtn.style.opacity = '0.6';
+
+setTimeout(() => {
+  if (!myNametag) {
+    connectBtn.textContent = 'Connect Sphere Wallet';
+    connectBtn.disabled = false;
+    connectBtn.style.opacity = '1';
+  }
+}, 2000);
+
+connectBtn.addEventListener('click', () => {
   const w = window.SphereWallet;
   if (w && w.connect) {
+    connectBtn.textContent = 'Connecting...';
+    connectBtn.disabled = true;
+    connectBtn.style.opacity = '0.6';
     w.connect();
   } else {
     alert('Sphere Wallet not detected. Use the nametag input instead.');
