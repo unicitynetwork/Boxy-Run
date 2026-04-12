@@ -86,6 +86,16 @@ export class TournamentManager {
 			// This handles page refreshes and game-page redirects where
 			// the player is already registered from tournament.html.
 			const existing = this.registered.get(tag)!;
+
+			// Clear stale tournament assignment if the tournament is done
+			if (existing.tournamentId) {
+				const oldT = this.tournaments.get(existing.tournamentId);
+				if (!oldT || oldT.getPhase() === 'DONE') {
+					this.playerToTournament.delete(tag);
+					existing.tournamentId = null;
+				}
+			}
+
 			this.registered.set(tag, { identity, tournamentId: existing.tournamentId });
 			const others = Array.from(this.registered.keys()).filter((t) => t !== tag);
 			const deliveries: ManagerDelivery[] = [{
@@ -200,6 +210,16 @@ export class TournamentManager {
 		return deliveries;
 	}
 
+	/** Clear a player's tournament assignment if the tournament is finished. */
+	private clearStaleTournament(player: RegisteredPlayer, nametag: string): void {
+		if (!player.tournamentId) return;
+		const t = this.tournaments.get(player.tournamentId);
+		if (!t || t.getPhase() === 'DONE') {
+			this.playerToTournament.delete(nametag);
+			player.tournamentId = null;
+		}
+	}
+
 	isRegistered(nametag: string): boolean {
 		return this.registered.has(nametag);
 	}
@@ -213,6 +233,8 @@ export class TournamentManager {
 
 		const fromPlayer = this.registered.get(from)!;
 		const toPlayer = this.registered.get(opponent)!;
+		this.clearStaleTournament(fromPlayer, from);
+		this.clearStaleTournament(toPlayer, opponent);
 		if (fromPlayer.tournamentId) return [err(from, 'in_tournament', 'you are already in a tournament')];
 		if (toPlayer.tournamentId) return [err(from, 'opponent_busy', `${opponent} is in a tournament`)];
 
@@ -308,6 +330,7 @@ export class TournamentManager {
 	joinQueue(nametag: string): ManagerDelivery[] {
 		if (!this.registered.has(nametag)) return [err(nametag, 'not_registered', 'register first')];
 		const player = this.registered.get(nametag)!;
+		this.clearStaleTournament(player, nametag);
 		if (player.tournamentId) return [err(nametag, 'in_tournament', 'already in a tournament')];
 		if (this.queue.includes(nametag)) return [err(nametag, 'already_in_queue', 'already queued')];
 
