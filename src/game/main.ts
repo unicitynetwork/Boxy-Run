@@ -88,19 +88,21 @@ window.addEventListener('load', () => {
 	const skinParam = params.get('skin');
 	const isTournament = params.get('tournament') === '1';
 
-	// If skin is already set via URL param, skip the selector
-	if (skinParam) {
+	// Tournament mode: skip skin selector (use param or default).
+	// Showing a selector during a redirect/reload wastes time and
+	// confuses the flow — the match is waiting.
+	if (isTournament) {
 		const skin = getSkin(skinParam);
-		if (isTournament) startTournamentMode(params, skin);
-		else startSinglePlayer(params, skin);
+		startTournamentMode(params, skin);
 		return;
 	}
 
-	// Show character selector, then start the game
-	showSkinSelector((skin) => {
-		if (isTournament) startTournamentMode(params, skin);
-		else startSinglePlayer(params, skin);
-	});
+	// Single-player: show skin selector if no param
+	if (skinParam) {
+		startSinglePlayer(params, getSkin(skinParam));
+		return;
+	}
+	showSkinSelector((skin) => startSinglePlayer(params, skin));
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -258,6 +260,16 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		onRegistered: (msg) => {
 			console.log('Registered. Online players:', msg.onlinePlayers);
 			showOverlay('Waiting for match...');
+			// If no match arrives within 3 seconds, the tournament is
+			// gone (page refresh after match ended). Show options.
+			setTimeout(() => {
+				if (!matchId && !matchActive) {
+					showOverlay(
+						'<div style="font-size:16px;margin-bottom:16px">No active match</div>' +
+						rematchButton() + backToArenaLink(),
+					);
+				}
+			}, 3000);
 		},
 
 		onChallengeReceived: (msg) => {
