@@ -72,6 +72,16 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 // ── WebSocket server ─────────────────────────────────────────────
 const wss = new WebSocketServer({ server: httpServer });
 
+// Ping all connected sockets every 20 seconds to keep Fly.io's
+// proxy from killing idle WebSocket connections.
+setInterval(() => {
+	for (const socket of allSockets) {
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.ping();
+		}
+	}
+}, 20_000);
+
 wss.on('connection', (ws, req) => {
 	const addr = req.socket.remoteAddress ?? 'unknown';
 	allSockets.add(ws);
@@ -91,6 +101,11 @@ wss.on('connection', (ws, req) => {
 		}
 
 		const nametag = socketToNametag.get(ws);
+
+		// Log all non-input messages for debugging
+		if (msg.type !== 'input' && msg.type !== 'heartbeat') {
+			console.log(`[msg] ${nametag || '?'}: ${msg.type}`);
+		}
 
 		switch (msg.type) {
 			// ── Registration ──
@@ -140,7 +155,7 @@ wss.on('connection', (ws, req) => {
 			case 'input': {
 				if (!nametag) { console.log('[input] DROP: no nametag'); break; }
 				const t = manager.getTournament(nametag);
-				if (!t) { console.log('[input] DROP: no tournament for', nametag); break; }
+				if (!t) { console.log(`[input] DROP: no tournament for ${nametag} (registered=${manager.isRegistered(nametag)})`); break; }
 				const inputDeliveries = t.relayInput(nametag, msg.matchId, msg.tick, msg.payload);
 				if (inputDeliveries.length > 0) {
 					const target = inputDeliveries[0].to;
@@ -151,10 +166,10 @@ wss.on('connection', (ws, req) => {
 				break;
 			}
 			case 'result': {
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
+				if (!nametag) { console.log('[result] DROP: no nametag'); break; }
 				const t = manager.getTournament(nametag);
 				if (!t) {
-					console.log(`[result] DROP: no tournament for ${nametag}`);
+					console.log(`[result] DROP: no tournament for ${nametag} (registered=${manager.isRegistered(nametag)})`);
 					break;
 				}
 				try {

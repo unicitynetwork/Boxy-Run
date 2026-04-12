@@ -96,30 +96,59 @@ export class TournamentClient {
 	 * Open the WebSocket connection. Resolves when the socket is open.
 	 * Rejects if the connection fails.
 	 */
+	private reconnectTimer: any = null;
+
 	connect(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const Ctor = this.opts.WebSocketCtor ?? WebSocket;
-			const ws = new Ctor(this.opts.url);
-			this.ws = ws;
-
-			ws.onopen = () => resolve();
-			ws.onerror = (e) => reject(e);
-			ws.onclose = () => {
-				this.ws = null;
-				this.opts.onClose?.();
-			};
-			ws.onmessage = (e) => {
-				let msg: ServerMessage;
-				try {
-					msg = JSON.parse(
-						typeof e.data === 'string' ? e.data : e.data.toString(),
-					) as ServerMessage;
-				} catch {
-					return;
-				}
-				this.dispatch(msg);
-			};
+			this.connectInternal(resolve, reject);
 		});
+	}
+
+	private connectInternal(
+		onFirstOpen?: () => void,
+		onFirstError?: (e: unknown) => void,
+	): void {
+		const Ctor = this.opts.WebSocketCtor ?? WebSocket;
+		const ws = new Ctor(this.opts.url);
+		this.ws = ws;
+		let opened = false;
+
+		ws.onopen = () => {
+			opened = true;
+			console.log('[tournament-client] connected');
+			if (this.reconnectTimer) {
+				clearTimeout(this.reconnectTimer);
+				this.reconnectTimer = null;
+				// Re-register after reconnect
+				this.register();
+			}
+			onFirstOpen?.();
+		};
+		ws.onerror = (e) => {
+			if (!opened) onFirstError?.(e);
+		};
+		ws.onclose = () => {
+			this.ws = null;
+			console.log('[tournament-client] disconnected, reconnecting in 2s');
+			// Auto-reconnect after 2 seconds
+			if (!this.reconnectTimer) {
+				this.reconnectTimer = setTimeout(() => {
+					this.connectInternal();
+				}, 2000);
+			}
+			this.opts.onClose?.();
+		};
+		ws.onmessage = (e) => {
+			let msg: ServerMessage;
+			try {
+				msg = JSON.parse(
+					typeof e.data === 'string' ? e.data : e.data.toString(),
+				) as ServerMessage;
+			} catch {
+				return;
+			}
+			this.dispatch(msg);
+		};
 	}
 
 	disconnect(): void {
