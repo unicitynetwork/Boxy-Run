@@ -1,20 +1,12 @@
 /**
- * Tournament server — MVP lobby only.
+ * Tournament server — thin WebSocket layer on top of the Tournament
+ * state machine in state.ts. Handles connection lifecycle, parses
+ * incoming JSON, forwards the logic to the Tournament class, and
+ * routes its returned Delivery array back to the right WebSockets.
  *
- * Currently implemented:
- *   - Accept WebSocket connections
- *   - Handle `join` (stub chain verification — anything goes for now)
- *   - Track connected players in a single hardcoded tournament
- *   - Broadcast `lobby-state` on roster changes
- *   - Report errors back via the `error` frame
- *
- * Not yet implemented (coming in subsequent commits):
- *   - Real entry-fee verification against the Unicity chain
- *   - Bracket generation and seeding
- *   - Match lifecycle (ready window, match-start, input relay)
- *   - Result hash agreement
- *   - Prize pool payouts
- *   - Reconnection / resume
+ * State machine logic lives in state.ts. This file should stay small
+ * and focused on networking concerns (message parsing, socket routing,
+ * logging, graceful shutdown).
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -23,35 +15,41 @@ import {
 	PROTOCOL_VERSION,
 	type ClientMessage,
 	type ErrorMessage,
-	type JoinMessage,
-	type LobbyStateMessage,
-	type PublicIdentity,
 } from '../protocol/messages';
+import { Tournament, type Delivery } from './state';
 
 const PORT = parseInt(process.env.PORT || '7101', 10);
 const LOBBY_CAPACITY = parseInt(process.env.LOBBY_CAPACITY || '32', 10);
+const MIN_PLAYERS = parseInt(
+	process.env.MIN_PLAYERS || String(LOBBY_CAPACITY),
+	10,
+);
+const ROUND_WINDOW_MS = parseInt(
+	process.env.ROUND_WINDOW_MS || String(24 * 60 * 60 * 1000),
+	10,
+);
+const TOURNAMENT_ID = process.env.TOURNAMENT_ID || 'boxyrun-alpha-1';
+
+const tournament = new Tournament({
+	id: TOURNAMENT_ID,
+	capacity: LOBBY_CAPACITY,
+	minPlayers: MIN_PLAYERS,
+	roundWindowMs: ROUND_WINDOW_MS,
+});
 
 /**
- * For v0 MVP we run a single hardcoded tournament. Real deployment
- * would create tournaments dynamically (from the operator dashboard
- * or an on-chain trigger) and route connections to them by tournament
- * id.
+ * Two-way map: WebSocket ↔ nametag. Used to deliver messages to
+ * specific players by their in-game identity.
  */
-const TOURNAMENT_ID = 'boxyrun-alpha-1';
-
-interface PlayerSession {
-	readonly ws: WebSocket;
-	readonly identity: PublicIdentity;
-	readonly joinedAt: number;
-	readonly tournamentId: string;
-}
-
-const sessions = new Map<WebSocket, PlayerSession>();
+const socketToNametag = new Map<WebSocket, string>();
+const nametagToSocket = new Map<string, WebSocket>();
 
 const wss = new WebSocketServer({ port: PORT });
 
 console.log(`[server] listening on ws://localhost:${PORT}`);
-console.log(`[server] tournament id: ${TOURNAMENT_ID}, capacity: ${LOBBY_CAPACITY}`);
+console.log(
+	`[server] tournament=${TOURNAMENT_ID} capacity=${LOBBY_CAPACITY} minPlayers=${MIN_PLAYERS}`,
+);
 
 wss.on('connection', (ws, req) => {
 	const addr = req.socket.remoteAddress ?? 'unknown';
@@ -92,11 +90,13 @@ wss.on('connection', (ws, req) => {
 	});
 
 	ws.on('close', () => {
-		const session = sessions.get(ws);
-		if (session) {
-			console.log(`[server] ${session.identity.nametag} disconnected`);
-			sessions.delete(ws);
-			broadcastLobbyState();
+		const nametag = socketToNametag.get(ws);
+		if (nametag) {
+			console.log(`[server] ${nametag} disconnected`);
+			socketToNametag.delete(ws);
+			nametagToSocket.delete(nametag);
+			const deliveries = tournament.removePlayer(nametag);
+			deliver(deliveries);
 		} else {
 			console.log(`[server] connection from ${addr} closed (pre-join)`);
 		}
@@ -107,71 +107,66 @@ wss.on('connection', (ws, req) => {
 	});
 });
 
-function handleJoin(ws: WebSocket, msg: JoinMessage): void {
-	// TODO: verify signature over (tournamentId|entry.txHash) using identity.pubkey
-	// TODO: verify entry.txHash against the Unicity chain (amount, recipient, not replayed)
-	// For MVP we accept any well-formed join.
-
+function handleJoin(ws: WebSocket, msg: ClientMessage & { type: 'join' }): void {
+	// TODO: verify signature over (tournamentId|entry.txHash)
+	// TODO: verify entry.txHash against the Unicity chain
 	if (msg.tournamentId !== TOURNAMENT_ID) {
-		sendError(
-			ws,
-			'unknown_tournament',
-			`no such tournament: ${msg.tournamentId}`,
-		);
+		sendError(ws, 'unknown_tournament', `no such tournament: ${msg.tournamentId}`);
 		return;
 	}
-
-	if (sessions.has(ws)) {
+	if (socketToNametag.has(ws)) {
 		sendError(ws, 'already_joined', 'this connection has already joined');
 		return;
 	}
 
-	if (sessions.size >= LOBBY_CAPACITY) {
-		sendError(ws, 'lobby_full', 'tournament is full');
+	// Optimistically bind this socket to the nametag BEFORE calling
+	// addPlayer so that if addPlayer's broadcasts go out before we
+	// return from this function, the sender is already routable.
+	const nametag = msg.identity.nametag;
+	const deliveries = tournament.addPlayer(msg.identity);
+
+	// If the first delivery is an error addressed to this player, the
+	// join was rejected; don't register the socket mapping.
+	const firstMsg = deliveries[0];
+	if (
+		firstMsg &&
+		firstMsg.to === nametag &&
+		firstMsg.message.type === 'error'
+	) {
+		ws.send(JSON.stringify(firstMsg.message));
 		return;
 	}
 
-	for (const existing of sessions.values()) {
-		if (existing.identity.nametag === msg.identity.nametag) {
-			sendError(
-				ws,
-				'duplicate_nametag',
-				`${msg.identity.nametag} is already in the lobby`,
-			);
-			return;
-		}
-	}
-
-	const session: PlayerSession = {
-		ws,
-		identity: msg.identity,
-		joinedAt: Date.now(),
-		tournamentId: msg.tournamentId,
-	};
-	sessions.set(ws, session);
+	socketToNametag.set(ws, nametag);
+	nametagToSocket.set(nametag, ws);
 	console.log(
-		`[server] ${msg.identity.nametag} joined (${sessions.size}/${LOBBY_CAPACITY})`,
+		`[server] ${nametag} joined (${tournament.getPlayerCount()}/${LOBBY_CAPACITY})`,
 	);
 
-	broadcastLobbyState();
+	deliver(deliveries);
 }
 
-function broadcastLobbyState(): void {
-	const state: LobbyStateMessage = {
-		type: 'lobby-state',
-		v: PROTOCOL_VERSION,
-		tournamentId: TOURNAMENT_ID,
-		players: Array.from(sessions.values()).map((s) => ({
-			nametag: s.identity.nametag,
-			joinedAt: s.joinedAt,
-		})),
-		capacity: LOBBY_CAPACITY,
-		startsAt: null,
-	};
-	const encoded = JSON.stringify(state);
-	for (const session of sessions.values()) {
-		if (session.ws.readyState === WebSocket.OPEN) {
-			session.ws.send(encoded);
+/**
+ * Route a batch of deliveries from the Tournament class to the right
+ * WebSockets. A `to` of '*' broadcasts to every currently-connected
+ * player. Unknown nametags are silently dropped (the player may have
+ * disconnected between state computation and delivery).
+ */
+function deliver(deliveries: Delivery[]): void {
+	for (const d of deliveries) {
+		const encoded = JSON.stringify(d.message);
+		if (d.to === '*') {
+			for (const socket of nametagToSocket.values()) {
+				if (socket.readyState === WebSocket.OPEN) {
+					socket.send(encoded);
+				}
+			}
+			continue;
+		}
+		const socket = nametagToSocket.get(d.to);
+		if (!socket) continue;
+		if (socket.readyState === WebSocket.OPEN) {
+			socket.send(encoded);
 		}
 	}
 }
@@ -188,11 +183,10 @@ function sendError(ws: WebSocket, code: string, message: string): void {
 	}
 }
 
-// Graceful shutdown on SIGINT so Ctrl+C doesn't leave the port occupied.
 process.on('SIGINT', () => {
 	console.log('\n[server] shutting down');
-	for (const session of sessions.values()) {
-		session.ws.close(1001, 'server shutting down');
+	for (const socket of nametagToSocket.values()) {
+		socket.close(1001, 'server shutting down');
 	}
 	wss.close(() => process.exit(0));
 });

@@ -28,19 +28,35 @@ const SERVER_BUNDLE = join(REPO_ROOT, 'dist', 'server.js');
  * to allow parallel test runs.
  */
 let nextPort = 7200;
-export async function startServer(options: { capacity?: number } = {}): Promise<{
+export async function startServer(
+	options: {
+		capacity?: number;
+		minPlayers?: number;
+		roundWindowMs?: number;
+		tournamentId?: string;
+	} = {},
+): Promise<{
 	proc: ChildProcess;
 	url: string;
 	port: number;
 }> {
 	const port = nextPort++;
-	const env = {
+	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		PORT: String(port),
-		...(options.capacity !== undefined
-			? { LOBBY_CAPACITY: String(options.capacity) }
-			: {}),
 	};
+	if (options.capacity !== undefined) {
+		env.LOBBY_CAPACITY = String(options.capacity);
+	}
+	if (options.minPlayers !== undefined) {
+		env.MIN_PLAYERS = String(options.minPlayers);
+	}
+	if (options.roundWindowMs !== undefined) {
+		env.ROUND_WINDOW_MS = String(options.roundWindowMs);
+	}
+	if (options.tournamentId !== undefined) {
+		env.TOURNAMENT_ID = options.tournamentId;
+	}
 	const proc = spawn('node', [SERVER_BUNDLE], {
 		env,
 		stdio: ['ignore', 'pipe', 'pipe'],
