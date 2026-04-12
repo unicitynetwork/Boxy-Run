@@ -1263,15 +1263,26 @@ function renderBracket(msg) {
 
 // ── Button handlers ────────────────────────────────────────────
 document.getElementById('btn-challenge').addEventListener('click', () => {
+  // Auto-register if not yet joined
   if (!registered) {
-    const cs = document.getElementById('challenge-status');
-    cs.style.display = 'block';
-    cs.style.color = 'var(--magenta)';
-    cs.textContent = 'Enter your nametag first (use dev input or connect wallet)';
+    const nameInput = document.getElementById('player-name').value.trim();
+    if (!nameInput) {
+      document.getElementById('player-name').focus();
+      document.getElementById('challenge-status').style.display = 'block';
+      document.getElementById('challenge-status').style.color = 'var(--magenta)';
+      document.getElementById('challenge-status').textContent = 'Enter your @nametag above first';
+      return;
+    }
+    document.getElementById('btn-join-lobby').click();
+    // Wait for registration then retry
+    setTimeout(() => document.getElementById('btn-challenge').click(), 500);
     return;
   }
   const opponent = document.getElementById('challenge-opponent').value.trim();
-  if (!opponent) return;
+  if (!opponent) {
+    document.getElementById('challenge-opponent').focus();
+    return;
+  }
   const tag = opponent.startsWith('@') ? opponent : '@' + opponent;
   send({ type: 'challenge', v: 0, opponent: tag, wager: 0 });
   document.getElementById('challenge-status').style.display = 'block';
@@ -1280,6 +1291,13 @@ document.getElementById('btn-challenge').addEventListener('click', () => {
 });
 
 document.getElementById('btn-queue').addEventListener('click', () => {
+  if (!registered) {
+    const nameInput = document.getElementById('player-name').value.trim();
+    if (!nameInput) { document.getElementById('player-name').focus(); return; }
+    document.getElementById('btn-join-lobby').click();
+    setTimeout(() => document.getElementById('btn-queue').click(), 500);
+    return;
+  }
   send({ type: 'queue-join', v: 0 });
   inQueue = true;
   document.getElementById('btn-queue').style.display = 'none';

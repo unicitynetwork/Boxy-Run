@@ -485,6 +485,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 				// Notify when opponent dies (match continues — survivor keeps running)
 				if (opponentState?.gameOver && !opponentDeathNotified) {
 					opponentDeathNotified = true;
+					// Hide opponent character from the scene
+					if (render.opponent) render.opponent.root.visible = false;
 					showDeathBanner(
 						'OPPONENT DOWN',
 						`Their final score: ${opponentState.score}. Keep running to beat it!`,
@@ -638,33 +640,32 @@ function showDeathBanner(title: string, subtitle: string): void {
 	removeDeathBanner();
 	deathBannerEl = document.createElement('div');
 	deathBannerEl.style.cssText =
-		'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:150;' +
-		'background:rgba(0,0,0,0.8);color:#fff;' +
-		'padding:24px 40px;border-radius:8px;text-align:center;' +
+		'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:150;' +
+		'background:rgba(0,0,0,0.5);color:#fff;opacity:0.8;' +
+		'padding:12px 24px;border-radius:8px;text-align:center;' +
 		'font-family:monospace;pointer-events:none;' +
-		'border:1px solid rgba(255,255,255,0.15);' +
-		'animation:fadeInBanner 0.3s ease;';
+		'border:1px solid rgba(255,255,255,0.1);' +
+		'animation:fadeInBanner 0.3s ease;backdrop-filter:blur(4px);';
 	deathBannerEl.innerHTML =
-		`<div style="font-size:20px;font-weight:bold;margin-bottom:8px;letter-spacing:0.1em">${title}</div>` +
-		`<div style="font-size:13px;color:#94a3b8">${subtitle}</div>`;
+		`<span style="font-size:14px;font-weight:bold;letter-spacing:0.1em">${title}</span>` +
+		`<span style="font-size:12px;color:#94a3b8;margin-left:12px">${subtitle}</span>`;
 
-	// Add the animation keyframe if not already present
 	if (!document.getElementById('death-banner-style')) {
 		const style = document.createElement('style');
 		style.id = 'death-banner-style';
-		style.textContent = '@keyframes fadeInBanner{from{opacity:0;transform:translate(-50%,-50%) scale(0.95)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}';
+		style.textContent = '@keyframes fadeInBanner{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:0.8;transform:translateX(-50%) translateY(0)}}';
 		document.head.appendChild(style);
 	}
 
 	document.body.appendChild(deathBannerEl);
 
-	// Auto-fade after 3 seconds so it doesn't block the view permanently
+	// Fade further after 2 seconds
 	setTimeout(() => {
 		if (deathBannerEl) {
 			deathBannerEl.style.transition = 'opacity 0.5s';
-			deathBannerEl.style.opacity = '0.4';
+			deathBannerEl.style.opacity = '0.3';
 		}
-	}, 3000);
+	}, 2000);
 }
 
 function removeDeathBanner(): void {
