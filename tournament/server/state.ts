@@ -68,6 +68,8 @@ export interface MatchState {
 	/** Input trace stored per side for post-match verification. */
 	inputsA: Array<{ tick: number; payload: string }>;
 	inputsB: Array<{ tick: number; payload: string }>;
+	/** When the match entered READY_WAIT (for forfeit timeout). */
+	readyWaitStartedAt: number;
 	/** Result hashes submitted by each side, null until received. */
 	resultA: { finalTick: number; score: Record<string, number>; winner: string; inputsHash: string; resultHash: string } | null;
 	resultB: { finalTick: number; score: Record<string, number>; winner: string; inputsHash: string; resultHash: string } | null;
@@ -548,6 +550,7 @@ export class Tournament {
 					inputsB: [],
 					resultA: null,
 					resultB: null,
+					readyWaitStartedAt: Date.now(),
 				});
 			}
 		}
@@ -664,6 +667,126 @@ export class Tournament {
 			deliveries.push({ to: match.playerA, message: toA });
 			deliveries.push({ to: match.playerB, message: toB });
 		}
+		return deliveries;
+	}
+
+	// ── timeouts ─────────────────────────────────────────────────────
+
+	/** Ready-wait timeout in ms. If both players don't ready within this window, forfeit. */
+	static readonly READY_TIMEOUT_MS = 60_000; // 60 seconds
+	/** Result timeout in ms. If both results don't arrive within this window after the first, forfeit. */
+	static readonly RESULT_TIMEOUT_MS = 30_000; // 30 seconds
+
+	/**
+	 * Check for timed-out matches. Called periodically by the server.
+	 * Returns deliveries for any matches that were force-resolved.
+	 */
+	checkTimeouts(): Delivery[] {
+		if (this.phase !== 'RUNNING') return [];
+		const now = Date.now();
+		const deliveries: Delivery[] = [];
+
+		for (const match of this.matches.values()) {
+			// ── Ready-wait timeout: forfeit the player who didn't ready ──
+			if (match.phase === 'READY_WAIT') {
+				const elapsed = now - match.readyWaitStartedAt;
+				if (elapsed > Tournament.READY_TIMEOUT_MS) {
+					if (match.readyA && !match.readyB) {
+						// B didn't ready — A wins by forfeit
+						deliveries.push(...this.forfeitMatch(match, match.playerA!, 'forfeit'));
+					} else if (!match.readyA && match.readyB) {
+						// A didn't ready — B wins by forfeit
+						deliveries.push(...this.forfeitMatch(match, match.playerB!, 'forfeit'));
+					} else {
+						// Neither readied — dual forfeit
+						deliveries.push(...this.forfeitMatch(match, '', 'dual-forfeit'));
+					}
+				}
+			}
+
+			// ── Result timeout: one player submitted, the other didn't ──
+			if (match.phase === 'AWAIT_HASHES') {
+				const firstResult = match.resultA || match.resultB;
+				if (firstResult) {
+					// Check time since the match started (we use startedAt as a proxy)
+					const matchDuration = now - (match.startedAt ?? now);
+					if (matchDuration > Tournament.RESULT_TIMEOUT_MS + 600_000) {
+						// 10 min match + 30s grace — way past any reasonable match
+						if (match.resultA && !match.resultB) {
+							deliveries.push(...this.forfeitResolve(match, 'A'));
+						} else if (!match.resultA && match.resultB) {
+							deliveries.push(...this.forfeitResolve(match, 'B'));
+						}
+					}
+				}
+			}
+		}
+
+		return deliveries;
+	}
+
+	/**
+	 * Force-resolve a match via forfeit. The winner advances.
+	 */
+	private forfeitMatch(match: MatchState, winnerNametag: string, reason: 'forfeit' | 'dual-forfeit'): Delivery[] {
+		match.phase = 'RESOLVED';
+		match.winner = winnerNametag || null;
+
+		const endMsg: MatchEndMessage = {
+			type: 'match-end', v: PROTOCOL_VERSION,
+			matchId: match.matchId,
+			winner: winnerNametag,
+			reason,
+			scores: {},
+		};
+		const deliveries: Delivery[] = [];
+		if (match.playerA) deliveries.push({ to: match.playerA, message: endMsg });
+		if (match.playerB) deliveries.push({ to: match.playerB, message: endMsg });
+
+		if (winnerNametag) {
+			this.advanceWinner(match.roundIndex, match.slotIndex, winnerNametag);
+		}
+
+		deliveries.push(...this.checkRoundComplete(match.roundIndex));
+		return deliveries;
+	}
+
+	/**
+	 * Resolve a match where only one player submitted a result.
+	 * Run the server replay for the player who submitted, give 0
+	 * to the absent player.
+	 */
+	private forfeitResolve(match: MatchState, submittedSide: 'A' | 'B'): Delivery[] {
+		const seed = parseInt(match.seed ?? '0', 16) >>> 0;
+		const config = DEFAULT_CONFIG;
+		const inputs = submittedSide === 'A' ? match.inputsA : match.inputsB;
+		const score = this.replaySim(seed, inputs, config);
+
+		const winnerNametag = submittedSide === 'A' ? match.playerA! : match.playerB!;
+		const loserNametag = submittedSide === 'A' ? match.playerB! : match.playerA!;
+
+		match.phase = 'RESOLVED';
+		match.winner = winnerNametag;
+
+		const scores: Record<string, number> = {};
+		scores[winnerNametag] = score;
+		scores[loserNametag] = 0;
+
+		console.log(`[match] ${match.matchId}: forfeit-resolve, ${winnerNametag} wins with ${score}`);
+
+		const endMsg: MatchEndMessage = {
+			type: 'match-end', v: PROTOCOL_VERSION,
+			matchId: match.matchId,
+			winner: winnerNametag,
+			reason: 'forfeit',
+			scores,
+		};
+		const deliveries: Delivery[] = [];
+		if (match.playerA) deliveries.push({ to: match.playerA, message: endMsg });
+		if (match.playerB) deliveries.push({ to: match.playerB, message: endMsg });
+
+		this.advanceWinner(match.roundIndex, match.slotIndex, winnerNametag);
+		deliveries.push(...this.checkRoundComplete(match.roundIndex));
 		return deliveries;
 	}
 

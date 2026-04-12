@@ -409,11 +409,39 @@ export class TournamentManager {
 	 * This exists because setTimeout callbacks can't return deliveries
 	 * through the normal flow.
 	 */
+	/** Challenge timeout in ms. */
+	static readonly CHALLENGE_TIMEOUT_MS = 30_000;
+
 	tick(): ManagerDelivery[] {
+		const deliveries: ManagerDelivery[] = [];
+
+		// Queue countdown
 		if (this.queueStartsAt && Date.now() >= this.queueStartsAt) {
-			return this.fireQueue();
+			deliveries.push(...this.fireQueue());
 		}
-		return [];
+
+		// Expire stale challenges
+		const now = Date.now();
+		for (const [id, ch] of this.challenges) {
+			if (now - ch.createdAt > TournamentManager.CHALLENGE_TIMEOUT_MS) {
+				this.challenges.delete(id);
+				deliveries.push({
+					to: ch.from,
+					message: { type: 'error', v: V, code: 'challenge_expired', message: `Challenge to ${ch.to} expired` },
+				});
+			}
+		}
+
+		// Check tournament timeouts (ready-wait, result)
+		for (const t of this.tournaments.values()) {
+			const tDeliveries = t.checkTimeouts();
+			deliveries.push(...tDeliveries.map(asMD));
+		}
+
+		// Clean up done tournaments
+		this.cleanupDone();
+
+		return deliveries;
 	}
 
 	private broadcastQueueState(): ManagerDelivery[] {
