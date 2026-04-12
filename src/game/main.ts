@@ -890,7 +890,8 @@ function rematchButton(): string {
 }
 
 function backToArenaLink(): string {
-	return `<a href="tournament.html" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO ARENA</a>`;
+	const tab = lastTournamentType === 'rolling' ? '#quickmatch' : '';
+	return `<a href="tournament.html${tab}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO ARENA</a>`;
 }
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */

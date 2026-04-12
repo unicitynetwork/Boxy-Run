@@ -1094,14 +1094,24 @@ document.getElementById('player-name').addEventListener('keydown', (e) => {
 
 
 // ── Tab switching ──────────────────────────────────────────────
+function activateTab(tabName) {
+  document.querySelectorAll('.lobby-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.lobby-panel').forEach(p => p.style.display = 'none');
+  const tab = document.querySelector(`.lobby-tab[data-tab="${tabName}"]`);
+  if (tab) { tab.classList.add('active'); }
+  const panel = document.getElementById('tab-' + tabName);
+  if (panel) { panel.style.display = ''; }
+}
+
 document.querySelectorAll('.lobby-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.lobby-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.lobby-panel').forEach(p => p.style.display = 'none');
-    tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).style.display = '';
-  });
+  tab.addEventListener('click', () => activateTab(tab.dataset.tab));
 });
+
+// Activate tab from URL hash (e.g. #quickmatch)
+const hashTab = location.hash.replace('#', '');
+if (hashTab && document.getElementById('tab-' + hashTab)) {
+  activateTab(hashTab);
+}
 
 // ── WebSocket connection + lobby state ─────────────────────────
 let ws = null;
