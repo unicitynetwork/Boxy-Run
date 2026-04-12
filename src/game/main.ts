@@ -255,16 +255,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onRegistered: (msg) => {
 			console.log('Registered. Online players:', msg.onlinePlayers);
-			// Quick check: if we registered but don't get a tournament
-			// assignment within 500ms, the old match is gone.
-			setTimeout(() => {
-				if (!matchId && !matchActive) {
-					showOverlay(
-						`Match ended.<br><br>` +
-						rematchButton() + backToArenaLink(),
-					);
-				}
-			}, 500);
+			showOverlay('Waiting for match...');
 		},
 
 		onChallengeReceived: (msg) => {
@@ -276,6 +267,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onTournamentAssigned: (msg) => {
 			console.log(`Assigned to tournament ${msg.tournamentId} (${msg.tournamentType})`);
+			showOverlay('Tournament found! Waiting for bracket...');
 		},
 
 		onQueueState: (msg) => {
