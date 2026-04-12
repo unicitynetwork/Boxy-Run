@@ -388,19 +388,25 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onTournamentEnd: (msg) => {
 			console.log('Tournament end:', msg);
+			// Don't overwrite the both-dead result screen if it's already
+			// showing — it has the actual scores. Only show tournament-end
+			// if we don't already have a result displayed.
+			if (resultSubmitted) return;
+
 			let resultText = '';
 			if (msg.standings && msg.standings.length > 0) {
 				const champion = msg.standings[0]?.nametag || '?';
 				const isMe = champion === name;
 				resultText = isMe
-					? '<div style="font-size:24px;font-weight:bold;color:#FFD700;margin-bottom:12px">YOU ARE THE CHAMPION!</div>'
-					: `<div style="font-size:20px;font-weight:bold;margin-bottom:12px">Winner: ${champion}</div>`;
+					? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:12px">YOU WIN!</div>'
+					: `<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:12px">Winner: ${champion}</div>`;
 				resultText += msg.standings
 					.map((s) => `<div style="margin:4px 0">#${s.place} ${s.nametag}</div>`)
 					.join('');
+			} else {
+				resultText = '<div style="font-size:18px;margin-bottom:12px">Match complete</div>';
 			}
 			showOverlay(
-				`<div style="font-size:14px;opacity:0.6;margin-bottom:8px">TOURNAMENT COMPLETE</div>` +
 				resultText + '<br>' +
 				rematchButton() + backToArenaLink(),
 			);
