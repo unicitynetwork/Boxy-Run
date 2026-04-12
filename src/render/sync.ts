@@ -11,9 +11,9 @@ import type { GameConfig, GameState } from '../sim/state';
 import {
 	createCharacterMesh,
 	syncCharacterMesh,
-	type CharacterColors,
 	type CharacterMesh,
 } from './character-mesh';
+import { Colors } from './colors';
 import {
 	createCoinMeshPool,
 	syncCoinMeshes,
@@ -44,9 +44,16 @@ export interface RenderState {
 export function createRenderState(
 	scene: SceneHandle,
 	playerSkin: CharacterSkin = SKINS[0],
+	tournament = false,
 ): RenderState {
+	const shirtHex = '#' + (playerSkin.colors.shirt ?? Colors.yellow).toString(16).padStart(6, '0');
 	return {
-		character: createCharacterMesh(scene.scene, playerSkin.colors),
+		character: createCharacterMesh(
+			scene.scene,
+			playerSkin.colors,
+			tournament ? 'YOU' : undefined,
+			tournament ? shirtHex : undefined,
+		),
 		trees: createTreeMeshPool(scene.scene),
 		coins: createCoinMeshPool(scene.scene),
 		opponent: null,
@@ -56,12 +63,14 @@ export function createRenderState(
 
 /**
  * Add an opponent character mesh to the scene. The opponent's skin
- * auto-contrasts with the player's selection.
+ * auto-contrasts with the player's selection. Labeled "OPP" in
+ * the opponent's shirt color.
  */
 export function addOpponentMesh(render: RenderState, scene: SceneHandle): void {
 	if (render.opponent) return;
 	const oppSkin = getOpponentSkin(render.playerSkin);
-	render.opponent = createCharacterMesh(scene.scene, oppSkin.colors);
+	const oppShirtHex = '#' + (oppSkin.colors.shirt ?? Colors.cherry).toString(16).padStart(6, '0');
+	render.opponent = createCharacterMesh(scene.scene, oppSkin.colors, 'OPP', oppShirtHex);
 }
 
 /**

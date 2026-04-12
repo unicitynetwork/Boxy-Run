@@ -226,7 +226,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
-	const render = createRenderState(scene, skin);
+	const render = createRenderState(scene, skin, true);
 
 	// Start with a placeholder sim so the world renders while we wait
 	let myState: GameState = makeInitialState(0, config);

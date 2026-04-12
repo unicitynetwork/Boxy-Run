@@ -32,6 +32,7 @@ export interface CharacterMesh {
 	rightLeg: any;
 	leftLowerLeg: any;
 	rightLowerLeg: any;
+	label: any | null;
 }
 
 /** Internal helper: create a box mesh with the given dimensions and color. */
@@ -97,9 +98,47 @@ export interface CharacterColors {
 	shorts?: number;
 }
 
+/**
+ * Create a floating text sprite to display above a character's head.
+ * Uses a canvas texture so it renders as a 3D billboard that always
+ * faces the camera.
+ */
+function createTextLabel(text: string, color: string): any {
+	const canvas = document.createElement('canvas');
+	const size = 256;
+	canvas.width = size;
+	canvas.height = 64;
+	const ctx = canvas.getContext('2d')!;
+
+	ctx.clearRect(0, 0, size, 64);
+	ctx.font = 'bold 36px monospace';
+	ctx.textAlign = 'center';
+	ctx.textBaseline = 'middle';
+	// Outline for readability against any background
+	ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+	ctx.lineWidth = 5;
+	ctx.strokeText(text, size / 2, 32);
+	ctx.fillStyle = color;
+	ctx.fillText(text, size / 2, 32);
+
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.needsUpdate = true;
+	const material = new THREE.SpriteMaterial({
+		map: texture,
+		transparent: true,
+		depthTest: false,
+	});
+	const sprite = new THREE.Sprite(material);
+	sprite.scale.set(600, 150, 1);
+	sprite.position.set(0, 500, 0); // above the head
+	return sprite;
+}
+
 export function createCharacterMesh(
 	scene: any,
 	colorOverrides?: CharacterColors,
+	label?: string,
+	labelColor?: string,
 ): CharacterMesh {
 	const skin = colorOverrides?.skin ?? Colors.brown;
 	const hair = colorOverrides?.hair ?? Colors.black;
@@ -138,6 +177,12 @@ export function createCharacterMesh(
 	root.add(leftLeg);
 	root.add(rightLeg);
 
+	let labelSprite: any = null;
+	if (label) {
+		labelSprite = createTextLabel(label, labelColor ?? '#ffffff');
+		root.add(labelSprite);
+	}
+
 	scene.add(root);
 
 	return {
@@ -152,6 +197,7 @@ export function createCharacterMesh(
 		rightLeg,
 		leftLowerLeg,
 		rightLowerLeg,
+		label: labelSprite,
 	};
 }
 
