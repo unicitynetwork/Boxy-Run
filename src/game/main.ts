@@ -261,10 +261,15 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		},
 
 		onChallengeReceived: (msg) => {
-			// Auto-accept challenges (including rematches)
 			console.log(`Challenge from ${msg.from}, wager: ${msg.wager}`);
-			client.acceptChallenge(msg.challengeId);
-			showOverlay(`Challenge accepted from ${msg.from}!<br>Starting match...`);
+			// Show accept/decline UI instead of auto-accepting.
+			// This prevents the case where one player clicks REMATCH
+			// while the other is navigating away.
+			showOverlay(
+				`<div style="font-size:18px;font-weight:bold;margin-bottom:12px">${msg.from} wants a rematch!</div>` +
+				`<button onclick="window.__acceptChallenge('${msg.challengeId}')" style="${BTN_STYLE}font-size:14px;background:#2d6a4f;border-color:#2d6a4f">ACCEPT</button>` +
+				`<button onclick="window.__declineChallenge('${msg.challengeId}')" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">DECLINE</button>`,
+			);
 		},
 
 		onTournamentAssigned: (msg) => {
@@ -627,6 +632,18 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		requestAnimationFrame(loop);
 	}
+
+	// Accept/decline rematch challenges
+	(window as any).__acceptChallenge = (challengeId: string) => {
+		client.acceptChallenge(challengeId);
+		showOverlay('Challenge accepted! Starting match...');
+	};
+	(window as any).__declineChallenge = (challengeId: string) => {
+		client.declineChallenge(challengeId);
+		showOverlay(
+			`Challenge declined.<br><br>` + backToArenaLink(),
+		);
+	};
 
 	// Ready up for a match
 	(window as any).__ready = () => {
