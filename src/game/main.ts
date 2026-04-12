@@ -396,10 +396,18 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onError: (msg) => {
 			console.error('Tournament error:', msg);
-			showOverlay(
-				`Error: ${msg.message}<br><br>` +
-				rematchButton() + backToArenaLink(),
-			);
+			// Suppress non-critical errors during gameplay (match_not_active
+			// happens after match ends while inputs are still being sent)
+			if (matchActive && (msg.code === 'match_not_active' || msg.code === 'match_not_active')) {
+				return;
+			}
+			// Only show error in overlay if we're not in a match
+			if (!matchActive) {
+				showOverlay(
+					`Error: ${msg.message}<br><br>` +
+					rematchButton() + backToArenaLink(),
+				);
+			}
 		},
 	});
 
@@ -451,7 +459,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		const action = keyToAction(key);
 		if (action) {
 			myState.character.queuedActions.push(action);
-			if (matchId) {
+			if (matchId && !resultSubmitted) {
 				client.sendInput(matchId, myState.tick, btoa(action));
 			}
 		}
@@ -462,7 +470,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		onAction: (a) => {
 			if (matchActive && !matchOver) {
 				myState.character.queuedActions.push(a);
-				if (matchId) client.sendInput(matchId, myState.tick, btoa(a));
+				if (matchId && !resultSubmitted) client.sendInput(matchId, myState.tick, btoa(a));
 			}
 		},
 		onStart: () => {
