@@ -1308,11 +1308,10 @@ document.getElementById('btn-challenge').addEventListener('click', () => {
     document.getElementById('challenge-opponent').focus();
     return;
   }
-  const tag = opponent.startsWith('@') ? opponent : '@' + opponent;
-  send({ type: 'challenge', v: 0, opponent: tag, wager: 0 });
+  send({ type: 'challenge', v: 0, opponent: opponent, wager: 0 });
   document.getElementById('challenge-status').style.display = 'block';
   document.getElementById('challenge-status').style.color = 'var(--text-dim)';
-  document.getElementById('challenge-status').textContent = `Sending challenge to ${tag}...`;
+  document.getElementById('challenge-status').textContent = `Sending challenge to ${opponent}...`;
 });
 
 document.getElementById('btn-queue').addEventListener('click', () => {
