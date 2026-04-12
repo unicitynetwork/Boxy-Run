@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tournament Dev Client</title>
+<style>
+  body { font-family: monospace; margin: 20px; max-width: 800px; }
+  .controls { margin-bottom: 10px; }
+  .controls button { margin: 2px; padding: 5px 10px; }
+  input { padding: 4px; }
+  #log { background: #111; color: #0f0; padding: 10px; height: 500px;
+         overflow-y: auto; font-size: 13px; white-space: pre-wrap; }
+  .sent { color: #f90; }
+  .recv { color: #0f0; }
+  .info { color: #999; }
+  .err { color: #f44; }
+</style>
+</head>
+<body>
+<h2>Tournament Dev Client</h2>
+<div class="controls">
+  <label>Server: <input id="url" value="ws://localhost:7101" size="30"></label>
+  <label>Nametag: <input id="nametag" value="@alice" size="15"></label>
+  <button id="btn-connect">Connect</button>
+  <button id="btn-disconnect" disabled>Disconnect</button>
+</div>
+<div class="controls">
+  <button id="btn-join" disabled>Join</button>
+  <button id="btn-ready" disabled>Ready</button>
+  <button id="btn-unready" disabled>Unready</button>
+  <button id="btn-send-input" disabled>Send Input (tick=1, 'up')</button>
+  <button id="btn-send-result" disabled>Send Fake Result</button>
+</div>
+<div class="controls">
+  <label>Match ID: <input id="match-id" value="" size="15" placeholder="auto-filled"></label>
+</div>
+<div id="log"></div>
+
+<script>
+let ws = null;
+const $ = id => document.getElementById(id);
+
+function log(cls, text) {
+  const el = $('log');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = new Date().toISOString().substring(11,23) + ' ' + text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function send(msg) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { log('err', 'not connected'); return; }
+  const str = JSON.stringify(msg);
+  ws.send(str);
+  log('sent', '→ ' + str);
+}
+
+$('btn-connect').onclick = () => {
+  if (ws) ws.close();
+  ws = new WebSocket($('url').value);
+  ws.onopen = () => {
+    log('info', 'connected');
+    $('btn-connect').disabled = true;
+    $('btn-disconnect').disabled = false;
+    $('btn-join').disabled = false;
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    log('recv', '← ' + JSON.stringify(msg, null, 0));
+    // Auto-fill matchId from round-open
+    if (msg.type === 'round-open') {
+      $('match-id').value = msg.matchId;
+      $('btn-ready').disabled = false;
+      $('btn-unready').disabled = false;
+      $('btn-send-input').disabled = false;
+      $('btn-send-result').disabled = false;
+    }
+  };
+  ws.onclose = () => {
+    log('info', 'disconnected');
+    $('btn-connect').disabled = false;
+    $('btn-disconnect').disabled = true;
+    $('btn-join').disabled = true;
+    ws = null;
+  };
+  ws.onerror = (e) => log('err', 'error: ' + e);
+};
+
+$('btn-disconnect').onclick = () => { if (ws) ws.close(); };
+
+$('btn-join').onclick = () => {
+  send({
+    type: 'join', v: 0,
+    tournamentId: 'boxyrun-alpha-1',
+    identity: { nametag: $('nametag').value, pubkey: '00'.repeat(32) },
+    entry: { txHash: 'stub', amount: '10', coinId: 'stub' },
+    signature: 'stub',
+  });
+};
+
+$('btn-ready').onclick = () => {
+  send({ type: 'match-ready', v: 0, matchId: $('match-id').value });
+};
+
+$('btn-unready').onclick = () => {
+  send({ type: 'match-unready', v: 0, matchId: $('match-id').value });
+};
+
+$('btn-send-input').onclick = () => {
+  send({ type: 'input', v: 0, matchId: $('match-id').value, tick: 1, payload: 'dXA=' });
+};
+
+$('btn-send-result').onclick = () => {
+  send({
+    type: 'result', v: 0,
+    matchId: $('match-id').value,
+    finalTick: 500,
+    score: { A: 8000, B: 4000 },
+    winner: 'A',
+    inputsHash: 'test-hash',
+    resultHash: 'test-result-hash',
+  });
+};
+</script>
+</body>
+</html>
