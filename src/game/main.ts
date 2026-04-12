@@ -20,7 +20,14 @@ import {
 	renderFrame,
 	type SceneHandle,
 } from '../render/scene';
-import { createRenderState, syncRender, type RenderState } from '../render/sync';
+import {
+	addOpponentMesh,
+	createRenderState,
+	removeOpponentMesh,
+	syncOpponent,
+	syncRender,
+	type RenderState,
+} from '../render/sync';
 import { makeInitialState } from '../sim/init';
 import {
 	DEFAULT_CONFIG,
@@ -210,8 +217,10 @@ function startTournamentMode(params: URLSearchParams) {
 			lastFrameTime = performance.now();
 			tickAccumulator = 0;
 
-			// Clear the old world meshes and recreate
-			// (simple approach: just let syncRender handle it)
+			// Add opponent character to the scene (cherry red shirt)
+			removeOpponentMesh(render, scene);
+			addOpponentMesh(render, scene);
+
 			hideOverlay();
 		},
 
@@ -229,6 +238,7 @@ function startTournamentMode(params: URLSearchParams) {
 
 		onMatchEnd: (msg) => {
 			console.log('Match end:', msg);
+			removeOpponentHud();
 			showOverlay(
 				`Match over! Winner: ${msg.winner}<br>Reason: ${msg.reason}`,
 			);
@@ -348,8 +358,15 @@ function startTournamentMode(params: URLSearchParams) {
 			}
 		}
 
+		// Update opponent HUD if in tournament
+		if (opponentState && matchActive) {
+			updateOpponentHud(opponentState);
+		}
+
 		// Render my sim (my character + world from my perspective)
 		syncRender(myState, render, scene, config);
+		// Render opponent character from their sim state
+		if (opponentState) syncOpponent(opponentState, render, config);
 		renderFrame(scene);
 
 		requestAnimationFrame(loop);
@@ -393,4 +410,33 @@ function hideOverlay(): void {
 	if (el) el.style.visibility = 'hidden';
 	const controls = document.getElementById('controls');
 	if (controls) controls.style.display = 'none';
+}
+
+/** Floating opponent HUD — created once, updated per frame. */
+let opponentHudEl: HTMLElement | null = null;
+
+function updateOpponentHud(oppState: GameState): void {
+	if (!opponentHudEl) {
+		opponentHudEl = document.createElement('div');
+		opponentHudEl.id = 'opponent-hud';
+		opponentHudEl.style.cssText =
+			'position:fixed;top:16px;right:16px;z-index:100;' +
+			'background:rgba(0,0,0,0.7);color:#e35d6a;' +
+			'padding:10px 16px;border-radius:6px;' +
+			'font-family:monospace;font-size:14px;' +
+			'border:1px solid rgba(227,93,106,0.3);' +
+			'pointer-events:none;';
+		document.body.appendChild(opponentHudEl);
+	}
+	const status = oppState.gameOver ? ' [DEAD]' : '';
+	opponentHudEl.innerHTML =
+		`<span style="font-size:11px;opacity:0.6">OPPONENT</span><br>` +
+		`Score: ${oppState.score}${status}`;
+}
+
+function removeOpponentHud(): void {
+	if (opponentHudEl) {
+		opponentHudEl.remove();
+		opponentHudEl = null;
+	}
 }

@@ -89,11 +89,22 @@ function createLimb(
  * Body-part dimensions, positions, and colors are copied verbatim from
  * the Character class in the original game.js.
  */
-export function createCharacterMesh(scene: any): CharacterMesh {
-	const skin = Colors.brown;
-	const hair = Colors.black;
-	const shirt = Colors.yellow;
-	const shorts = Colors.olive;
+/** Optional color overrides for creating opponent / alternate characters. */
+export interface CharacterColors {
+	skin?: number;
+	hair?: number;
+	shirt?: number;
+	shorts?: number;
+}
+
+export function createCharacterMesh(
+	scene: any,
+	colorOverrides?: CharacterColors,
+): CharacterMesh {
+	const skin = colorOverrides?.skin ?? Colors.brown;
+	const hair = colorOverrides?.hair ?? Colors.black;
+	const shirt = colorOverrides?.shirt ?? Colors.yellow;
+	const shorts = colorOverrides?.shorts ?? Colors.olive;
 
 	const face = createBox(100, 100, 60, skin, 0, 0, 0);
 	const hairBox = createBox(105, 20, 65, hair, 0, 50, 0);
