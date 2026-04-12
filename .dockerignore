@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.netlify
+local.db
+boxyrun.db
+*.db-journal
+*.db-wal

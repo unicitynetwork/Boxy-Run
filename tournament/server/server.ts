@@ -209,8 +209,8 @@ function sendError(ws: WebSocket, code: string, message: string): void {
 }
 
 // ── Start ────────────────────────────────────────────────────────
-httpServer.listen(PORT, () => {
-	console.log(`[server] listening on http://localhost:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+	console.log(`[server] listening on http://0.0.0.0:${PORT}`);
 	console.log(`[server] static files: ${STATIC_DIR}`);
 	console.log(`[server] tournament=${TOURNAMENT_ID} capacity=${LOBBY_CAPACITY} minPlayers=${MIN_PLAYERS}`);
 });
