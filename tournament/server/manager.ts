@@ -451,10 +451,18 @@ export class TournamentManager {
 			total: this.queue.length,
 			startsAt: this.queueStartsAt,
 		};
-		return this.queue.map((tag, i) => ({
-			to: tag,
-			message: { ...msg, position: i + 1 },
-		}));
+		// Send to ALL registered players so everyone sees the queue
+		// size (not just people in the queue). Queued players get
+		// their position; non-queued players get position=0.
+		const deliveries: ManagerDelivery[] = [];
+		for (const tag of this.registered.keys()) {
+			const queueIdx = this.queue.indexOf(tag);
+			deliveries.push({
+				to: tag,
+				message: { ...msg, position: queueIdx >= 0 ? queueIdx + 1 : 0 },
+			});
+		}
+		return deliveries;
 	}
 
 	// ── Tournament routing ───────────────────────────────────────
