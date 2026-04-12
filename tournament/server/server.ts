@@ -178,12 +178,18 @@ wss.on('connection', (ws, req) => {
 		const nametag = socketToNametag.get(ws);
 		if (nametag) {
 			socketToNametag.delete(ws);
-			// Only unregister if this socket is still the active one for
-			// this nametag. On page refresh, a new socket may have already
-			// replaced this one via re-registration.
+			// Only unregister if this socket is still the active one AND
+			// after a grace period (5s) to allow page redirects where
+			// the old WS closes before the new page's WS connects.
 			if (nametagToSocket.get(nametag) === ws) {
 				nametagToSocket.delete(nametag);
-				deliverManager(manager.unregister(nametag));
+				setTimeout(() => {
+					// If the player hasn't re-registered on a new socket
+					// within the grace period, unregister them.
+					if (!nametagToSocket.has(nametag)) {
+						deliverManager(manager.unregister(nametag));
+					}
+				}, 5000);
 			}
 		}
 	});

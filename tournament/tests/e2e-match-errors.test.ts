@@ -13,10 +13,13 @@ import {
 } from './harness';
 import { makePlayer } from './e2e-helpers';
 
+let matchCounter = 0;
+
 /** Helper: set up a challenge match and return both players + matchId */
 async function setupMatch(url: string) {
-	const alice = makePlayer(url, 'alice_merr');
-	const bob = makePlayer(url, 'bob_merr');
+	matchCounter++;
+	const alice = makePlayer(url, `alice_merr${matchCounter}`);
+	const bob = makePlayer(url, `bob_merr${matchCounter}`);
 
 	await alice.client.connect();
 	await bob.client.connect();
@@ -25,7 +28,7 @@ async function setupMatch(url: string) {
 	await alice.waitRegistered();
 	await bob.waitRegistered();
 
-	alice.client.challenge('bob_merr');
+	alice.client.challenge(`bob_merr${matchCounter}`);
 	const ch = await bob.waitChallengeReceived();
 	bob.client.acceptChallenge(ch.challengeId);
 
@@ -40,7 +43,7 @@ runTest('e2e: match-phase error paths', async () => {
 	try {
 		// ── 1. Ready with bad matchId ──
 		{
-			const alice = makePlayer(server.url, 'alice_bad');
+			const alice = makePlayer(server.url, `alice_bad${Date.now()}`);
 			await alice.client.connect();
 			alice.client.register();
 			await alice.waitRegistered();
