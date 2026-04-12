@@ -26,6 +26,9 @@ import {
 	type TournamentEndMessage,
 } from '../protocol/messages';
 import { generateBracket, hashString } from './bracket';
+import { makeInitialState } from '../../src/sim/init';
+import { tick as simTick } from '../../src/sim/tick';
+import { DEFAULT_CONFIG, type CharacterAction } from '../../src/sim/state';
 
 export type TournamentPhase = 'LOBBY' | 'RUNNING' | 'PAYOUT' | 'DONE';
 
@@ -323,24 +326,23 @@ export class Tournament {
 	}
 
 	/**
-	 * Resolve the match from both players' self-reported scores.
-	 * Each player reports their own score; the server determines
-	 * the winner by comparing them. Higher score wins; ties go to
-	 * side A (arbitrary but deterministic).
-	 *
-	 * This replaces the previous hash-agreement approach which
-	 * required both sims to be perfectly in sync (impossible without
-	 * rollback netcode). The server-adjudicated approach is less
-	 * trustless but actually works over real networks.
+	 * Resolve the match by replaying both players' input traces
+	 * through the headless sim. The server runs the game with each
+	 * player's recorded inputs and the shared match seed, producing
+	 * authoritative scores. No self-reporting, no hash agreement,
+	 * no cheating.
 	 */
 	private resolveMatch(match: MatchState): Delivery[] {
-		const rA = match.resultA!;
-		const rB = match.resultB!;
 		const deliveries: Delivery[] = [];
 
-		// Extract each player's self-reported score
-		const scoreA = (rA.score as Record<string, number>)['A'] || 0;
-		const scoreB = (rB.score as Record<string, number>)['B'] || 0;
+		// Replay each player's sim from the match seed
+		const seed = parseInt(match.seed ?? '0', 16) >>> 0;
+		const config = DEFAULT_CONFIG;
+
+		const scoreA = this.replaySim(seed, match.inputsA, config);
+		const scoreB = this.replaySim(seed, match.inputsB, config);
+
+		console.log(`[match] ${match.matchId}: A=${scoreA} B=${scoreB} (server replay)`);
 
 		// Higher score wins. Ties go to side A.
 		const winnerSide = scoreA >= scoreB ? 'A' : 'B';
@@ -366,6 +368,48 @@ export class Tournament {
 		// Check if the round is fully resolved
 		deliveries.push(...this.checkRoundComplete(match.roundIndex));
 		return deliveries;
+	}
+
+	/**
+	 * Replay a single player's game from seed + input trace. Returns
+	 * the final score when the character dies or the sim reaches the
+	 * time cap (36000 ticks = 10 minutes at 60Hz).
+	 */
+	private replaySim(
+		seed: number,
+		inputs: Array<{ tick: number; payload: string }>,
+		config: typeof DEFAULT_CONFIG,
+	): number {
+		const state = makeInitialState(seed, config);
+		const TIME_CAP = 36000; // 10 minutes
+
+		// Index inputs by tick for fast lookup
+		const inputsByTick = new Map<number, CharacterAction[]>();
+		for (const inp of inputs) {
+			try {
+				const action = atob(inp.payload) as CharacterAction;
+				if (action === 'up' || action === 'left' || action === 'right') {
+					if (!inputsByTick.has(inp.tick)) inputsByTick.set(inp.tick, []);
+					inputsByTick.get(inp.tick)!.push(action);
+				}
+			} catch {
+				// skip malformed
+			}
+		}
+
+		// Run the sim until death or time cap
+		while (!state.gameOver && state.tick < TIME_CAP) {
+			// Apply inputs for this tick
+			const actions = inputsByTick.get(state.tick);
+			if (actions) {
+				for (const a of actions) {
+					state.character.queuedActions.push(a);
+				}
+			}
+			simTick(state, config);
+		}
+
+		return state.score;
 	}
 
 	/**
