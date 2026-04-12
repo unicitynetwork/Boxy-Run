@@ -241,6 +241,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	let resultSubmitted = false;
 	let opponentDeathNotified = false;
 	let myDeathNotified = false;
+	/** Buffered opponent inputs keyed by tick number. */
+	const opponentInputBuffer: Map<number, CharacterAction[]> = new Map();
 
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
@@ -323,7 +325,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			opponentDeathNotified = false;
 			myDeathNotified = false;
 
-			// Add opponent character to the scene
+			// Clear opponent input buffer and add opponent to scene
+			opponentInputBuffer.clear();
 			removeOpponentMesh(render, scene);
 			addOpponentMesh(render, scene);
 
@@ -332,25 +335,29 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			if (opponentState) syncOpponent(opponentState, render, config);
 			renderFrame(scene);
 
-			// Countdown: 3... 2... 1... GO!
-			matchActive = false; // don't tick yet
-			let count = 3;
-			showOverlay(`<div style="font-size:64px;font-weight:bold">${count}</div>`);
-			const countdownInterval = setInterval(() => {
-				count--;
-				if (count > 0) {
-					showOverlay(`<div style="font-size:64px;font-weight:bold">${count}</div>`);
+			// Synchronized countdown using the server's startsAt timestamp.
+			// Both clients compute the same wall-clock start time, so they
+			// begin ticking within ~network-latency of each other.
+			matchActive = false;
+			const startTime = msg.startsAt;
+			const updateCountdown = () => {
+				const msLeft = startTime - Date.now();
+				if (msLeft > 1000) {
+					const secs = Math.ceil(msLeft / 1000);
+					showOverlay(`<div style="font-size:64px;font-weight:bold">${secs}</div>`);
+					setTimeout(updateCountdown, 200);
+				} else if (msLeft > 0) {
+					showOverlay(`<div style="font-size:64px;font-weight:bold">1</div>`);
+					setTimeout(updateCountdown, msLeft);
 				} else {
-					clearInterval(countdownInterval);
-					showOverlay(`<div style="font-size:64px;font-weight:bold;color:var(--cyan,#00e5ff)">GO!</div>`);
-					setTimeout(() => {
-						hideOverlay();
-						matchActive = true;
-						lastFrameTime = performance.now();
-						tickAccumulator = 0;
-					}, 500);
+					showOverlay(`<div style="font-size:64px;font-weight:bold;color:#f97316">GO!</div>`);
+					matchActive = true;
+					lastFrameTime = performance.now();
+					tickAccumulator = 0;
+					setTimeout(hideOverlay, 500);
 				}
-			}, 1000);
+			};
+			updateCountdown();
 		},
 
 		onOpponentInput: (msg) => {
@@ -358,7 +365,12 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			try {
 				const action = atob(msg.payload) as CharacterAction;
 				if (action === 'up' || action === 'left' || action === 'right') {
-					opponentState.character.queuedActions.push(action);
+					// Buffer by tick so we apply at the right moment
+					const tick = msg.tick;
+					if (!opponentInputBuffer.has(tick)) {
+						opponentInputBuffer.set(tick, []);
+					}
+					opponentInputBuffer.get(tick)!.push(action);
 				}
 			} catch {
 				// ignore malformed payloads
@@ -491,6 +503,31 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		if (matchActive && !matchOver) {
 			tickAccumulator += delta;
 			while (tickAccumulator >= TICK_SECONDS && !matchOver) {
+				// Apply any buffered opponent inputs for this tick
+				// BEFORE advancing the opponent's sim, so the inputs
+				// take effect at the same tick they were generated.
+				if (opponentState) {
+					const oppTick = opponentState.tick;
+					const buffered = opponentInputBuffer.get(oppTick);
+					if (buffered) {
+						for (const action of buffered) {
+							opponentState.character.queuedActions.push(action);
+						}
+						opponentInputBuffer.delete(oppTick);
+					}
+					// Also apply any inputs from earlier ticks that we
+					// might have missed (arrived late). Better late than
+					// never — apply them now so the sim doesn't diverge.
+					for (const [t, actions] of opponentInputBuffer) {
+						if (t <= oppTick) {
+							for (const action of actions) {
+								opponentState.character.queuedActions.push(action);
+							}
+							opponentInputBuffer.delete(t);
+						}
+					}
+				}
+
 				// Advance both sims. tick() no-ops on a dead sim, so
 				// only the surviving player's sim keeps progressing.
 				tick(myState, config);
