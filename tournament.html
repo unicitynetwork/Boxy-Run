@@ -821,7 +821,7 @@ main {
       <div class="lobby-panel card" id="tab-quickmatch" style="display:none">
         <div class="card-body">
           <div style="margin-bottom:16px;color:var(--text-dim);font-size:13px">
-            Join a rolling 4-8 player tournament. Starts after a 2-minute countdown once enough players queue up.
+            Join a quick match tournament. A countdown starts once enough players are in the queue.
           </div>
           <div id="queue-info" style="margin-bottom:16px">
             <div class="lobby-count" id="queue-count">0<span> in queue</span></div>
@@ -1266,16 +1266,29 @@ function declineChallenge(id, btn) {
   btn.closest('div').remove();
 }
 
+let queueStartsAt = null;
+
 function updateQueueState(msg) {
   document.getElementById('queue-count').innerHTML = `${msg.total}<span> in queue</span>`;
   document.getElementById('queue-bar').style.width = `${Math.min(100, (msg.total / 8) * 100)}%`;
-  if (msg.startsAt) {
-    const secs = Math.max(0, Math.ceil((msg.startsAt - Date.now()) / 1000));
-    document.getElementById('queue-countdown').textContent = `Starting in ${secs}s`;
+  queueStartsAt = msg.startsAt;
+  tickQueueCountdown();
+}
+
+function tickQueueCountdown() {
+  const el = document.getElementById('queue-countdown');
+  if (!el) return;
+  if (queueStartsAt) {
+    const secs = Math.max(0, Math.ceil((queueStartsAt - Date.now()) / 1000));
+    el.textContent = secs > 0 ? `Starting in ${secs}s` : 'Starting...';
   } else {
-    document.getElementById('queue-countdown').textContent = msg.total >= 4 ? 'Countdown starting...' : `Need ${4 - msg.total} more players`;
+    const total = parseInt(document.getElementById('queue-count')?.textContent || '0');
+    el.textContent = total >= 1 ? 'Waiting for more players...' : 'Join to start the countdown';
   }
 }
+
+// Tick the countdown every second
+setInterval(tickQueueCountdown, 1000);
 
 function renderBracket(msg) {
   const container = document.getElementById('bracket-container');
