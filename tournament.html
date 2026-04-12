@@ -1174,9 +1174,11 @@ function handleServerMessage(msg) {
       document.getElementById('challenge-status').textContent = `${msg.by} declined the challenge.`;
       break;
     case 'tournament-assigned':
-      // Player got assigned to a tournament — open the game!
-      const name = getPlayerName();
-      window.open(`dev.html?tournament=1&name=${encodeURIComponent(name)}&server=${encodeURIComponent(WS_URL)}&mode=legacy&tid=${msg.tournamentId}`, '_blank');
+      // Player got assigned to a tournament — redirect to the game.
+      // Using location.href instead of window.open to avoid popup blockers
+      // (WebSocket message handlers aren't user-initiated clicks).
+      const gameName = getPlayerName();
+      location.href = `dev.html?tournament=1&name=${encodeURIComponent(gameName)}&server=${encodeURIComponent(WS_URL)}&mode=legacy&tid=${msg.tournamentId}`;
       break;
     case 'queue-state':
       updateQueueState(msg);
