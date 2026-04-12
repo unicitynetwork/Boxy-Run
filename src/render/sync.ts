@@ -10,6 +10,7 @@
 import type { GameConfig, GameState } from '../sim/state';
 import {
 	createCharacterMesh,
+	makeGhostly,
 	syncCharacterMesh,
 	type CharacterMesh,
 } from './character-mesh';
@@ -71,6 +72,7 @@ export function addOpponentMesh(render: RenderState, scene: SceneHandle): void {
 	const oppSkin = getOpponentSkin(render.playerSkin);
 	const oppShirtHex = '#' + (oppSkin.colors.shirt ?? Colors.cherry).toString(16).padStart(6, '0');
 	render.opponent = createCharacterMesh(scene.scene, oppSkin.colors, 'OPP', oppShirtHex);
+	makeGhostly(render.opponent);
 }
 
 /**

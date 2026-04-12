@@ -90,6 +90,30 @@ function createLimb(
  * Body-part dimensions, positions, and colors are copied verbatim from
  * the Character class in the original game.js.
  */
+/**
+ * Make a character mesh ghostly — semi-transparent with an ethereal
+ * tint. Traverses all child meshes and updates their materials.
+ */
+export function makeGhostly(mesh: CharacterMesh): void {
+	mesh.root.traverse((child: any) => {
+		if (child.isMesh && child.material) {
+			child.material = child.material.clone();
+			child.material.transparent = true;
+			child.material.opacity = 0.35;
+			child.material.depthWrite = false;
+			// Add a slight emissive glow in the shirt color
+			if (child.material.emissive) {
+				child.material.emissive.setHex(child.material.color.getHex());
+				child.material.emissiveIntensity = 0.3;
+			}
+		}
+	});
+	// Make the label more transparent too
+	if (mesh.label) {
+		mesh.label.material.opacity = 0.5;
+	}
+}
+
 /** Optional color overrides for creating opponent / alternate characters. */
 export interface CharacterColors {
 	skin?: number;
