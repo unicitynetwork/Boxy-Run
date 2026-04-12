@@ -151,6 +151,22 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	});
 	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; });
 
+	installTouchControls({
+		onAction: (a) => {
+			if (!paused && !state.gameOver) state.character.queuedActions.push(a);
+		},
+		onStart: () => {
+			if (paused && !state.gameOver && walletCanPlay()) {
+				paused = false;
+				lastFrameTime = performance.now();
+				tickAccumulator = 0;
+				hideOverlay();
+				getWallet()?.updateUI('playing');
+			}
+		},
+		isPlaying: () => !paused && !state.gameOver,
+	});
+
 	function loop() {
 		const now = performance.now();
 		let delta = (now - lastFrameTime) / 1000;
@@ -355,6 +371,22 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		}
 	});
 	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; });
+
+	installTouchControls({
+		onAction: (a) => {
+			if (matchActive && !matchOver) {
+				myState.character.queuedActions.push(a);
+				if (matchId) client.sendInput(matchId, myState.tick, btoa(a));
+			}
+		},
+		onStart: () => {
+			if (matchId && !matchActive) {
+				client.ready(matchId);
+				showOverlay('Waiting for opponent...');
+			}
+		},
+		isPlaying: () => matchActive && !matchOver,
+	});
 
 	// Main loop
 	function loop() {
@@ -561,6 +593,70 @@ function removeDeathBanner(): void {
 		deathBannerEl.remove();
 		deathBannerEl = null;
 	}
+}
+
+// ── Touch controls ───────────────────────────────────────────────
+const SWIPE_THRESHOLD = 30;
+const TAP_THRESHOLD_MS = 200;
+
+/**
+ * Install touch handlers for mobile. `onAction` is called with
+ * the character action; `onStart` is called on tap when the game
+ * hasn't started yet. Prevents scroll/zoom during gameplay.
+ */
+function installTouchControls(opts: {
+	onAction: (a: CharacterAction) => void;
+	onStart: () => void;
+	isPlaying: () => boolean;
+}): void {
+	let startX = 0;
+	let startY = 0;
+	let startTime = 0;
+
+	document.addEventListener(
+		'touchmove',
+		(e) => { if (opts.isPlaying()) e.preventDefault(); },
+		{ passive: false },
+	);
+
+	document.addEventListener(
+		'touchstart',
+		(e) => {
+			if (!opts.isPlaying()) {
+				// Tap to start
+				opts.onStart();
+				return;
+			}
+			const touch = e.touches[0];
+			startX = touch.clientX;
+			startY = touch.clientY;
+			startTime = Date.now();
+		},
+		{ passive: true },
+	);
+
+	document.addEventListener(
+		'touchend',
+		(e) => {
+			if (!opts.isPlaying()) return;
+			const touch = e.changedTouches[0];
+			const dx = touch.clientX - startX;
+			const dy = touch.clientY - startY;
+			const elapsed = Date.now() - startTime;
+			const absDx = Math.abs(dx);
+			const absDy = Math.abs(dy);
+
+			if (absDx < SWIPE_THRESHOLD && absDy < SWIPE_THRESHOLD && elapsed < TAP_THRESHOLD_MS) {
+				opts.onAction('up'); // tap = jump
+			} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
+				opts.onAction('up'); // swipe up = jump
+			} else if (absDx > absDy) {
+				if (dx < -SWIPE_THRESHOLD) opts.onAction('left');
+				else if (dx > SWIPE_THRESHOLD) opts.onAction('right');
+			}
+		},
+		{ passive: true },
+	);
 }
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */
