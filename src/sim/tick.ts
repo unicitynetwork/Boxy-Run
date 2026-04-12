@@ -147,6 +147,7 @@ export function tick(state: GameState, config: GameConfig): void {
 		if (aabbIntersect(charBox, coinBox(coin))) {
 			coin.collected = true;
 			state.coinCount += 1;
+			state.score += config.coinScoreBonus;
 			state.coins.splice(i, 1);
 		}
 	}

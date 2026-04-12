@@ -19,9 +19,9 @@ import {
 	syncCoinMeshes,
 	type CoinMeshPool,
 } from './coin-mesh';
-import { Colors } from './colors';
 import { updateHud } from './hud';
 import { syncFog, type SceneHandle } from './scene';
+import { type CharacterSkin, getOpponentSkin, SKINS } from './skins';
 import {
 	createTreeMeshPool,
 	syncTreeMeshes,
@@ -34,33 +34,34 @@ export interface RenderState {
 	readonly trees: TreeMeshPool;
 	readonly coins: CoinMeshPool;
 	opponent: CharacterMesh | null;
+	playerSkin: CharacterSkin;
 }
 
-/** Create mesh pools for all entity types. Adds the character to the scene immediately. */
-export function createRenderState(scene: SceneHandle): RenderState {
+/**
+ * Create mesh pools for all entity types. The player's skin determines
+ * their character's appearance and (by contrast) the opponent's.
+ */
+export function createRenderState(
+	scene: SceneHandle,
+	playerSkin: CharacterSkin = SKINS[0],
+): RenderState {
 	return {
-		character: createCharacterMesh(scene.scene),
+		character: createCharacterMesh(scene.scene, playerSkin.colors),
 		trees: createTreeMeshPool(scene.scene),
 		coins: createCoinMeshPool(scene.scene),
 		opponent: null,
+		playerSkin,
 	};
 }
 
-/** Opponent character colors — cherry red shirt, blue shorts. */
-const OPPONENT_COLORS: CharacterColors = {
-	skin: Colors.peach,
-	hair: Colors.black,
-	shirt: Colors.cherry,
-	shorts: Colors.blue,
-};
-
 /**
- * Add an opponent character mesh to the scene. Call once when a
- * tournament match starts.
+ * Add an opponent character mesh to the scene. The opponent's skin
+ * auto-contrasts with the player's selection.
  */
 export function addOpponentMesh(render: RenderState, scene: SceneHandle): void {
 	if (render.opponent) return;
-	render.opponent = createCharacterMesh(scene.scene, OPPONENT_COLORS);
+	const oppSkin = getOpponentSkin(render.playerSkin);
+	render.opponent = createCharacterMesh(scene.scene, oppSkin.colors);
 }
 
 /**

@@ -129,6 +129,8 @@ export interface GameConfig {
 	readonly spawnDistance: number;
 	/** Fixed integer score awarded per tick while alive. */
 	readonly scorePerTick: number;
+	/** Bonus score added per coin collected. */
+	readonly coinScoreBonus: number;
 	/** Jump duration in seconds. */
 	readonly jumpDuration: number;
 	/** Jump peak height in world units. */
@@ -152,6 +154,7 @@ export const DEFAULT_CONFIG: GameConfig = {
 	spawnDistance: 4500,
 	// Matches the original `Math.floor(600 * (moveSpeed / 6000) / TICK_HZ)` = 16.
 	scorePerTick: Math.floor((600 * (10000 / 6000)) / TICK_HZ),
+	coinScoreBonus: 250,
 	jumpDuration: 0.6,
 	jumpHeight: 2000,
 	characterStepFreq: 2,

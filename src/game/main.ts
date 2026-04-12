@@ -37,6 +37,7 @@ import {
 	type GameState,
 } from '../sim/state';
 import { tick } from '../sim/tick';
+import { getSkin, SKINS, type CharacterSkin } from '../render/skins';
 import { TournamentClient } from '../../tournament/client/client';
 
 // Key codes
@@ -51,29 +52,38 @@ const KEY_ENTER = 13;
 
 window.addEventListener('load', () => {
 	const params = new URLSearchParams(location.search);
+	const skinParam = params.get('skin');
 	const isTournament = params.get('tournament') === '1';
 
-	if (isTournament) {
-		startTournamentMode(params);
-	} else {
-		startSinglePlayer(params);
+	// If skin is already set via URL param, skip the selector
+	if (skinParam) {
+		const skin = getSkin(skinParam);
+		if (isTournament) startTournamentMode(params, skin);
+		else startSinglePlayer(params, skin);
+		return;
 	}
+
+	// Show character selector, then start the game
+	showSkinSelector((skin) => {
+		if (isTournament) startTournamentMode(params, skin);
+		else startSinglePlayer(params, skin);
+	});
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Single-player (unchanged from before)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function startSinglePlayer(params: URLSearchParams) {
+function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	const seedParam = params.get('seed');
 	const seed = seedParam
 		? parseInt(seedParam, 10) >>> 0
 		: (Math.random() * 0xffffffff) >>> 0;
-	console.log('Boxy Run seed:', seed);
+	console.log('Boxy Run seed:', seed, 'skin:', skin.name);
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
-	const render = createRenderState(scene);
+	const render = createRenderState(scene, skin);
 	const state = makeInitialState(seed, config);
 	let paused = true;
 
@@ -144,15 +154,15 @@ function startSinglePlayer(params: URLSearchParams) {
 // Tournament mode
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function startTournamentMode(params: URLSearchParams) {
+function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	const name = params.get('name') || '@player';
 	const serverUrl = params.get('server') || 'ws://localhost:7101';
 	const tournamentId = params.get('tid') || 'boxyrun-alpha-1';
-	console.log(`Tournament mode: ${name} → ${serverUrl} (${tournamentId})`);
+	console.log(`Tournament mode: ${name} → ${serverUrl} (${tournamentId}) skin: ${skin.name}`);
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
-	const render = createRenderState(scene);
+	const render = createRenderState(scene, skin);
 
 	// Start with a placeholder sim so the world renders while we wait
 	let myState: GameState = makeInitialState(0, config);
@@ -439,4 +449,113 @@ function removeOpponentHud(): void {
 		opponentHudEl.remove();
 		opponentHudEl = null;
 	}
+}
+
+/**
+ * Full-screen character selector overlay. Shows a grid of skin
+ * options; clicking one invokes the callback and removes the overlay.
+ */
+function showSkinSelector(onSelect: (skin: CharacterSkin) => void): void {
+	const overlay = document.createElement('div');
+	overlay.id = 'skin-selector';
+	overlay.style.cssText =
+		'position:fixed;inset:0;z-index:200;' +
+		'background:rgba(0,0,0,0.85);' +
+		'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+		'font-family:monospace;color:#e2e8f0;';
+
+	const title = document.createElement('div');
+	title.style.cssText =
+		'font-size:24px;font-weight:bold;margin-bottom:8px;letter-spacing:0.1em;';
+	title.textContent = 'CHOOSE YOUR RUNNER';
+	overlay.appendChild(title);
+
+	const sub = document.createElement('div');
+	sub.style.cssText = 'font-size:13px;color:#64748b;margin-bottom:32px;';
+	sub.textContent = 'Each coin collected adds 250 to your score';
+	overlay.appendChild(sub);
+
+	const grid = document.createElement('div');
+	grid.style.cssText =
+		'display:grid;grid-template-columns:repeat(4,1fr);gap:16px;' +
+		'max-width:560px;width:90%;';
+
+	for (const skin of SKINS) {
+		const card = document.createElement('button');
+		const hex = '#' + skin.preview.toString(16).padStart(6, '0');
+		card.style.cssText =
+			'background:rgba(255,255,255,0.05);border:2px solid rgba(255,255,255,0.1);' +
+			'border-radius:8px;padding:16px 8px;cursor:pointer;' +
+			'display:flex;flex-direction:column;align-items:center;gap:10px;' +
+			'transition:all 0.2s;color:#e2e8f0;font-family:monospace;';
+
+		// Character preview — a simple figure with colored shirt
+		const figure = document.createElement('div');
+		figure.style.cssText =
+			'width:40px;height:60px;position:relative;';
+
+		// Head
+		const head = document.createElement('div');
+		const skinHex = '#' + skin.colors.skin.toString(16).padStart(6, '0');
+		const hairHex = '#' + skin.colors.hair.toString(16).padStart(6, '0');
+		head.style.cssText =
+			`width:20px;height:20px;background:${skinHex};` +
+			`border-radius:4px;margin:0 auto;position:relative;` +
+			`border-top:4px solid ${hairHex};`;
+		figure.appendChild(head);
+
+		// Torso (shirt)
+		const torso = document.createElement('div');
+		torso.style.cssText =
+			`width:28px;height:22px;background:${hex};` +
+			'border-radius:3px;margin:2px auto 0;';
+		figure.appendChild(torso);
+
+		// Shorts
+		const shortsHex = '#' + skin.colors.shorts.toString(16).padStart(6, '0');
+		const shorts = document.createElement('div');
+		shorts.style.cssText =
+			`width:28px;height:10px;background:${shortsHex};` +
+			'border-radius:0 0 3px 3px;margin:1px auto 0;';
+		figure.appendChild(shorts);
+
+		// Legs
+		const legs = document.createElement('div');
+		legs.style.cssText =
+			`width:20px;height:12px;margin:1px auto 0;` +
+			`display:flex;gap:4px;justify-content:center;`;
+		const legL = document.createElement('div');
+		legL.style.cssText = `width:6px;height:12px;background:${skinHex};border-radius:2px;`;
+		const legR = legL.cloneNode(true) as HTMLElement;
+		legs.appendChild(legL);
+		legs.appendChild(legR);
+		figure.appendChild(legs);
+
+		card.appendChild(figure);
+
+		const label = document.createElement('div');
+		label.style.cssText = 'font-size:11px;font-weight:600;letter-spacing:0.1em;';
+		label.textContent = skin.name.toUpperCase();
+		card.appendChild(label);
+
+		card.addEventListener('mouseenter', () => {
+			card.style.borderColor = hex;
+			card.style.background = 'rgba(255,255,255,0.1)';
+			card.style.transform = 'translateY(-2px)';
+		});
+		card.addEventListener('mouseleave', () => {
+			card.style.borderColor = 'rgba(255,255,255,0.1)';
+			card.style.background = 'rgba(255,255,255,0.05)';
+			card.style.transform = 'translateY(0)';
+		});
+		card.addEventListener('click', () => {
+			overlay.remove();
+			onSelect(skin);
+		});
+
+		grid.appendChild(card);
+	}
+
+	overlay.appendChild(grid);
+	document.body.appendChild(overlay);
 }
