@@ -72,6 +72,7 @@ function walletCanPlay(): boolean {
 
 // Shared state for rematch
 let lastOpponentName = '';
+let lastTournamentType = '';
 
 // Key codes
 const KEY_LEFT = 37;
@@ -286,6 +287,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onTournamentAssigned: (msg) => {
 			console.log(`Assigned to tournament ${msg.tournamentId} (${msg.tournamentType})`);
+			lastTournamentType = msg.tournamentType;
 			showOverlay('Tournament found! Waiting for bracket...');
 		},
 
@@ -882,6 +884,8 @@ function readyButton(): string {
 
 function rematchButton(): string {
 	if (!lastOpponentName) return '';
+	// Only show rematch for 1v1 challenges, not quick match
+	if (lastTournamentType === 'rolling') return '';
 	return `<button onclick="window.__rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>`;
 }
 
