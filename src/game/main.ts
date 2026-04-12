@@ -376,11 +376,20 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onTournamentEnd: (msg) => {
 			console.log('Tournament end:', msg);
-			const lines = msg.standings
-				.map((s) => `#${s.place} ${s.nametag}`)
-				.join('<br>');
+			let resultText = '';
+			if (msg.standings && msg.standings.length > 0) {
+				const champion = msg.standings[0]?.nametag || '?';
+				const isMe = champion === name;
+				resultText = isMe
+					? '<div style="font-size:24px;font-weight:bold;color:#FFD700;margin-bottom:12px">YOU ARE THE CHAMPION!</div>'
+					: `<div style="font-size:20px;font-weight:bold;margin-bottom:12px">Winner: ${champion}</div>`;
+				resultText += msg.standings
+					.map((s) => `<div style="margin:4px 0">#${s.place} ${s.nametag}</div>`)
+					.join('');
+			}
 			showOverlay(
-				`Tournament complete!<br><br>${lines}<br><br>` +
+				`<div style="font-size:14px;opacity:0.6;margin-bottom:8px">TOURNAMENT COMPLETE</div>` +
+				resultText + '<br>' +
 				rematchButton() + backToArenaLink(),
 			);
 		},
@@ -541,9 +550,13 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 						resultHash,
 					);
 
-					const status = winner === mySide ? 'You win!' : 'You lose!';
+					const iWon = winner === mySide;
+					const statusHtml = iWon
+						? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
+						: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
 					showOverlay(
-						`${status}<br>Your score: ${myScore} vs Opponent: ${oppScore}<br><br>` +
+						statusHtml +
+						`<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>` +
 						rematchButton() + backToArenaLink(),
 					);
 					break;
@@ -776,17 +789,19 @@ function installTouchControls(opts: {
 	);
 }
 
+const BTN_STYLE = 'padding:12px 32px;background:#1a1a2e;color:#fff;border:2px solid #1a1a2e;border-radius:6px;font-family:monospace;font-weight:bold;cursor:pointer;letter-spacing:0.1em;text-decoration:none;display:inline-block;margin:6px;';
+
 function readyButton(): string {
-	return '<button onclick="window.__ready()" style="padding:14px 40px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:18px;font-weight:bold;cursor:pointer;letter-spacing:0.15em">READY</button>';
+	return `<button onclick="window.__ready()" style="${BTN_STYLE}font-size:18px;background:#f97316;border-color:#f97316;color:#fff">READY</button>`;
 }
 
 function rematchButton(): string {
 	if (!lastOpponentName) return '';
-	return '<button onclick="window.__rematch()" style="padding:10px 24px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:bold;cursor:pointer;letter-spacing:0.1em;margin-right:12px">REMATCH</button>';
+	return `<button onclick="window.__rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>`;
 }
 
 function backToArenaLink(): string {
-	return '<a href="tournament.html" style="color:#00e5ff;text-decoration:none;font-weight:bold;font-size:16px">Back to Arena</a>';
+	return `<a href="tournament.html" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO ARENA</a>`;
 }
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */
