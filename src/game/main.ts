@@ -252,6 +252,19 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onRegistered: (msg) => {
 			console.log('Registered. Online players:', msg.onlinePlayers);
+			// If we're in legacy/redirect mode but have no tournament,
+			// we'll get registered without a tournament-assigned follow-up.
+			// Show a "go back" message after a short delay.
+			if (mode === 'legacy' || mode === '') {
+				setTimeout(() => {
+					if (!matchId && !matchActive) {
+						showOverlay(
+							`No active match found.<br><br>` +
+							backToArenaLink(),
+						);
+					}
+				}, 2000);
+			}
 		},
 
 		onChallengeReceived: (msg) => {
@@ -362,7 +375,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			console.log('Match end:', msg);
 			removeOpponentHud();
 			showOverlay(
-				`Match over! Winner: ${msg.winner}<br>Reason: ${msg.reason}`,
+				`Match over! Winner: ${msg.winner}<br>Reason: ${msg.reason}<br><br>` +
+				backToArenaLink(),
 			);
 		},
 
@@ -372,7 +386,8 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 				.map((s) => `#${s.place} ${s.nametag}`)
 				.join('<br>');
 			showOverlay(
-				`Tournament complete!<br><br>${lines}<br><br>Reload to play again.`,
+				`Tournament complete!<br><br>${lines}<br><br>` +
+				backToArenaLink(),
 			);
 		},
 
@@ -721,6 +736,10 @@ function installTouchControls(opts: {
 		},
 		{ passive: true },
 	);
+}
+
+function backToArenaLink(): string {
+	return '<a href="tournament.html" style="color:#00e5ff;text-decoration:none;font-weight:bold;font-size:16px">Back to Arena</a>';
 }
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */
