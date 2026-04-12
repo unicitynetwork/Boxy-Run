@@ -17,6 +17,7 @@ import {
 	type BracketSlot,
 	type LobbyStateMessage,
 	type MatchEndMessage,
+	type MatchEndReason,
 	type MatchStartMessage,
 	type OpponentInputMessage,
 	type OpponentReadyMessage,
@@ -341,25 +342,50 @@ export class Tournament {
 		const seed = parseInt(match.seed ?? '0', 16) >>> 0;
 		const config = DEFAULT_CONFIG;
 
-		const scoreA = this.replaySim(seed, match.inputsA, config);
-		const scoreB = this.replaySim(seed, match.inputsB, config);
+		const replayA = this.replaySim(seed, match.inputsA, config);
+		const replayB = this.replaySim(seed, match.inputsB, config);
 
-		console.log(`[match] ${match.matchId}: A=${scoreA} B=${scoreB} (server replay)`);
+		console.log(
+			`[match] ${match.matchId}: A=${replayA.score} B=${replayB.score}` +
+			(replayA.violation ? ` [A VIOLATION: ${replayA.violation}]` : '') +
+			(replayB.violation ? ` [B VIOLATION: ${replayB.violation}]` : ''),
+		);
 
-		// Higher score wins. Ties go to side A.
-		const winnerSide = scoreA >= scoreB ? 'A' : 'B';
+		// Check for DQ: if a player cheated, the other wins
+		let winnerSide: 'A' | 'B';
+		let reason: MatchEndReason = 'death';
+
+		if (replayA.violation && replayB.violation) {
+			// Both cheated — higher legit score wins (or A by default)
+			winnerSide = 'A';
+			reason = 'dq';
+		} else if (replayA.violation) {
+			// A cheated — B wins by DQ
+			winnerSide = 'B';
+			reason = 'dq';
+			console.log(`[match] ${match.matchId}: Player A (${match.playerA}) DQ'd: ${replayA.violation}`);
+		} else if (replayB.violation) {
+			// B cheated — A wins by DQ
+			winnerSide = 'A';
+			reason = 'dq';
+			console.log(`[match] ${match.matchId}: Player B (${match.playerB}) DQ'd: ${replayB.violation}`);
+		} else {
+			// Clean match — higher score wins. Ties go to side A.
+			winnerSide = replayA.score >= replayB.score ? 'A' : 'B';
+		}
+
 		match.winner = winnerSide === 'A' ? match.playerA! : match.playerB!;
 		match.phase = 'RESOLVED';
 
 		const combinedScores: Record<string, number> = {};
-		if (match.playerA) combinedScores[match.playerA] = scoreA;
-		if (match.playerB) combinedScores[match.playerB] = scoreB;
+		if (match.playerA) combinedScores[match.playerA] = replayA.score;
+		if (match.playerB) combinedScores[match.playerB] = replayB.score;
 
 		const endMsg: MatchEndMessage = {
 			type: 'match-end', v: PROTOCOL_VERSION,
 			matchId: match.matchId,
 			winner: match.winner,
-			reason: 'death',
+			reason,
 			scores: combinedScores,
 		};
 		deliveries.push({ to: match.playerA!, message: endMsg });
@@ -372,20 +398,61 @@ export class Tournament {
 		return deliveries;
 	}
 
-	/**
-	 * Replay a single player's game from seed + input trace. Returns
-	 * the final score when the character dies or the sim reaches the
-	 * time cap (36000 ticks = 10 minutes at 60Hz).
-	 */
+	/** Result of a server-side sim replay. */
 	private replaySim(
 		seed: number,
 		inputs: Array<{ tick: number; payload: string }>,
 		config: typeof DEFAULT_CONFIG,
-	): number {
-		const state = makeInitialState(seed, config);
-		const TIME_CAP = 36000; // 10 minutes
+	): { score: number; deathTick: number; violation: string | null } {
+		const TIME_CAP = 36000; // 10 minutes at 60Hz
+		const MAX_INPUTS_PER_TICK = 3; // up + left/right at most
 
-		// Index inputs by tick for fast lookup
+		// ── Validate inputs before replay ──
+		let violation: string | null = null;
+
+		// Check for inputs at invalid ticks
+		for (const inp of inputs) {
+			if (inp.tick < 0) {
+				violation = `input at negative tick ${inp.tick}`;
+				break;
+			}
+			if (inp.tick > TIME_CAP) {
+				violation = `input at tick ${inp.tick} exceeds time cap`;
+				break;
+			}
+		}
+
+		// Check input rate per tick
+		if (!violation) {
+			const tickCounts = new Map<number, number>();
+			for (const inp of inputs) {
+				tickCounts.set(inp.tick, (tickCounts.get(inp.tick) ?? 0) + 1);
+				if (tickCounts.get(inp.tick)! > MAX_INPUTS_PER_TICK) {
+					violation = `${tickCounts.get(inp.tick)} inputs at tick ${inp.tick} (max ${MAX_INPUTS_PER_TICK})`;
+					break;
+				}
+			}
+		}
+
+		// Check for inhuman input density (sustained >10 inputs/sec for 5+ seconds)
+		if (!violation && inputs.length > 0) {
+			const WINDOW = 300; // 5 seconds in ticks
+			const MAX_IN_WINDOW = 80; // ~16/sec sustained is suspicious
+			for (let start = 0; start < inputs.length; start++) {
+				const windowEnd = inputs[start].tick + WINDOW;
+				let count = 0;
+				for (let j = start; j < inputs.length && inputs[j].tick <= windowEnd; j++) {
+					count++;
+				}
+				if (count > MAX_IN_WINDOW) {
+					violation = `${count} inputs in ${WINDOW}-tick window (max ${MAX_IN_WINDOW})`;
+					break;
+				}
+			}
+		}
+
+		// ── Replay the sim ──
+		const state = makeInitialState(seed, config);
 		const inputsByTick = new Map<number, CharacterAction[]>();
 		for (const inp of inputs) {
 			try {
@@ -399,9 +466,7 @@ export class Tournament {
 			}
 		}
 
-		// Run the sim until death or time cap
 		while (!state.gameOver && state.tick < TIME_CAP) {
-			// Apply inputs for this tick
 			const actions = inputsByTick.get(state.tick);
 			if (actions) {
 				for (const a of actions) {
@@ -411,7 +476,7 @@ export class Tournament {
 			simTick(state, config);
 		}
 
-		return state.score;
+		return { score: state.score, deathTick: state.tick, violation };
 	}
 
 	/**
@@ -760,7 +825,8 @@ export class Tournament {
 		const seed = parseInt(match.seed ?? '0', 16) >>> 0;
 		const config = DEFAULT_CONFIG;
 		const inputs = submittedSide === 'A' ? match.inputsA : match.inputsB;
-		const score = this.replaySim(seed, inputs, config);
+		const replay = this.replaySim(seed, inputs, config);
+		const score = replay.score;
 
 		const winnerNametag = submittedSide === 'A' ? match.playerA! : match.playerB!;
 		const loserNametag = submittedSide === 'A' ? match.playerB! : match.playerA!;

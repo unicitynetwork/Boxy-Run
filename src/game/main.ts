@@ -388,9 +388,17 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			const iWon = msg.winner === name;
 			const myScore = msg.scores?.[name] ?? myState.score;
 			const oppScore = msg.scores?.[lastOpponentName] ?? 0;
-			const statusHtml = iWon
-				? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
-				: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
+
+			let statusHtml: string;
+			if (msg.reason === 'dq') {
+				statusHtml = iWon
+					? '<div style="font-size:24px;font-weight:bold;color:#FFD700;margin-bottom:8px">OPPONENT DISQUALIFIED</div>'
+					: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU HAVE BEEN DISQUALIFIED</div>';
+			} else {
+				statusHtml = iWon
+					? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
+					: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
+			}
 			showOverlay(
 				statusHtml +
 				`<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>` +
