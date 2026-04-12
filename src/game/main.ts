@@ -40,6 +40,36 @@ import { tick } from '../sim/tick';
 import { getSkin, SKINS, type CharacterSkin } from '../render/skins';
 import { TournamentClient } from '../../tournament/client/client';
 
+// ── Sphere wallet bridge ─────────────────────────────────────────
+// sphere-connect.ts (loaded before this script) exposes
+// window.SphereWallet. These helpers wrap it so the rest of the code
+// doesn't need to null-check repeatedly.
+interface SphereWallet {
+	isConnected: boolean;
+	isDepositPaid: boolean;
+	identity: { nametag?: string } | null;
+	coinId: string;
+	entryFee: number;
+	updateUI(phase: string): void;
+	requestPayout(coins: number): void;
+	resetDeposit(): void;
+	depositAndRestart(): void;
+}
+
+function getWallet(): SphereWallet | null {
+	return (window as any).SphereWallet ?? null;
+}
+
+function walletNametag(): string | null {
+	return getWallet()?.identity?.nametag ?? null;
+}
+
+function walletCanPlay(): boolean {
+	const w = getWallet();
+	if (!w) return true; // no wallet = dev mode, allow playing
+	return w.isDepositPaid;
+}
+
 // Key codes
 const KEY_LEFT = 37;
 const KEY_UP = 38;
@@ -101,10 +131,12 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 		keysAllowed[key] = false;
 
 		if (paused && key > 18) {
+			if (!walletCanPlay()) return; // deposit required
 			paused = false;
 			lastFrameTime = performance.now();
 			tickAccumulator = 0;
 			hideOverlay();
+			getWallet()?.updateUI('playing');
 			return;
 		}
 		if (key === KEY_P) {
@@ -135,7 +167,19 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 		renderFrame(scene);
 		if (state.gameOver && !paused) {
 			paused = true;
-			showOverlay(`Game over! Score: ${state.score}, Coins: ${state.coinCount}. Reload to try again.`);
+			const w = getWallet();
+			if (w?.isConnected) {
+				w.requestPayout(state.coinCount);
+				w.resetDeposit();
+				w.updateUI('gameover');
+				showOverlay(
+					`Game over! You earned <strong>${state.coinCount} ${w.coinId}</strong>`,
+				);
+			} else {
+				showOverlay(
+					`Game over! Score: ${state.score}, Coins: ${state.coinCount}. Reload to try again.`,
+				);
+			}
 		}
 		requestAnimationFrame(loop);
 	}

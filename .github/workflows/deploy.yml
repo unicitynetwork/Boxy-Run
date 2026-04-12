@@ -49,8 +49,8 @@ jobs:
       - name: Stage site files
         run: |
           mkdir _site
-          cp index.html display.html leaderboard.html style.css _site/
-          cp unicity-logo.png _site/ 2>/dev/null || true
+          cp index.html display.html leaderboard.html tournament.html style.css _site/
+          cp logo.png unicity-logo.png _site/ 2>/dev/null || true
           cp -r js _site/js
 
       - name: Determine deploy destination
