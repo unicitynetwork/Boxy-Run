@@ -87,6 +87,12 @@ wss.on('connection', (ws, req) => {
 				deliver(deliveries);
 				break;
 			}
+			case 'input': {
+				const nametag = socketToNametag.get(ws);
+				if (!nametag) { sendError(ws, 'not_joined', 'join first'); break; }
+				deliver(tournament.relayInput(nametag, msg.matchId, msg.tick, msg.payload));
+				break;
+			}
 			case 'leave':
 				ws.close(1000, 'client leave');
 				break;

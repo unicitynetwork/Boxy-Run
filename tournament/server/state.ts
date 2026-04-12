@@ -17,6 +17,7 @@ import {
 	type BracketSlot,
 	type LobbyStateMessage,
 	type MatchStartMessage,
+	type OpponentInputMessage,
 	type OpponentReadyMessage,
 	type PublicIdentity,
 	type RoundOpenMessage,
@@ -59,6 +60,12 @@ export interface MatchState {
 	/** Last ready-toggle timestamp per side, for rate limiting. */
 	lastReadyToggleA: number;
 	lastReadyToggleB: number;
+	/** Input trace stored per side for post-match verification. */
+	inputsA: Array<{ tick: number; payload: string }>;
+	inputsB: Array<{ tick: number; payload: string }>;
+	/** Result hashes submitted by each side, null until received. */
+	resultA: { finalTick: number; score: Record<string, number>; winner: string; inputsHash: string; resultHash: string } | null;
+	resultB: { finalTick: number; score: Record<string, number>; winner: string; inputsHash: string; resultHash: string } | null;
 }
 
 export interface Delivery {
@@ -240,6 +247,34 @@ export class Tournament {
 		return [{ to: opponent, message: readyMsg }];
 	}
 
+	/**
+	 * Relay a player's input to the opponent. Stores the input in the
+	 * match's trace for post-match verification and emits opponent-input
+	 * to the other side.
+	 */
+	relayInput(nametag: string, matchId: string, tick: number, payload: string): Delivery[] {
+		const match = this.matches.get(matchId);
+		if (!match) return [errorTo(nametag, 'unknown_match', `no such match: ${matchId}`)];
+		if (match.phase !== 'ACTIVE') {
+			return [errorTo(nametag, 'match_not_active', `match ${matchId} is not active`)];
+		}
+		const side = this.sideOf(nametag, match);
+		if (!side) return [errorTo(nametag, 'not_in_match', 'you are not in this match')];
+
+		// Store in trace
+		const trace = { tick, payload };
+		if (side === 'A') match.inputsA.push(trace);
+		else match.inputsB.push(trace);
+
+		// Relay to opponent
+		const opponent = side === 'A' ? match.playerB! : match.playerA!;
+		const msg: OpponentInputMessage = {
+			type: 'opponent-input', v: PROTOCOL_VERSION,
+			matchId, tick, payload,
+		};
+		return [{ to: opponent, message: msg }];
+	}
+
 	private sideOf(nametag: string, match: MatchState): 'A' | 'B' | null {
 		if (match.playerA === nametag) return 'A';
 		if (match.playerB === nametag) return 'B';
@@ -318,6 +353,10 @@ export class Tournament {
 					startedAt: null,
 					lastReadyToggleA: 0,
 					lastReadyToggleB: 0,
+					inputsA: [],
+					inputsB: [],
+					resultA: null,
+					resultB: null,
 				});
 			}
 		}
