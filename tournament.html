@@ -297,6 +297,47 @@ main {
 
 .card-body { padding: 24px; }
 
+/* ── Lobby tabs ──────────────────────────────────────────────── */
+.lobby-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.lobby-tab {
+  flex: 1;
+  padding: 12px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lobby-tab:first-child { border-radius: var(--radius) 0 0 0; }
+.lobby-tab:last-child { border-radius: 0 var(--radius) 0 0; }
+
+.lobby-tab:hover { color: var(--text); background: rgba(0,229,255,0.03); }
+
+.lobby-tab.active {
+  color: var(--cyan);
+  background: var(--bg-card);
+  border-color: var(--border-bright);
+  border-bottom-color: transparent;
+  position: relative;
+}
+
+.lobby-panel {
+  border-radius: 0 0 var(--radius) var(--radius);
+  border-top: 1px solid var(--border-bright);
+}
+
 /* ── Live Tournament Section ──────────────────────────────────── */
 .tournament-grid {
   display: grid;
@@ -717,36 +758,89 @@ main {
     </div>
   </section>
 
-  <!-- ── LIVE TOURNAMENT ───────────────────────────────────── -->
+  <!-- ── PLAY ──────────────────────────────────────────────── -->
   <section id="tournament" class="section">
     <div class="section-head reveal">
-      <div class="section-label">Live</div>
-      <div class="section-title">Tournament</div>
+      <div class="section-label">Play</div>
+      <div class="section-title">Enter the Arena</div>
     </div>
-    <div class="tournament-grid reveal">
-      <div class="card lobby-card">
-        <div class="card-header">
-          <h3><span class="status-dot offline" id="ws-dot"></span>Lobby</h3>
-          <span class="lb-refresh" id="ws-status">Connecting...</span>
-        </div>
+
+    <!-- Nametag input (shared across all modes) -->
+    <div class="card reveal" style="max-width:480px;margin-bottom:24px">
+      <div class="card-body" style="display:flex;align-items:center;gap:12px">
+        <span class="status-dot offline" id="ws-dot"></span>
+        <input type="text" id="player-name" placeholder="@your-nametag" value="@player"
+               style="flex:1;padding:10px 14px;background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font-body);font-size:13px;outline:none">
+        <span style="font-size:11px;color:var(--text-muted)" id="ws-status">Offline</span>
+      </div>
+    </div>
+
+    <!-- Three-tab lobby -->
+    <div class="reveal">
+      <div class="lobby-tabs">
+        <button class="lobby-tab active" data-tab="challenge">Challenge</button>
+        <button class="lobby-tab" data-tab="quickmatch">Quick Match</button>
+        <button class="lobby-tab" data-tab="grandfinal">Grand Final</button>
+      </div>
+
+      <!-- Challenge tab -->
+      <div class="lobby-panel card" id="tab-challenge">
         <div class="card-body">
-          <div class="lobby-count" id="lobby-count">0<span> / 32</span></div>
-          <div class="lobby-bar"><div class="lobby-bar-fill" id="lobby-bar" style="width:0%"></div></div>
-          <ul class="lobby-players" id="lobby-players"></ul>
-          <div class="join-form">
-            <input type="text" id="join-name" placeholder="@your-nametag" value="@player">
-            <button class="btn btn-primary" id="btn-join" onclick="joinTournament()">Join Tournament</button>
+          <div style="margin-bottom:16px;color:var(--text-dim);font-size:13px">
+            Challenge a specific player to a 1v1 deathmatch.
+          </div>
+          <div id="online-players" style="margin-bottom:16px">
+            <div style="font-size:11px;color:var(--text-muted);letter-spacing:0.2em;text-transform:uppercase;margin-bottom:8px">Online Players</div>
+            <div id="online-list" style="color:var(--text-dim);font-size:13px">Connecting...</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="challenge-opponent" placeholder="@opponent"
+                   style="flex:1;padding:10px 14px;background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font-body);font-size:13px;outline:none">
+            <button class="btn btn-primary" id="btn-challenge">Challenge</button>
+          </div>
+          <div id="challenge-status" style="margin-top:12px;font-size:13px;color:var(--text-dim);display:none"></div>
+          <!-- Incoming challenges appear here -->
+          <div id="incoming-challenges" style="margin-top:16px"></div>
+        </div>
+      </div>
+
+      <!-- Quick Match tab -->
+      <div class="lobby-panel card" id="tab-quickmatch" style="display:none">
+        <div class="card-body">
+          <div style="margin-bottom:16px;color:var(--text-dim);font-size:13px">
+            Join a rolling 4-8 player tournament. Starts after a 2-minute countdown once enough players queue up.
+          </div>
+          <div id="queue-info" style="margin-bottom:16px">
+            <div class="lobby-count" id="queue-count">0<span> in queue</span></div>
+            <div class="lobby-bar"><div class="lobby-bar-fill" id="queue-bar" style="width:0%"></div></div>
+            <div id="queue-countdown" style="margin-top:8px;font-size:13px;color:var(--text-dim)"></div>
+          </div>
+          <button class="btn btn-primary" id="btn-queue" style="width:100%">Join Queue</button>
+          <button class="btn btn-ghost" id="btn-queue-leave" style="width:100%;display:none;margin-top:8px">Leave Queue</button>
+        </div>
+      </div>
+
+      <!-- Grand Final tab -->
+      <div class="lobby-panel card" id="tab-grandfinal" style="display:none">
+        <div class="card-body">
+          <div style="margin-bottom:16px;color:var(--text-dim);font-size:13px">
+            Weekly championship for the top qualifiers. Win rolling tournaments to earn your spot.
+          </div>
+          <div style="text-align:center;padding:40px 0;color:var(--text-muted)">
+            Coming soon — earn qualifier points by winning Quick Matches!
           </div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-header">
-          <h3>Bracket</h3>
-          <span class="lb-refresh" id="bracket-phase">Waiting for players</span>
-        </div>
-        <div class="card-body bracket-container" id="bracket-container">
-          <div class="bracket-empty">Tournament bracket will appear when the lobby fills.</div>
-        </div>
+    </div>
+
+    <!-- Active bracket (shown when in a tournament) -->
+    <div class="card reveal" style="margin-top:24px">
+      <div class="card-header">
+        <h3>Active Bracket</h3>
+        <span class="lb-refresh" id="bracket-phase">No active tournament</span>
+      </div>
+      <div class="card-body bracket-container" id="bracket-container">
+        <div class="bracket-empty">Join a match to see the bracket here.</div>
       </div>
     </div>
   </section>
@@ -920,16 +1014,36 @@ loadDaily();
 setInterval(loadDaily, 30000);
 setInterval(loadAllTime, 60000);
 
-// ── Tournament WebSocket ───────────────────────────────────────
+// ── Tab switching ──────────────────────────────────────────────
+document.querySelectorAll('.lobby-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.lobby-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.lobby-panel').forEach(p => p.style.display = 'none');
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).style.display = '';
+  });
+});
+
+// ── WebSocket connection + lobby state ─────────────────────────
 let ws = null;
+let registered = false;
+let onlinePlayers = [];
+let inQueue = false;
 let bracketData = null;
+
+function getPlayerName() {
+  return document.getElementById('player-name').value.trim() || '@player';
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
 
 function connectWS() {
   const dot = document.getElementById('ws-dot');
   const status = document.getElementById('ws-status');
-  try {
-    ws = new WebSocket(WS_URL);
-  } catch {
+  registered = false;
+  try { ws = new WebSocket(WS_URL); } catch {
     dot.classList.add('offline');
     status.textContent = 'Server offline';
     return;
@@ -937,10 +1051,13 @@ function connectWS() {
   ws.onopen = () => {
     dot.classList.remove('offline');
     status.textContent = 'Connected';
+    // Register with the server
+    send({ type: 'register', v: 0, identity: { nametag: getPlayerName(), pubkey: '00'.repeat(32) } });
   };
   ws.onclose = () => {
     dot.classList.add('offline');
     status.textContent = 'Disconnected';
+    registered = false;
     ws = null;
     setTimeout(connectWS, 5000);
   };
@@ -949,46 +1066,123 @@ function connectWS() {
     status.textContent = 'Server offline';
   };
   ws.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      handleServerMessage(msg);
-    } catch {}
+    try { handleServerMessage(JSON.parse(e.data)); } catch {}
   };
 }
 
 function handleServerMessage(msg) {
   switch (msg.type) {
-    case 'lobby-state': updateLobby(msg); break;
-    case 'bracket': updateBracket(msg); break;
-    case 'round-open': case 'match-start': case 'match-end': case 'tournament-end':
-      // Re-render bracket with updated info if we have it
+    case 'registered':
+      registered = true;
+      onlinePlayers = msg.onlinePlayers || [];
+      document.getElementById('ws-status').textContent = msg.nametag;
+      renderOnlinePlayers();
+      break;
+    case 'player-online':
+      if (msg.online) { if (!onlinePlayers.includes(msg.nametag)) onlinePlayers.push(msg.nametag); }
+      else { onlinePlayers = onlinePlayers.filter(n => n !== msg.nametag); }
+      renderOnlinePlayers();
+      break;
+    case 'challenge-received':
+      showIncomingChallenge(msg);
+      break;
+    case 'challenge-sent':
+      document.getElementById('challenge-status').style.display = 'block';
+      document.getElementById('challenge-status').textContent = `Challenge sent to ${msg.opponent}. Waiting...`;
+      break;
+    case 'challenge-declined':
+      document.getElementById('challenge-status').style.display = 'block';
+      document.getElementById('challenge-status').textContent = `${msg.by} declined the challenge.`;
+      break;
+    case 'tournament-assigned':
+      // Player got assigned to a tournament — open the game!
+      const name = getPlayerName();
+      window.open(`dev.html?tournament=1&name=${encodeURIComponent(name)}&server=${encodeURIComponent(WS_URL)}&mode=legacy&tid=${msg.tournamentId}`, '_blank');
+      break;
+    case 'queue-state':
+      updateQueueState(msg);
+      break;
+    case 'lobby-state':
+      // From an active tournament
+      break;
+    case 'bracket':
+      bracketData = msg;
+      document.getElementById('bracket-phase').textContent = `${msg.rounds.length}-round bracket`;
+      renderBracket(msg);
+      break;
+    case 'tournament-end':
       if (bracketData) renderBracket(bracketData);
-      if (msg.type === 'tournament-end') {
-        document.getElementById('bracket-phase').textContent = 'Complete';
+      document.getElementById('bracket-phase').textContent = 'Complete';
+      break;
+    case 'error':
+      console.error('Server error:', msg.code, msg.message);
+      // Show inline if relevant
+      const cs = document.getElementById('challenge-status');
+      if (msg.code.includes('challenge') || msg.code === 'opponent_offline' || msg.code === 'opponent_busy') {
+        cs.style.display = 'block';
+        cs.textContent = msg.message;
+        cs.style.color = 'var(--magenta)';
       }
       break;
   }
 }
 
-function updateLobby(msg) {
-  const count = msg.players.length;
-  const cap = msg.capacity;
-  document.getElementById('lobby-count').innerHTML = `${count}<span> / ${cap}</span>`;
-  document.getElementById('lobby-bar').style.width = `${(count / cap) * 100}%`;
-  const ul = document.getElementById('lobby-players');
-  ul.innerHTML = msg.players.map(p => `<li>${esc(p.nametag)}</li>`).join('');
+function renderOnlinePlayers() {
+  const el = document.getElementById('online-list');
+  const me = getPlayerName();
+  const others = onlinePlayers.filter(n => n !== me);
+  if (others.length === 0) {
+    el.innerHTML = '<span style="color:var(--text-muted)">No other players online</span>';
+  } else {
+    el.innerHTML = others.map(n =>
+      `<span style="cursor:pointer;color:var(--cyan);margin-right:12px" onclick="challengePlayer('${esc(n)}')">${esc(n)}</span>`
+    ).join('');
+  }
 }
 
-function updateBracket(msg) {
-  bracketData = msg;
-  document.getElementById('bracket-phase').textContent = `Round ${msg.rounds.length} bracket`;
-  renderBracket(msg);
+function challengePlayer(opponent) {
+  document.getElementById('challenge-opponent').value = opponent;
+  document.getElementById('btn-challenge').click();
+}
+
+function showIncomingChallenge(msg) {
+  const container = document.getElementById('incoming-challenges');
+  const div = document.createElement('div');
+  div.style.cssText = 'padding:12px;background:var(--cyan-dim);border:1px solid var(--border-bright);border-radius:var(--radius);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between';
+  div.innerHTML = `
+    <span><strong>${esc(msg.from)}</strong> challenges you!${msg.wager > 0 ? ' (Wager: ' + msg.wager + ' UCT)' : ''}</span>
+    <span>
+      <button class="btn btn-primary" style="padding:6px 14px;font-size:10px" onclick="acceptChallenge('${msg.challengeId}',this)">Accept</button>
+      <button class="btn btn-ghost" style="padding:6px 14px;font-size:10px;margin-left:4px" onclick="declineChallenge('${msg.challengeId}',this)">Decline</button>
+    </span>`;
+  container.appendChild(div);
+}
+
+function acceptChallenge(id, btn) {
+  send({ type: 'challenge-accept', v: 0, challengeId: id });
+  btn.closest('div').remove();
+}
+
+function declineChallenge(id, btn) {
+  send({ type: 'challenge-decline', v: 0, challengeId: id });
+  btn.closest('div').remove();
+}
+
+function updateQueueState(msg) {
+  document.getElementById('queue-count').innerHTML = `${msg.total}<span> in queue</span>`;
+  document.getElementById('queue-bar').style.width = `${Math.min(100, (msg.total / 8) * 100)}%`;
+  if (msg.startsAt) {
+    const secs = Math.max(0, Math.ceil((msg.startsAt - Date.now()) / 1000));
+    document.getElementById('queue-countdown').textContent = `Starting in ${secs}s`;
+  } else {
+    document.getElementById('queue-countdown').textContent = msg.total >= 4 ? 'Countdown starting...' : `Need ${4 - msg.total} more players`;
+  }
 }
 
 function renderBracket(msg) {
   const container = document.getElementById('bracket-container');
   if (!msg.rounds || msg.rounds.length === 0) {
-    container.innerHTML = '<div class="bracket-empty">Bracket not yet generated</div>';
+    container.innerHTML = '<div class="bracket-empty">No active bracket</div>';
     return;
   }
   let html = '<div class="bracket">';
@@ -1002,11 +1196,9 @@ function renderBracket(msg) {
       const isBye = !match.playerA || !match.playerB;
       const isTBD = pA === 'TBD' && pB === 'TBD';
       let boxClass = 'match-box';
-      // Simple state detection from bracket data
       if (isTBD) boxClass += '';
       else if (isBye) boxClass += ' resolved';
       else boxClass += ' active';
-
       html += `<div class="${boxClass}">`;
       html += `<div class="match-player ${pA === 'TBD' ? 'tbd' : ''}"><span class="name">${esc(pA)}</span></div>`;
       html += `<div class="match-player ${pB === 'TBD' ? 'tbd' : ''}"><span class="name">${esc(pB)}</span></div>`;
@@ -1018,10 +1210,34 @@ function renderBracket(msg) {
   container.innerHTML = html;
 }
 
-function joinTournament() {
-  const name = document.getElementById('join-name').value.trim() || '@player';
-  window.open(`dev.html?tournament=1&name=${encodeURIComponent(name)}&server=${encodeURIComponent(WS_URL)}`, '_blank');
-}
+// ── Button handlers ────────────────────────────────────────────
+document.getElementById('btn-challenge').addEventListener('click', () => {
+  const opponent = document.getElementById('challenge-opponent').value.trim();
+  if (!opponent) return;
+  send({ type: 'challenge', v: 0, opponent, wager: 0 });
+  document.getElementById('challenge-status').style.display = 'block';
+  document.getElementById('challenge-status').style.color = 'var(--text-dim)';
+  document.getElementById('challenge-status').textContent = `Sending challenge to ${opponent}...`;
+});
+
+document.getElementById('btn-queue').addEventListener('click', () => {
+  send({ type: 'queue-join', v: 0 });
+  inQueue = true;
+  document.getElementById('btn-queue').style.display = 'none';
+  document.getElementById('btn-queue-leave').style.display = 'block';
+});
+
+document.getElementById('btn-queue-leave').addEventListener('click', () => {
+  send({ type: 'queue-leave', v: 0 });
+  inQueue = false;
+  document.getElementById('btn-queue').style.display = 'block';
+  document.getElementById('btn-queue-leave').style.display = 'none';
+});
+
+// Reconnect with new nametag when the input changes
+document.getElementById('player-name').addEventListener('change', () => {
+  if (ws) { ws.close(); }
+});
 
 connectWS();
 </script>
