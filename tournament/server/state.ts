@@ -16,12 +16,14 @@ import {
 	type BracketMessage,
 	type BracketSlot,
 	type LobbyStateMessage,
+	type MatchEndMessage,
 	type MatchStartMessage,
 	type OpponentInputMessage,
 	type OpponentReadyMessage,
 	type PublicIdentity,
 	type RoundOpenMessage,
 	type ServerMessage,
+	type TournamentEndMessage,
 } from '../protocol/messages';
 import { generateBracket, hashString } from './bracket';
 
@@ -273,6 +275,151 @@ export class Tournament {
 			matchId, tick, payload,
 		};
 		return [{ to: opponent, message: msg }];
+	}
+
+	/**
+	 * Submit a result hash from a player. When both players have
+	 * submitted, compare their resultHash values:
+	 *   - Agree → resolve the match, advance the winner.
+	 *   - Disagree → flag the match for operator review.
+	 * After resolving, checks whether the current round is fully
+	 * resolved and, if so, opens the next round (or ends the
+	 * tournament if this was the final).
+	 */
+	submitResult(
+		nametag: string,
+		matchId: string,
+		finalTick: number,
+		score: Record<string, number>,
+		winner: string,
+		inputsHash: string,
+		resultHash: string,
+	): Delivery[] {
+		const match = this.matches.get(matchId);
+		if (!match) return [errorTo(nametag, 'unknown_match', `no such match: ${matchId}`)];
+		if (match.phase !== 'ACTIVE' && match.phase !== 'AWAIT_HASHES') {
+			return [errorTo(nametag, 'wrong_phase', `match ${matchId} is in phase ${match.phase}`)];
+		}
+		const side = this.sideOf(nametag, match);
+		if (!side) return [errorTo(nametag, 'not_in_match', 'you are not in this match')];
+
+		const result = { finalTick, score, winner, inputsHash, resultHash };
+		if (side === 'A') match.resultA = result;
+		else match.resultB = result;
+
+		// Move to AWAIT_HASHES on first result
+		if (match.phase === 'ACTIVE') {
+			match.phase = 'AWAIT_HASHES';
+		}
+
+		// If both results are in, try to resolve
+		if (match.resultA && match.resultB) {
+			return this.resolveMatch(match);
+		}
+		return [];
+	}
+
+	/**
+	 * Compare the two result hashes and either resolve the match or
+	 * flag it as disputed. On resolution, advance the winner into
+	 * the next round and check whether the round (or tournament) is
+	 * complete.
+	 */
+	private resolveMatch(match: MatchState): Delivery[] {
+		const rA = match.resultA!;
+		const rB = match.resultB!;
+		const deliveries: Delivery[] = [];
+
+		if (rA.resultHash === rB.resultHash) {
+			// Hashes agree — winner is the agreed-upon winner
+			const winnerSide = rA.winner; // 'A' or 'B'
+			match.winner = winnerSide === 'A' ? match.playerA! : match.playerB!;
+			match.phase = 'RESOLVED';
+
+			const endMsg: MatchEndMessage = {
+				type: 'match-end', v: PROTOCOL_VERSION,
+				matchId: match.matchId,
+				winner: match.winner,
+				reason: 'death',
+				scores: rA.score as Record<string, number>,
+			};
+			deliveries.push({ to: match.playerA!, message: endMsg });
+			deliveries.push({ to: match.playerB!, message: endMsg });
+
+			this.advanceWinner(match.roundIndex, match.slotIndex, match.winner);
+		} else {
+			// Hashes disagree — flag the match
+			match.phase = 'RESOLVED';
+			match.winner = null; // disputed
+
+			const endMsg: MatchEndMessage = {
+				type: 'match-end', v: PROTOCOL_VERSION,
+				matchId: match.matchId,
+				winner: '',
+				reason: 'flagged',
+				scores: {},
+			};
+			deliveries.push({ to: match.playerA!, message: endMsg });
+			deliveries.push({ to: match.playerB!, message: endMsg });
+		}
+
+		// Check if the round is fully resolved
+		deliveries.push(...this.checkRoundComplete(match.roundIndex));
+		return deliveries;
+	}
+
+	/**
+	 * If every match in the given round is RESOLVED (or BYE), advance
+	 * to the next round or end the tournament if this was the final.
+	 */
+	private checkRoundComplete(round: number): Delivery[] {
+		if (!this.bracket) return [];
+		const allResolved = this.bracket[round].every((slot) => {
+			const m = this.matches.get(slot.matchId);
+			return m && (m.phase === 'RESOLVED' || m.phase === 'BYE');
+		});
+		if (!allResolved) return [];
+
+		const nextRound = round + 1;
+		if (nextRound >= this.bracket.length) {
+			// This was the final — end the tournament
+			return this.endTournament();
+		}
+
+		// Resolve any byes in the next round and open it
+		this.resolveByes(nextRound);
+		return this.emitRoundOpen(nextRound);
+	}
+
+	/**
+	 * End the tournament and emit tournament-end with standings.
+	 * Payouts are stubbed for now — no on-chain transfers.
+	 */
+	private endTournament(): Delivery[] {
+		this.phase = 'DONE';
+
+		// Determine standings from the bracket (champion = winner of
+		// the final match, runner-up = loser, etc.)
+		const standings: TournamentEndMessage['standings'] = [];
+		if (this.bracket && this.bracket.length > 0) {
+			const finalRound = this.bracket[this.bracket.length - 1];
+			const finalMatch = this.matches.get(finalRound[0].matchId);
+			if (finalMatch?.winner) {
+				standings.push({ place: 1, nametag: finalMatch.winner, payout: '0' });
+				const runnerUp = finalMatch.winner === finalMatch.playerA
+					? finalMatch.playerB!
+					: finalMatch.playerA!;
+				standings.push({ place: 2, nametag: runnerUp, payout: '0' });
+			}
+		}
+
+		const endMsg: TournamentEndMessage = {
+			type: 'tournament-end', v: PROTOCOL_VERSION,
+			tournamentId: this.id,
+			standings,
+			payoutTxs: [], // stub — no real payout yet
+		};
+		return [{ to: '*', message: endMsg }];
 	}
 
 	private sideOf(nametag: string, match: MatchState): 'A' | 'B' | null {
