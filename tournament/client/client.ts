@@ -32,14 +32,19 @@
 import {
 	PROTOCOL_VERSION,
 	type BracketMessage,
+	type ChallengeReceivedMessage,
 	type ErrorMessage,
 	type LobbyStateMessage,
 	type MatchEndMessage,
 	type MatchStartMessage,
 	type OpponentInputMessage,
 	type OpponentReadyMessage,
+	type PlayerOnlineMessage,
+	type QueueStateMessage,
+	type RegisteredMessage,
 	type RoundOpenMessage,
 	type ServerMessage,
+	type TournamentAssignedMessage,
 	type TournamentEndMessage,
 } from '../protocol/messages';
 
@@ -55,6 +60,14 @@ export interface TournamentClientOptions {
 	/** WebSocket constructor. In browser: window.WebSocket. In Node: require('ws').WebSocket. */
 	WebSocketCtor?: new (url: string) => WebSocket;
 
+	// ── Lobby callbacks ──
+	onRegistered?: MaybeCallback<RegisteredMessage>;
+	onPlayerOnline?: MaybeCallback<PlayerOnlineMessage>;
+	onChallengeReceived?: MaybeCallback<ChallengeReceivedMessage>;
+	onTournamentAssigned?: MaybeCallback<TournamentAssignedMessage>;
+	onQueueState?: MaybeCallback<QueueStateMessage>;
+
+	// ── Match callbacks ──
 	onLobbyState?: MaybeCallback<LobbyStateMessage>;
 	onBracket?: MaybeCallback<BracketMessage>;
 	onRoundOpen?: MaybeCallback<RoundOpenMessage>;
@@ -115,6 +128,16 @@ export class TournamentClient {
 
 	// ── Protocol actions ──────────────────────────────────────────────
 
+	/** Register with the server (required before any lobby action). */
+	register(): void {
+		this.send({
+			type: 'register',
+			v: PROTOCOL_VERSION,
+			identity: { nametag: this.opts.nametag, pubkey: this.opts.pubkey },
+		});
+	}
+
+	/** Legacy join (for backward compatibility with tests). */
 	join(
 		tournamentId: string,
 		txHash = 'stub',
@@ -130,6 +153,31 @@ export class TournamentClient {
 			entry: { txHash, amount, coinId },
 			signature,
 		});
+	}
+
+	/** Send a 1v1 challenge to a specific player. */
+	challenge(opponent: string, wager = 0): void {
+		this.send({ type: 'challenge', v: PROTOCOL_VERSION, opponent, wager });
+	}
+
+	/** Accept an incoming challenge. */
+	acceptChallenge(challengeId: string): void {
+		this.send({ type: 'challenge-accept', v: PROTOCOL_VERSION, challengeId });
+	}
+
+	/** Decline an incoming challenge. */
+	declineChallenge(challengeId: string): void {
+		this.send({ type: 'challenge-decline', v: PROTOCOL_VERSION, challengeId });
+	}
+
+	/** Join the rolling quick-match queue. */
+	joinQueue(): void {
+		this.send({ type: 'queue-join', v: PROTOCOL_VERSION });
+	}
+
+	/** Leave the rolling queue. */
+	leaveQueue(): void {
+		this.send({ type: 'queue-leave', v: PROTOCOL_VERSION });
 	}
 
 	ready(matchId: string): void {
@@ -186,33 +234,20 @@ export class TournamentClient {
 
 	private dispatch(msg: ServerMessage): void {
 		switch (msg.type) {
-			case 'lobby-state':
-				this.opts.onLobbyState?.(msg);
-				break;
-			case 'bracket':
-				this.opts.onBracket?.(msg);
-				break;
-			case 'round-open':
-				this.opts.onRoundOpen?.(msg);
-				break;
-			case 'opponent-ready':
-				this.opts.onOpponentReady?.(msg);
-				break;
-			case 'match-start':
-				this.opts.onMatchStart?.(msg);
-				break;
-			case 'opponent-input':
-				this.opts.onOpponentInput?.(msg);
-				break;
-			case 'match-end':
-				this.opts.onMatchEnd?.(msg);
-				break;
-			case 'tournament-end':
-				this.opts.onTournamentEnd?.(msg);
-				break;
-			case 'error':
-				this.opts.onError?.(msg);
-				break;
+			case 'registered': this.opts.onRegistered?.(msg); break;
+			case 'player-online': this.opts.onPlayerOnline?.(msg); break;
+			case 'challenge-received': this.opts.onChallengeReceived?.(msg); break;
+			case 'tournament-assigned': this.opts.onTournamentAssigned?.(msg); break;
+			case 'queue-state': this.opts.onQueueState?.(msg); break;
+			case 'lobby-state': this.opts.onLobbyState?.(msg); break;
+			case 'bracket': this.opts.onBracket?.(msg); break;
+			case 'round-open': this.opts.onRoundOpen?.(msg); break;
+			case 'opponent-ready': this.opts.onOpponentReady?.(msg); break;
+			case 'match-start': this.opts.onMatchStart?.(msg); break;
+			case 'opponent-input': this.opts.onOpponentInput?.(msg); break;
+			case 'match-end': this.opts.onMatchEnd?.(msg); break;
+			case 'tournament-end': this.opts.onTournamentEnd?.(msg); break;
+			case 'error': this.opts.onError?.(msg); break;
 		}
 	}
 }

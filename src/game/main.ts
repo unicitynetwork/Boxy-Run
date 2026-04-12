@@ -250,6 +250,30 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		nametag: name,
 		pubkey: name.replace('@', '') + '00'.repeat(31),
 
+		onRegistered: (msg) => {
+			console.log('Registered. Online players:', msg.onlinePlayers);
+		},
+
+		onChallengeReceived: (msg) => {
+			// Auto-accept challenges for now (in future: show accept/decline UI)
+			console.log(`Challenge from ${msg.from}, wager: ${msg.wager}`);
+			client.acceptChallenge(msg.challengeId);
+			showOverlay(`Challenge accepted from ${msg.from}!`);
+		},
+
+		onTournamentAssigned: (msg) => {
+			console.log(`Assigned to tournament ${msg.tournamentId} (${msg.tournamentType})`);
+		},
+
+		onQueueState: (msg) => {
+			const countdown = msg.startsAt
+				? `<br>Starting in ${Math.ceil((msg.startsAt - Date.now()) / 1000)}s`
+				: '';
+			showOverlay(
+				`In queue: position ${msg.position} of ${msg.total}${countdown}`,
+			);
+		},
+
 		onLobbyState: (msg) => {
 			showOverlay(
 				`Lobby: ${msg.players.length}/${msg.capacity} players<br>` +
@@ -337,12 +361,31 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		},
 	});
 
-	// Connect and join
+	// Connect and enter lobby
+	const mode = params.get('mode') || 'queue'; // challenge, queue, or legacy join
+	const opponent = params.get('opponent') || '';
+
 	client
 		.connect()
 		.then(() => {
 			console.log('Connected to tournament server');
-			client.join(tournamentId);
+			client.register();
+
+			if (mode === 'challenge' && opponent) {
+				// Wait for registration, then send challenge
+				setTimeout(() => {
+					client.challenge(opponent);
+					showOverlay(`Challenge sent to ${opponent}...<br>Waiting for response`);
+				}, 200);
+			} else if (mode === 'queue') {
+				setTimeout(() => {
+					client.joinQueue();
+					showOverlay('Joined queue...<br>Waiting for players');
+				}, 200);
+			} else {
+				// Legacy: direct join with tournamentId
+				client.join(tournamentId);
+			}
 		})
 		.catch((err) => {
 			showOverlay(`Failed to connect: ${err}`);
