@@ -44,6 +44,8 @@ export function makePlayer(url: string, nametag: string) {
 		onRegistered: (msg) => dispatch('registered', msg),
 		onPlayerOnline: (msg) => dispatch('player-online', msg),
 		onChallengeReceived: (msg) => dispatch('challenge-received', msg),
+		onChallengeSent: (msg) => dispatch('challenge-sent', msg),
+		onChallengeDeclined: (msg) => dispatch('challenge-declined', msg),
 		onTournamentAssigned: (msg) => dispatch('tournament-assigned', msg),
 		onQueueState: (msg) => dispatch('queue-state', msg),
 		onLobbyState: (msg) => dispatch('lobby-state', msg),

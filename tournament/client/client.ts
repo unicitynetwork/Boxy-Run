@@ -32,7 +32,9 @@
 import {
 	PROTOCOL_VERSION,
 	type BracketMessage,
+	type ChallengeDeclinedMessage,
 	type ChallengeReceivedMessage,
+	type ChallengeSentMessage,
 	type ErrorMessage,
 	type LobbyStateMessage,
 	type MatchEndMessage,
@@ -64,6 +66,8 @@ export interface TournamentClientOptions {
 	onRegistered?: MaybeCallback<RegisteredMessage>;
 	onPlayerOnline?: MaybeCallback<PlayerOnlineMessage>;
 	onChallengeReceived?: MaybeCallback<ChallengeReceivedMessage>;
+	onChallengeSent?: MaybeCallback<ChallengeSentMessage>;
+	onChallengeDeclined?: MaybeCallback<ChallengeDeclinedMessage>;
 	onTournamentAssigned?: MaybeCallback<TournamentAssignedMessage>;
 	onQueueState?: MaybeCallback<QueueStateMessage>;
 
@@ -237,6 +241,8 @@ export class TournamentClient {
 			case 'registered': this.opts.onRegistered?.(msg); break;
 			case 'player-online': this.opts.onPlayerOnline?.(msg); break;
 			case 'challenge-received': this.opts.onChallengeReceived?.(msg); break;
+			case 'challenge-sent': this.opts.onChallengeSent?.(msg); break;
+			case 'challenge-declined': this.opts.onChallengeDeclined?.(msg); break;
 			case 'tournament-assigned': this.opts.onTournamentAssigned?.(msg); break;
 			case 'queue-state': this.opts.onQueueState?.(msg); break;
 			case 'lobby-state': this.opts.onLobbyState?.(msg); break;
