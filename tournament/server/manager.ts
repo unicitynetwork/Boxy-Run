@@ -52,7 +52,6 @@ export class TournamentManager {
 	private playerToTournament = new Map<string, string>();
 	private challenges = new Map<string, PendingChallenge>();
 	private queue: string[] = [];
-	private queueCountdownTimer: ReturnType<typeof setTimeout> | null = null;
 	private queueStartsAt: number | null = null;
 	private nextId = 1;
 
@@ -336,12 +335,10 @@ export class TournamentManager {
 
 		this.queue.push(nametag);
 
-		// Start countdown when we hit min players
-		if (this.queue.length >= this.queueMinPlayers && !this.queueCountdownTimer) {
+		// Start countdown when we hit min players.
+		// The actual firing happens in tick() which runs every second.
+		if (this.queue.length >= this.queueMinPlayers && !this.queueStartsAt) {
 			this.queueStartsAt = Date.now() + this.queueCountdownMs;
-			this.queueCountdownTimer = setTimeout(() => {
-				this.fireQueue();
-			}, this.queueCountdownMs);
 		}
 
 		return this.broadcastQueueState();
@@ -353,9 +350,7 @@ export class TournamentManager {
 		this.queue.splice(idx, 1);
 
 		// Cancel countdown if we dropped below min
-		if (this.queue.length < this.queueMinPlayers && this.queueCountdownTimer) {
-			clearTimeout(this.queueCountdownTimer);
-			this.queueCountdownTimer = null;
+		if (this.queue.length < this.queueMinPlayers) {
 			this.queueStartsAt = null;
 		}
 
@@ -364,8 +359,8 @@ export class TournamentManager {
 
 	/** Called when the queue countdown expires. Creates a rolling tournament. */
 	private fireQueue(): ManagerDelivery[] {
-		this.queueCountdownTimer = null;
 		this.queueStartsAt = null;
+		console.log(`[queue] fireQueue: ${this.queue.length} players in queue`);
 
 		if (this.queue.length < 2) return [];
 

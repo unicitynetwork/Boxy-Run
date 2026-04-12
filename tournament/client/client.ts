@@ -97,8 +97,10 @@ export class TournamentClient {
 	 * Rejects if the connection fails.
 	 */
 	private reconnectTimer: any = null;
+	private intentionalClose = false;
 
 	connect(): Promise<void> {
+		this.intentionalClose = false;
 		return new Promise((resolve, reject) => {
 			this.connectInternal(resolve, reject);
 		});
@@ -129,10 +131,10 @@ export class TournamentClient {
 		};
 		ws.onclose = () => {
 			this.ws = null;
-			console.log('[tournament-client] disconnected, reconnecting in 2s');
-			// Auto-reconnect after 2 seconds
-			if (!this.reconnectTimer) {
+			if (!this.intentionalClose && !this.reconnectTimer) {
+				console.log('[tournament-client] disconnected, reconnecting in 2s');
 				this.reconnectTimer = setTimeout(() => {
+					this.reconnectTimer = null;
 					this.connectInternal();
 				}, 2000);
 			}
@@ -152,6 +154,11 @@ export class TournamentClient {
 	}
 
 	disconnect(): void {
+		this.intentionalClose = true;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
 		this.ws?.close();
 	}
 
