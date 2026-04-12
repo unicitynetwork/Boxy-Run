@@ -828,6 +828,7 @@ main {
             <div class="lobby-bar"><div class="lobby-bar-fill" id="queue-bar" style="width:0%"></div></div>
             <div id="queue-countdown" style="margin-top:8px;font-size:13px;color:var(--text-dim)"></div>
           </div>
+          <div id="last-match-result" style="display:none;margin-bottom:16px;padding:12px;background:rgba(0,229,255,0.05);border:1px solid var(--border-bright);border-radius:var(--radius)"></div>
           <button class="btn btn-primary" id="btn-queue" style="width:100%">Join Queue</button>
           <button class="btn btn-ghost" id="btn-queue-leave" style="width:100%;display:none;margin-top:8px">Leave Queue</button>
           <div id="bracket-section" style="margin-top:20px;display:none">
@@ -1112,6 +1113,32 @@ const hashTab = location.hash.replace('#', '');
 if (hashTab && document.getElementById('tab-' + hashTab)) {
   activateTab(hashTab);
 }
+
+// Show last match result on Quick Match tab
+try {
+  const raw = sessionStorage.getItem('lastMatchResult');
+  if (raw) {
+    const r = JSON.parse(raw);
+    // Only show if less than 5 minutes old
+    if (Date.now() - r.timestamp < 300000) {
+      const el = document.getElementById('last-match-result');
+      if (el) {
+        const isWinner = r.winner === getPlayerName() || r.winner === r.myName;
+        el.style.display = 'block';
+        el.innerHTML = `
+          <div style="font-size:10px;font-family:var(--font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Last Match</div>
+          <div style="font-size:16px;font-weight:bold;color:${isWinner ? '#2d6a4f' : '#c1121f'};margin-bottom:4px">
+            ${isWinner ? 'YOU WON!' : 'YOU LOST'}
+          </div>
+          <div style="font-size:13px;color:var(--text-dim)">
+            Your score: ${r.myScore.toLocaleString()} vs ${esc(r.oppName)}: ${r.oppScore.toLocaleString()}
+          </div>
+        `;
+      }
+    }
+    sessionStorage.removeItem('lastMatchResult');
+  }
+} catch {}
 
 // ── WebSocket connection + lobby state ─────────────────────────
 let ws = null;

@@ -402,6 +402,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			const iWon = msg.winner === name;
 			const myScore = msg.scores?.[name] ?? myState.score;
 			const oppScore = msg.scores?.[lastOpponentName] ?? 0;
+			saveLastResult(msg.winner, myScore, oppScore);
 
 			let statusHtml: string;
 			if (msg.reason === 'dq') {
@@ -892,6 +893,21 @@ function rematchButton(): string {
 function backToArenaLink(): string {
 	const tab = lastTournamentType === 'rolling' ? '#quickmatch' : '';
 	return `<a href="tournament.html${tab}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO ARENA</a>`;
+}
+
+/** Store last match result for display on the arena page. */
+function saveLastResult(winner: string, myScore: number, oppScore: number): void {
+	try {
+		sessionStorage.setItem('lastMatchResult', JSON.stringify({
+			winner,
+			myName: lastOpponentName ? name : '',
+			oppName: lastOpponentName,
+			myScore,
+			oppScore,
+			type: lastTournamentType,
+			timestamp: Date.now(),
+		}));
+	} catch {}
 }
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */
