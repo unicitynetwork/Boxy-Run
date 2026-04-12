@@ -82,7 +82,57 @@ export class TournamentManager {
 	register(identity: PublicIdentity): ManagerDelivery[] {
 		const tag = identity.nametag;
 		if (this.registered.has(tag)) {
-			return [err(tag, 'already_registered', `${tag} is already registered`)];
+			// Re-registration: update identity, treat as success.
+			// This handles page refreshes and game-page redirects where
+			// the player is already registered from tournament.html.
+			const existing = this.registered.get(tag)!;
+			this.registered.set(tag, { identity, tournamentId: existing.tournamentId });
+			const others = Array.from(this.registered.keys()).filter((t) => t !== tag);
+			const deliveries: ManagerDelivery[] = [{
+				to: tag,
+				message: {
+					type: 'registered', v: V,
+					nametag: tag,
+					onlinePlayers: others,
+				} satisfies RegisteredMessage,
+			}];
+			// If the player is already in a tournament (e.g., redirected
+			// from tournament.html after accepting a challenge), re-send
+			// the tournament state so the game page picks up where it
+			// left off.
+			if (existing.tournamentId) {
+				const t = this.tournaments.get(existing.tournamentId);
+				if (t) {
+					deliveries.push({
+						to: tag,
+						message: { type: 'tournament-assigned', v: V,
+							tournamentId: existing.tournamentId,
+							tournamentType: 'challenge' as const,
+						} satisfies TournamentAssignedMessage,
+					});
+					const bracket = t.buildPublicBracket();
+					if (bracket) deliveries.push(asMD({ to: tag, message: bracket }));
+					// Re-send round-open for any READY_WAIT match this player is in
+					for (const match of t.getAllMatches()) {
+						if (match.phase === 'READY_WAIT' &&
+							(match.playerA === tag || match.playerB === tag)) {
+							const opponent = match.playerA === tag ? match.playerB! : match.playerA!;
+							deliveries.push({
+								to: tag,
+								message: {
+									type: 'round-open', v: V,
+									matchId: match.matchId,
+									roundIndex: match.roundIndex,
+									opponent,
+									openedAt: Date.now(),
+									deadline: Date.now() + 24 * 60 * 60 * 1000,
+								},
+							});
+						}
+					}
+				}
+			}
+			return deliveries;
 		}
 		this.registered.set(tag, { identity, tournamentId: null });
 

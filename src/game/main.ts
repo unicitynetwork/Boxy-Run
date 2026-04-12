@@ -361,8 +361,10 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		},
 	});
 
-	// Connect and enter lobby
-	const mode = params.get('mode') || 'queue'; // challenge, queue, or legacy join
+	// Connect and register. The server will re-send tournament state
+	// if we're already assigned to one (e.g., redirected from the
+	// tournament page after accepting a challenge).
+	const mode = params.get('mode') || 'queue';
 	const opponent = params.get('opponent') || '';
 
 	client
@@ -372,7 +374,6 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			client.register();
 
 			if (mode === 'challenge' && opponent) {
-				// Wait for registration, then send challenge
 				setTimeout(() => {
 					client.challenge(opponent);
 					showOverlay(`Challenge sent to ${opponent}...<br>Waiting for response`);
@@ -382,10 +383,10 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 					client.joinQueue();
 					showOverlay('Joined queue...<br>Waiting for players');
 				}, 200);
-			} else {
-				// Legacy: direct join with tournamentId
-				client.join(tournamentId);
 			}
+			// For mode=legacy or any other mode: just register and wait.
+			// The server re-sends tournament-assigned + bracket + round-open
+			// if we're already in a tournament.
 		})
 		.catch((err) => {
 			showOverlay(`Failed to connect: ${err}`);

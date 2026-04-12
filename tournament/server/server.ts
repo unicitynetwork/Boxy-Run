@@ -172,8 +172,13 @@ wss.on('connection', (ws, req) => {
 		const nametag = socketToNametag.get(ws);
 		if (nametag) {
 			socketToNametag.delete(ws);
-			nametagToSocket.delete(nametag);
-			deliverManager(manager.unregister(nametag));
+			// Only unregister if this socket is still the active one for
+			// this nametag. On page refresh, a new socket may have already
+			// replaced this one via re-registration.
+			if (nametagToSocket.get(nametag) === ws) {
+				nametagToSocket.delete(nametag);
+				deliverManager(manager.unregister(nametag));
+			}
 		}
 	});
 
