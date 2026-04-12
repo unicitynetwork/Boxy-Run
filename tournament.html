@@ -346,7 +346,7 @@ main {
   gap: 24px;
 }
 
-.lobby-card .status-dot {
+.status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -354,9 +354,10 @@ main {
   animation: pulse-dot 2s ease-in-out infinite;
   display: inline-block;
   margin-right: 8px;
+  flex-shrink: 0;
 }
 
-.lobby-card .status-dot.offline {
+.status-dot.offline {
   background: var(--text-muted);
   animation: none;
 }
@@ -1043,13 +1044,7 @@ function checkWallet() {
     walletDiv.style.display = 'flex';
     noneDiv.style.display = 'none';
     document.getElementById('wallet-nametag').textContent = myNametag;
-
-    // Auto-connect to tournament server if not already
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      connectWS();
-    } else if (!registered) {
-      send({ type: 'register', v: 0, identity: { nametag: myNametag, pubkey: '00'.repeat(32) } });
-    }
+    registerWithServer();
   }
 }
 
@@ -1074,7 +1069,11 @@ document.getElementById('btn-dev-join').addEventListener('click', () => {
   document.getElementById('identity-wallet').style.display = 'flex';
   document.getElementById('identity-none').style.display = 'none';
   document.getElementById('wallet-nametag').textContent = myNametag + ' (dev)';
-  connectWS();
+  registerWithServer();
+});
+// Also support Enter key in the dev input
+document.getElementById('player-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btn-dev-join').click();
 });
 
 // ── Tab switching ──────────────────────────────────────────────
@@ -1102,35 +1101,50 @@ function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+function setDot(online) {
+  ['ws-dot', 'ws-dot-nowall'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { if (online) el.classList.remove('offline'); else el.classList.add('offline'); }
+  });
+}
+
 function connectWS() {
-  const dot = document.getElementById('ws-dot');
   const status = document.getElementById('ws-status');
   registered = false;
-  try { ws = new WebSocket(WS_URL); } catch {
-    dot.classList.add('offline');
+  console.log('[lobby] connecting to', WS_URL);
+  try { ws = new WebSocket(WS_URL); } catch (e) {
+    console.error('[lobby] WebSocket constructor failed:', e);
+    setDot(false);
     status.textContent = 'Server offline';
     return;
   }
   ws.onopen = () => {
-    dot.classList.remove('offline');
-    status.textContent = 'Connected';
-    // Register with the server
-    send({ type: 'register', v: 0, identity: { nametag: getPlayerName(), pubkey: '00'.repeat(32) } });
+    console.log('[lobby] connected');
+    setDot(true);
+    status.textContent = 'Connected — enter nametag to play';
+    // If we already have a nametag (wallet was fast), register now
+    if (myNametag) registerWithServer();
   };
   ws.onclose = () => {
-    dot.classList.add('offline');
+    setDot(false);
     status.textContent = 'Disconnected';
     registered = false;
     ws = null;
     setTimeout(connectWS, 5000);
   };
   ws.onerror = () => {
-    dot.classList.add('offline');
+    setDot(false);
     status.textContent = 'Server offline';
   };
   ws.onmessage = (e) => {
     try { handleServerMessage(JSON.parse(e.data)); } catch {}
   };
+}
+
+function registerWithServer() {
+  if (!myNametag || registered) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  send({ type: 'register', v: 0, identity: { nametag: myNametag, pubkey: '00'.repeat(32) } });
 }
 
 function handleServerMessage(msg) {
@@ -1297,12 +1311,9 @@ document.getElementById('btn-queue-leave').addEventListener('click', () => {
   document.getElementById('btn-queue-leave').style.display = 'none';
 });
 
-// Auto-connect if wallet is already available on page load
-checkWallet();
-// If no wallet, don't auto-connect — wait for dev button or wallet connect
-if (!myNametag) {
-  document.getElementById('ws-status').textContent = 'Connect wallet to play';
-}
+// Always connect WebSocket on load. Registration happens when
+// wallet connects or dev "Go" button is clicked.
+connectWS();
 </script>
 </body>
 </html>

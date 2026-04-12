@@ -284,7 +284,7 @@ setInterval(() => {
 }, 1000);
 
 // ── Start ────────────────────────────────────────────────────────
-httpServer.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, '::', () => {
 	console.log(`[server] listening on http://0.0.0.0:${PORT}`);
 	console.log(`[server] static files: ${STATIC_DIR}`);
 	console.log(`[server] queue: ${QUEUE_MIN}-${QUEUE_MAX} players, ${QUEUE_COUNTDOWN_MS / 1000}s countdown`);
