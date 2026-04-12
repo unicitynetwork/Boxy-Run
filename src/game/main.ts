@@ -244,6 +244,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	let resultSubmitted = false;
 	let opponentDeathNotified = false;
 	let myDeathNotified = false;
+	let inTournament = false; // true while in any active tournament (may span multiple rounds)
 	/** Buffered opponent inputs keyed by tick number. */
 	const opponentInputBuffer: Map<number, CharacterAction[]> = new Map();
 
@@ -261,10 +262,10 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		onRegistered: (msg) => {
 			console.log('Registered. Online players:', msg.onlinePlayers);
 			showOverlay('Waiting for match...');
-			// If no match arrives within 3 seconds, the tournament is
-			// gone (page refresh after match ended). Show options.
+			// If no match arrives within 3 seconds and we're not in a
+			// tournament waiting between rounds, show options.
 			setTimeout(() => {
-				if (!matchId && !matchActive) {
+				if (!matchId && !matchActive && !inTournament) {
 					showOverlay(
 						'<div style="font-size:16px;margin-bottom:16px">No active match</div>' +
 						rematchButton() + backToArenaLink(),
@@ -288,6 +289,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		onTournamentAssigned: (msg) => {
 			console.log(`Assigned to tournament ${msg.tournamentId} (${msg.tournamentType})`);
 			lastTournamentType = msg.tournamentType;
+			inTournament = true;
 			showOverlay('Tournament found! Waiting for bracket...');
 		},
 
@@ -310,6 +312,12 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onBracket: (msg) => {
 			console.log('Bracket received:', msg.rounds);
+			// Show bracket info for multi-round tournaments
+			if (msg.rounds && msg.rounds.length > 1) {
+				const totalPlayers = msg.rounds[0].length * 2;
+				const totalRounds = msg.rounds.length;
+				console.log(`Tournament: ${totalPlayers} players, ${totalRounds} rounds`);
+			}
 		},
 
 		onRoundOpen: (msg) => {
@@ -404,6 +412,15 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			const oppScore = msg.scores?.[lastOpponentName] ?? 0;
 			saveLastResult(msg.winner, myScore, oppScore);
 
+			// Reset match state so we can accept the next round
+			matchId = null;
+			matchActive = false;
+			matchOver = false;
+			resultSubmitted = false;
+			opponentDeathNotified = false;
+			myDeathNotified = false;
+			if (render.opponent) render.opponent.root.visible = false;
+
 			let statusHtml: string;
 			if (msg.reason === 'dq') {
 				statusHtml = iWon
@@ -414,19 +431,28 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 					? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
 					: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
 			}
-			showOverlay(
-				statusHtml +
-				`<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>` +
-				rematchButton() + backToArenaLink(),
-			);
+
+			const scoreHtml = `<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>`;
+
+			if (iWon && inTournament) {
+				// Won this round — might have a next round coming
+				showOverlay(
+					statusHtml + scoreHtml +
+					'<div style="font-size:14px;color:#666">Waiting for next round...</div>',
+				);
+			} else {
+				// Lost or final match
+				inTournament = false;
+				showOverlay(
+					statusHtml + scoreHtml +
+					rematchButton() + backToArenaLink(),
+				);
+			}
 		},
 
 		onTournamentEnd: (msg) => {
 			console.log('Tournament end:', msg);
-			// Don't overwrite the both-dead result screen if it's already
-			// showing — it has the actual scores. Only show tournament-end
-			// if we don't already have a result displayed.
-			if (resultSubmitted) return;
+			inTournament = false;
 
 			let resultText = '';
 			if (msg.standings && msg.standings.length > 0) {

@@ -14,7 +14,8 @@ primary_region = 'lhr'
   MIN_PLAYERS = '2'
   PORT = '8080'
   STATIC_DIR = '/app'
-  QUEUE_MIN_PLAYERS = '2'
+  QUEUE_MIN_PLAYERS = '4'
+  QUEUE_MAX_PLAYERS = '4'
   QUEUE_COUNTDOWN_MS = '30000'
 
 [[mounts]]
