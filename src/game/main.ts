@@ -70,6 +70,9 @@ function walletCanPlay(): boolean {
 	return w.isDepositPaid;
 }
 
+// Shared state for rematch
+let lastOpponentName = '';
+
 // Key codes
 const KEY_LEFT = 37;
 const KEY_UP = 38;
@@ -238,7 +241,6 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	let resultSubmitted = false;
 	let opponentDeathNotified = false;
 	let myDeathNotified = false;
-	let lastOpponentName = '';
 
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
@@ -259,10 +261,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 				if (!matchId && !matchActive) {
 					showOverlay(
 						`Match ended.<br><br>` +
-						(lastOpponentName
-							? `<button onclick="window.__rematch()" style="padding:10px 24px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:bold;cursor:pointer;letter-spacing:0.1em;margin-right:12px">REMATCH</button>`
-							: '') +
-						backToArenaLink(),
+						rematchButton() + backToArenaLink(),
 					);
 				}
 			}, 500);
@@ -378,7 +377,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 			removeOpponentHud();
 			showOverlay(
 				`Match over! Winner: ${msg.winner}<br>Reason: ${msg.reason}<br><br>` +
-				backToArenaLink(),
+				rematchButton() + backToArenaLink(),
 			);
 		},
 
@@ -389,7 +388,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 				.join('<br>');
 			showOverlay(
 				`Tournament complete!<br><br>${lines}<br><br>` +
-				backToArenaLink(),
+				rematchButton() + backToArenaLink(),
 			);
 		},
 
@@ -542,17 +541,9 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 					);
 
 					const status = winner === mySide ? 'You win!' : 'You lose!';
-					const opponentName = mySide === 'A'
-						? (opponentState ? '@' + name.replace('@','') : '')
-						: name;
-					// Get opponent's actual nametag from the round-open/match-start
-					const oppNametag = lastOpponentName || '';
 					showOverlay(
 						`${status}<br>Your score: ${myScore} vs Opponent: ${oppScore}<br><br>` +
-						(oppNametag
-							? `<button onclick="window.__rematch()" style="padding:10px 24px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:bold;cursor:pointer;letter-spacing:0.1em;margin-right:12px">REMATCH</button>`
-							: '') +
-						backToArenaLink(),
+						rematchButton() + backToArenaLink(),
 					);
 					break;
 				}
@@ -765,6 +756,11 @@ function installTouchControls(opts: {
 		},
 		{ passive: true },
 	);
+}
+
+function rematchButton(): string {
+	if (!lastOpponentName) return '';
+	return '<button onclick="window.__rematch()" style="padding:10px 24px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:bold;cursor:pointer;letter-spacing:0.1em;margin-right:12px">REMATCH</button>';
 }
 
 function backToArenaLink(): string {
