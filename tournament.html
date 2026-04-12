@@ -822,6 +822,12 @@ main {
           </div>
           <button class="btn btn-primary" id="btn-queue" style="width:100%">Join Queue</button>
           <button class="btn btn-ghost" id="btn-queue-leave" style="width:100%;display:none;margin-top:8px">Leave Queue</button>
+          <div id="bracket-section" style="margin-top:20px;display:none">
+            <div style="font-size:10px;font-family:var(--font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">
+              Bracket <span id="bracket-phase" style="color:var(--text-dim)"></span>
+            </div>
+            <div class="bracket-container" id="bracket-container"></div>
+          </div>
         </div>
       </div>
 
@@ -838,16 +844,6 @@ main {
       </div>
     </div>
 
-    <!-- Active bracket (shown when in a tournament) -->
-    <div class="card reveal" style="margin-top:24px">
-      <div class="card-header">
-        <h3>Active Bracket</h3>
-        <span class="lb-refresh" id="bracket-phase">No active tournament</span>
-      </div>
-      <div class="card-body bracket-container" id="bracket-container">
-        <div class="bracket-empty">Join a match to see the bracket here.</div>
-      </div>
-    </div>
   </section>
 
   <!-- ── LEADERBOARDS ──────────────────────────────────────── -->
@@ -1158,7 +1154,8 @@ function handleServerMessage(msg) {
       break;
     case 'bracket':
       bracketData = msg;
-      document.getElementById('bracket-phase').textContent = `${msg.rounds.length}-round bracket`;
+      document.getElementById('bracket-section').style.display = 'block';
+      document.getElementById('bracket-phase').textContent = `— ${msg.rounds.length} rounds`;
       renderBracket(msg);
       break;
     case 'tournament-end':
