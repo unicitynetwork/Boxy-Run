@@ -238,6 +238,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	let resultSubmitted = false;
 	let opponentDeathNotified = false;
 	let myDeathNotified = false;
+	let lastOpponentName = '';
 
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
@@ -268,10 +269,10 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		},
 
 		onChallengeReceived: (msg) => {
-			// Auto-accept challenges for now (in future: show accept/decline UI)
+			// Auto-accept challenges (including rematches)
 			console.log(`Challenge from ${msg.from}, wager: ${msg.wager}`);
 			client.acceptChallenge(msg.challengeId);
-			showOverlay(`Challenge accepted from ${msg.from}!`);
+			showOverlay(`Challenge accepted from ${msg.from}!<br>Starting match...`);
 		},
 
 		onTournamentAssigned: (msg) => {
@@ -301,6 +302,7 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onRoundOpen: (msg) => {
 			matchId = msg.matchId;
+			lastOpponentName = msg.opponent;
 			showOverlay(
 				`Match ready! vs ${msg.opponent}<br>` +
 				`Press ENTER when ready`,
@@ -540,8 +542,17 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 					);
 
 					const status = winner === mySide ? 'You win!' : 'You lose!';
+					const opponentName = mySide === 'A'
+						? (opponentState ? '@' + name.replace('@','') : '')
+						: name;
+					// Get opponent's actual nametag from the round-open/match-start
+					const oppNametag = lastOpponentName || '';
 					showOverlay(
-						`${status}<br>Your score: ${myScore} vs Opponent: ${oppScore}`,
+						`${status}<br>Your score: ${myScore} vs Opponent: ${oppScore}<br><br>` +
+						(oppNametag
+							? `<button onclick="window.__rematch()" style="padding:10px 24px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:bold;cursor:pointer;letter-spacing:0.1em;margin-right:12px">REMATCH</button>`
+							: '') +
+						backToArenaLink(),
 					);
 					break;
 				}
@@ -563,6 +574,23 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		requestAnimationFrame(loop);
 	}
+
+	// Rematch: send a new challenge to the same opponent
+	(window as any).__rematch = () => {
+		if (!lastOpponentName || !client.isConnected()) return;
+		showOverlay(`Sending rematch to ${lastOpponentName}...`);
+		// Reset match state so we can accept a new tournament
+		matchId = null;
+		matchActive = false;
+		matchOver = false;
+		resultSubmitted = false;
+		opponentDeathNotified = false;
+		myDeathNotified = false;
+		removeOpponentHud();
+		removeDeathBanner();
+		if (render.opponent) render.opponent.root.visible = false;
+		client.challenge(lastOpponentName);
+	};
 
 	// Expose debug state
 	(window as any).__boxyDebug = {
