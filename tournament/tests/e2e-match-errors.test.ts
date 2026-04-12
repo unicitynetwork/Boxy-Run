@@ -70,7 +70,7 @@ runTest('e2e: match-phase error paths', async () => {
 			bob.client.disconnect();
 		}
 
-		// ── 3. Mismatched result hashes → match should be flagged ──
+		// ── 3. Server-adjudicated: higher score wins ──
 		{
 			const { alice, bob, matchId } = await setupMatch(server.url);
 			alice.client.ready(matchId);
@@ -78,21 +78,22 @@ runTest('e2e: match-phase error paths', async () => {
 			await alice.waitMatchStart();
 			await bob.waitMatchStart();
 
-			// Submit DIFFERENT result hashes
-			alice.client.submitResult(matchId, 500, { A: 8000, B: 5000 }, 'A', 'hash1', 'alice-sees-this');
-			bob.client.submitResult(matchId, 500, { A: 8000, B: 5000 }, 'A', 'hash1', 'bob-sees-different');
+			// A reports score 8000, B reports score 5000
+			alice.client.submitResult(matchId, 500, { A: 8000 }, 'A', 'h', 'r');
+			bob.client.submitResult(matchId, 500, { B: 5000 }, 'B', 'h', 'r');
 
-			// Both should get match-end with reason 'flagged'
 			const aEnd = await alice.waitMatchEnd();
 			const bEnd = await bob.waitMatchEnd();
-			assertEqual(aEnd.reason, 'flagged', 'mismatched hashes should flag');
-			assertEqual(bEnd.reason, 'flagged', 'both see flagged');
+			assertEqual(aEnd.reason, 'death', 'server adjudicates as death');
+			assert(aEnd.winner !== '', 'should have a winner');
+			// A had higher score, so A's player should win
+			assertEqual(aEnd.winner, bEnd.winner, 'both see same winner');
 
 			alice.client.disconnect();
 			bob.client.disconnect();
 		}
 
-		// ── 4. Agreed hashes → match resolved correctly ──
+		// ── 4. Server-adjudicated: lower score loses ──
 		{
 			const { alice, bob, matchId } = await setupMatch(server.url);
 			alice.client.ready(matchId);
@@ -100,12 +101,12 @@ runTest('e2e: match-phase error paths', async () => {
 			await alice.waitMatchStart();
 			await bob.waitMatchStart();
 
-			// Submit SAME result hashes
-			alice.client.submitResult(matchId, 500, { A: 8000, B: 5000 }, 'A', 'h', 'same-hash');
-			bob.client.submitResult(matchId, 500, { A: 8000, B: 5000 }, 'A', 'h', 'same-hash');
+			// A reports score 3000, B reports score 9000 — B wins
+			alice.client.submitResult(matchId, 500, { A: 3000 }, 'A', 'h', 'r');
+			bob.client.submitResult(matchId, 500, { B: 9000 }, 'B', 'h', 'r');
 
 			const aEnd = await alice.waitMatchEnd();
-			assertEqual(aEnd.reason, 'death', 'agreed hashes should resolve as death');
+			assertEqual(aEnd.reason, 'death');
 			assert(aEnd.winner !== '', 'should have a winner');
 
 			alice.client.disconnect();

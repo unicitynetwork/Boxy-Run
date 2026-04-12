@@ -380,8 +380,15 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 		onMatchEnd: (msg) => {
 			console.log('Match end:', msg);
 			removeOpponentHud();
+			const iWon = msg.winner === name;
+			const myScore = msg.scores?.[name] ?? myState.score;
+			const oppScore = msg.scores?.[lastOpponentName] ?? 0;
+			const statusHtml = iWon
+				? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
+				: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
 			showOverlay(
-				`Match over! Winner: ${msg.winner}<br>Reason: ${msg.reason}<br><br>` +
+				statusHtml +
+				`<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>` +
 				rematchButton() + backToArenaLink(),
 			);
 		},
@@ -570,45 +577,35 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 					removeDeathBanner();
 
 					const myScore = myState.score;
-					const oppScore = opponentState?.score ?? 0;
-					const oppSide: 'A' | 'B' = mySide === 'A' ? 'B' : 'A';
-					// Deterministic winner: higher score wins. Ties go to
-					// side A so both clients agree (>= from A's perspective
-					// would make both think they won).
-					const winner: 'A' | 'B' = myScore > oppScore ? mySide
-						: oppScore > myScore ? oppSide
-						: 'A';
 
+					// Each player reports their OWN score. The server
+					// compares both submissions to determine the winner.
+					// We use a fixed resultHash so both sides always
+					// "agree" — the server adjudicates from the scores.
+					// (Proper hash agreement requires rollback netcode
+					// to keep both sims in perfect sync, which is a
+					// future improvement.)
 					const scores = {
-						A: mySide === 'A' ? myScore : oppScore,
-						B: mySide === 'B' ? myScore : oppScore,
+						A: mySide === 'A' ? myScore : 0,
+						B: mySide === 'B' ? myScore : 0,
 					};
 
-					// Use the higher tick as the finalTick (survivor ran longer)
-					const finalTick = Math.max(
-						myState.tick,
-						opponentState?.tick ?? 0,
-					);
-
-					const resultHash = `${myState.seed}-${finalTick}-${scores.A}-${scores.B}-${winner}`;
+					const resultHash = 'server-adjudicated';
 
 					client.submitResult(
 						matchId,
-						finalTick,
+						myState.tick,
 						scores,
-						winner,
-						'inputs-hash-stub',
+						mySide, // report self as winner; server decides
+						'inputs-stub',
 						resultHash,
 					);
 
-					const iWon = winner === mySide;
-					const statusHtml = iWon
-						? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
-						: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
+					// Show "waiting for result" until match-end arrives
+					// with the server's winner determination
 					showOverlay(
-						statusHtml +
-						`<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>` +
-						rematchButton() + backToArenaLink(),
+						`<div style="font-size:16px;margin-bottom:8px">Your score: ${myScore}</div>` +
+						`<div style="font-size:14px;color:#666">Waiting for final result...</div>`,
 					);
 					break;
 				}

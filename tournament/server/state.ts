@@ -323,48 +323,45 @@ export class Tournament {
 	}
 
 	/**
-	 * Compare the two result hashes and either resolve the match or
-	 * flag it as disputed. On resolution, advance the winner into
-	 * the next round and check whether the round (or tournament) is
-	 * complete.
+	 * Resolve the match from both players' self-reported scores.
+	 * Each player reports their own score; the server determines
+	 * the winner by comparing them. Higher score wins; ties go to
+	 * side A (arbitrary but deterministic).
+	 *
+	 * This replaces the previous hash-agreement approach which
+	 * required both sims to be perfectly in sync (impossible without
+	 * rollback netcode). The server-adjudicated approach is less
+	 * trustless but actually works over real networks.
 	 */
 	private resolveMatch(match: MatchState): Delivery[] {
 		const rA = match.resultA!;
 		const rB = match.resultB!;
 		const deliveries: Delivery[] = [];
 
-		if (rA.resultHash === rB.resultHash) {
-			// Hashes agree — winner is the agreed-upon winner
-			const winnerSide = rA.winner; // 'A' or 'B'
-			match.winner = winnerSide === 'A' ? match.playerA! : match.playerB!;
-			match.phase = 'RESOLVED';
+		// Extract each player's self-reported score
+		const scoreA = (rA.score as Record<string, number>)['A'] || 0;
+		const scoreB = (rB.score as Record<string, number>)['B'] || 0;
 
-			const endMsg: MatchEndMessage = {
-				type: 'match-end', v: PROTOCOL_VERSION,
-				matchId: match.matchId,
-				winner: match.winner,
-				reason: 'death',
-				scores: rA.score as Record<string, number>,
-			};
-			deliveries.push({ to: match.playerA!, message: endMsg });
-			deliveries.push({ to: match.playerB!, message: endMsg });
+		// Higher score wins. Ties go to side A.
+		const winnerSide = scoreA >= scoreB ? 'A' : 'B';
+		match.winner = winnerSide === 'A' ? match.playerA! : match.playerB!;
+		match.phase = 'RESOLVED';
 
-			this.advanceWinner(match.roundIndex, match.slotIndex, match.winner);
-		} else {
-			// Hashes disagree — flag the match
-			match.phase = 'RESOLVED';
-			match.winner = null; // disputed
+		const combinedScores: Record<string, number> = {};
+		if (match.playerA) combinedScores[match.playerA] = scoreA;
+		if (match.playerB) combinedScores[match.playerB] = scoreB;
 
-			const endMsg: MatchEndMessage = {
-				type: 'match-end', v: PROTOCOL_VERSION,
-				matchId: match.matchId,
-				winner: '',
-				reason: 'flagged',
-				scores: {},
-			};
-			deliveries.push({ to: match.playerA!, message: endMsg });
-			deliveries.push({ to: match.playerB!, message: endMsg });
-		}
+		const endMsg: MatchEndMessage = {
+			type: 'match-end', v: PROTOCOL_VERSION,
+			matchId: match.matchId,
+			winner: match.winner,
+			reason: 'death',
+			scores: combinedScores,
+		};
+		deliveries.push({ to: match.playerA!, message: endMsg });
+		deliveries.push({ to: match.playerB!, message: endMsg });
+
+		this.advanceWinner(match.roundIndex, match.slotIndex, match.winner);
 
 		// Check if the round is fully resolved
 		deliveries.push(...this.checkRoundComplete(match.roundIndex));
