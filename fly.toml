@@ -1,0 +1,22 @@
+app = "boxy-run"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  PORT = "8080"
+  STATIC_DIR = "/app"
+  DB_PATH = "/data/boxyrun.db"
+  LOBBY_CAPACITY = "32"
+  MIN_PLAYERS = "2"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[mounts]
+  source = "boxyrun_data"
+  destination = "/data"

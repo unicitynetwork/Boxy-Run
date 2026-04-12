@@ -801,7 +801,8 @@ main {
 <script>
 // ── Configuration ──────────────────────────────────────────────
 const API_BASE = '/api';
-const WS_URL = 'ws://localhost:7101';
+const WS_PROTOCOL = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = `${WS_PROTOCOL}//${location.host}`;
 const TOURNAMENT_ID = 'boxyrun-alpha-1';
 
 // ── Particles ──────────────────────────────────────────────────

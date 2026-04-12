@@ -203,7 +203,8 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 
 function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 	const name = params.get('name') || '@player';
-	const serverUrl = params.get('server') || 'ws://localhost:7101';
+	const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+	const serverUrl = params.get('server') || `${wsProto}//${location.host}`;
 	const tournamentId = params.get('tid') || 'boxyrun-alpha-1';
 	console.log(`Tournament mode: ${name} → ${serverUrl} (${tournamentId}) skin: ${skin.name}`);
 

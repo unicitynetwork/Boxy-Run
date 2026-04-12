@@ -49,13 +49,25 @@ execSync(
 
 // Run each compiled test in sequence.
 console.log('\nrunning tests:');
+const TEST_TIMEOUT_MS = 15000; // 15s per test, kills zombies
+
 let failures = 0;
 for (const src of testFiles) {
 	const js = src.replace(/\.ts$/, '.js');
 	const bundle = join(DIST_DIR, js);
 	const result = await new Promise((resolveRun) => {
-		const child = spawn('node', [bundle], { stdio: 'inherit' });
-		child.on('exit', (code) => resolveRun(code ?? 1));
+		// detached: true puts the child in its own process group so we
+		// can kill it AND any server subprocesses it spawned.
+		const child = spawn('node', [bundle], { stdio: 'inherit', detached: true });
+		const timer = setTimeout(() => {
+			console.error(`  TIMEOUT: ${src} exceeded ${TEST_TIMEOUT_MS}ms, killing`);
+			try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+			resolveRun(1);
+		}, TEST_TIMEOUT_MS);
+		child.on('exit', (code) => {
+			clearTimeout(timer);
+			resolveRun(code ?? 1);
+		});
 	});
 	if (result !== 0) failures++;
 }

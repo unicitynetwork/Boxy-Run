@@ -27,7 +27,11 @@ const SERVER_BUNDLE = join(REPO_ROOT, 'dist', 'server.js');
  * don't race against the listen call. Each call picks a unique port
  * to allow parallel test runs.
  */
-let nextPort = 7200;
+// Random port in 10000-60000 range to avoid collisions with orphaned servers
+function randomPort(): number {
+	return 10000 + Math.floor(Math.random() * 50000);
+}
+
 export async function startServer(
 	options: {
 		capacity?: number;
@@ -41,7 +45,7 @@ export async function startServer(
 	url: string;
 	port: number;
 }> {
-	const port = nextPort++;
+	const port = randomPort();
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		PORT: String(port),
