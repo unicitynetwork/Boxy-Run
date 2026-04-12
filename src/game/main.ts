@@ -253,19 +253,19 @@ function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
 
 		onRegistered: (msg) => {
 			console.log('Registered. Online players:', msg.onlinePlayers);
-			// If we're in legacy/redirect mode but have no tournament,
-			// we'll get registered without a tournament-assigned follow-up.
-			// Show a "go back" message after a short delay.
-			if (mode === 'legacy' || mode === '') {
-				setTimeout(() => {
-					if (!matchId && !matchActive) {
-						showOverlay(
-							`No active match found.<br><br>` +
-							backToArenaLink(),
-						);
-					}
-				}, 2000);
-			}
+			// Quick check: if we registered but don't get a tournament
+			// assignment within 500ms, the old match is gone.
+			setTimeout(() => {
+				if (!matchId && !matchActive) {
+					showOverlay(
+						`Match ended.<br><br>` +
+						(lastOpponentName
+							? `<button onclick="window.__rematch()" style="padding:10px 24px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;font-family:monospace;font-size:14px;font-weight:bold;cursor:pointer;letter-spacing:0.1em;margin-right:12px">REMATCH</button>`
+							: '') +
+						backToArenaLink(),
+					);
+				}
+			}, 500);
 		},
 
 		onChallengeReceived: (msg) => {
