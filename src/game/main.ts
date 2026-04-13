@@ -141,7 +141,13 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 	let myDeathNotified = false;
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
-	const backUrl = tournamentId ? `tournament-v2.html?id=${tournamentId}` : 'tournament-v2.html';
+	// For 1v1 challenges (tournament name contains "vs"), go back to
+	// the main page's challenge section. For bracket tournaments, go
+	// to the tournament detail page.
+	const isChallenge = !tournamentId || tournamentId.startsWith('challenge-');
+	const backUrl = isChallenge
+		? 'tournament-v2.html#challenge-section'
+		: `tournament-v2.html?id=${tournamentId}`;
 
 	// Opponent score HUD
 	let oppHud: HTMLElement | null = null;
@@ -219,7 +225,8 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 			: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
 
 		const rematchBtn = `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>`;
-		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO TOURNAMENT</a>`;
+		const backLabel = isChallenge ? 'PLAY AGAIN' : 'BACK TO TOURNAMENT';
+		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
 
 		showOverlay(
 			resultHtml +

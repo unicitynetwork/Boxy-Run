@@ -744,6 +744,7 @@ main {
     <p class="hero-sub">Compete in real-time knockout tournaments. Same obstacles, same seed. First to fall loses. Powered by Unicity.</p>
     <div class="hero-actions">
       <a href="index.html" class="btn btn-primary">Single Player</a>
+      <a href="#challenge-section" class="btn btn-ghost">Challenge</a>
       <a href="#tournament-section" class="btn btn-ghost">Tournament</a>
     </div>
     <div class="scroll-hint">
@@ -771,11 +772,17 @@ main {
 
     <!-- LIST VIEW -->
     <div id="view-list" class="reveal">
-      <!-- 1v1 Challenge -->
-      <div class="card" style="margin-bottom:24px">
+      <!-- CHALLENGE SECTION -->
+      <section id="challenge-section" class="section" style="padding-top:40px">
+        <div class="section-head">
+          <div class="section-label">Play Now</div>
+          <div class="section-title">Challenge a Player</div>
+        </div>
+      </section>
+      <div class="card" style="margin-bottom:48px">
         <div class="card-head">
-          <h2>Challenge a Player</h2>
-          <span style="font-size:12px;color:var(--text-dim)">Click a player to challenge them</span>
+          <h2>Online Players</h2>
+          <span style="font-size:12px;color:var(--text-dim)">Click a name to challenge them</span>
         </div>
         <div class="card-body">
           <div style="font-size:13px;font-family:var(--font-display);letter-spacing:0.1em;color:var(--text);margin-bottom:12px">Online Players</div>
@@ -787,7 +794,13 @@ main {
         </div>
       </div>
 
-      <!-- Tournament List -->
+      <!-- TOURNAMENT SECTION -->
+      <section id="tournament-section" class="section" style="padding-top:40px">
+        <div class="section-head">
+          <div class="section-label">Compete</div>
+          <div class="section-title">Tournaments</div>
+        </div>
+      </section>
       <div class="card">
         <div class="card-head"><h2>Tournaments</h2></div>
         <div class="card-body tourney-list" id="tourney-list">
