@@ -1306,8 +1306,9 @@ function declineChallenge(id, btn) {
 let queueStartsAt = null;
 
 function updateQueueState(msg) {
+  console.log('[lobby] queue-state:', msg.total, 'startsAt:', msg.startsAt);
   document.getElementById('queue-count').innerHTML = `${msg.total}<span> in queue</span>`;
-  document.getElementById('queue-bar').style.width = `${Math.min(100, (msg.total / 8) * 100)}%`;
+  document.getElementById('queue-bar').style.width = `${Math.min(100, (msg.total / 4) * 100)}%`;
   queueStartsAt = msg.startsAt;
   tickQueueCountdown();
 }
@@ -1384,11 +1385,16 @@ document.getElementById('btn-challenge').addEventListener('click', () => {
 
 document.getElementById('btn-queue').addEventListener('click', () => {
   if (!registered) {
-    if (!myNametag) { return; }
+    if (!myNametag) {
+      document.getElementById('queue-countdown').textContent = 'Connect wallet or enter nametag first';
+      document.getElementById('queue-countdown').style.color = 'var(--magenta)';
+      return;
+    }
     registerWithServer();
     setTimeout(() => document.getElementById('btn-queue').click(), 500);
     return;
   }
+  console.log('[lobby] joining queue as', myNametag);
   send({ type: 'queue-join', v: 0 });
   inQueue = true;
   document.getElementById('btn-queue').style.display = 'none';

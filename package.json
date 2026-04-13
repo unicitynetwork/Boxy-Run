@@ -5,7 +5,7 @@
   "scripts": {
     "build:sdk": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020",
     "build:game": "esbuild src/game/main.ts --bundle --outfile=js/game.js --format=iife --target=es2020",
-    "build:server": "esbuild tournament/server/server.ts --bundle --outfile=dist/server.js --platform=node --format=cjs --packages=external",
+    "build:server": "esbuild tournament/server/server-v2.ts --bundle --outfile=dist/server.js --platform=node --format=cjs --packages=external",
     "build": "npm run build:sdk && npm run build:game",
     "server": "npm run build:server && node dist/server.js",
     "test:server": "npm run build:server && node tournament/tests/run-all.mjs",
