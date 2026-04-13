@@ -20,7 +20,7 @@ const sockets = new Map<WebSocket, string>();
 /** Match ready flags: matchId → Set<nametag> */
 const readyFlags = new Map<string, Set<string>>();
 /** Match side mapping: matchId → { A: nametag, B: nametag } */
-const matchSides = new Map<string, { A: string; B: string }>();
+export const matchSides = new Map<string, { A: string; B: string }>();
 /** Players who have submitted "done" for a match */
 const matchDone = new Map<string, Set<string>>();
 

@@ -19,15 +19,17 @@ import {
 	handleDone,
 	handleInput,
 	handleReady,
+	matchSides,
 	registerSocket,
 	sendTo,
 	unregisterSocket,
 } from './tournament-ws';
 import {
 	createTournament,
+	getMatchesForRound,
 	registerPlayer,
 } from './tournament-db';
-import { startTournament } from './tournament-logic';
+import { startMatch, startTournament } from './tournament-logic';
 import { checkForfeits, checkRoundAdvance } from './tournament-logic';
 import { listTournaments } from './tournament-db';
 
@@ -173,18 +175,41 @@ async function handleChallengeAccept(acceptor: string, challengeId: string) {
 	pendingChallenges.delete(challengeId);
 
 	try {
-		// Create a 2-player tournament
+		// Create a 2-player tournament, start it, and start the match
 		const tId = `challenge-${Date.now()}`;
 		await createTournament({ id: tId, name: `${ch.from} vs ${ch.to}`, maxPlayers: 2, startsAt: new Date().toISOString() });
 		await registerPlayer(tId, ch.from);
 		await registerPlayer(tId, ch.to);
 		await startTournament(tId);
 
-		// Tell both players to go to the tournament page
-		const url = `tournament-v2.html?id=${tId}`;
-		sendTo(ch.from, { type: 'challenge-accepted', v: 0, challengeId, tournamentId: tId, url });
-		sendTo(ch.to, { type: 'challenge-accepted', v: 0, challengeId, tournamentId: tId, url });
+		// Get the match and start it immediately (skip the ready phase)
+		const matches = await getMatchesForRound(tId, 0);
+		const match = matches.find(m => m.status === 'ready_wait');
+
+		if (match) {
+			const result = await startMatch(match.id as string);
+			const startsAt = Date.now() + 3000;
+			const matchId = match.id as string;
+
+			// Register match sides for input relay
+			matchSides.set(matchId, { A: result.playerA, B: result.playerB });
+
+			// Send both players directly to the game
+			sendTo(ch.from, {
+				type: 'challenge-start', v: 0, challengeId, tournamentId: tId,
+				matchId, seed: result.seed,
+				opponent: ch.to, youAre: ch.from === result.playerA ? 'A' : 'B',
+				startsAt,
+			});
+			sendTo(ch.to, {
+				type: 'challenge-start', v: 0, challengeId, tournamentId: tId,
+				matchId, seed: result.seed,
+				opponent: ch.from, youAre: ch.to === result.playerA ? 'A' : 'B',
+				startsAt,
+			});
+		}
 	} catch (err: any) {
+		console.error('[challenge] accept error:', err);
 		sendTo(ch.from, { type: 'error', v: 0, code: 'challenge_failed', message: err.message });
 		sendTo(acceptor, { type: 'error', v: 0, code: 'challenge_failed', message: err.message });
 	}

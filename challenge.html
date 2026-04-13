@@ -216,8 +216,15 @@ function handleMsg(msg) {
     case 'challenge-declined':
       showStatus(`${esc(msg.by)} declined.`, 'rgba(218,54,51,0.1)', 'var(--red)');
       break;
-    case 'challenge-accepted':
-      location.href = `tournament-v2.html?id=${msg.tournamentId}`;
+    case 'challenge-start':
+      // Redirect straight to the game — match is already started
+      const p = new URLSearchParams({
+        tournament: '1', matchId: msg.matchId, seed: msg.seed,
+        side: msg.youAre, opponent: msg.opponent,
+        startsAt: String(msg.startsAt), name: myNametag,
+        tid: msg.tournamentId,
+      });
+      location.href = 'dev.html?' + p;
       break;
   }
 }
