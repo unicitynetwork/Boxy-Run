@@ -6,6 +6,8 @@
 <title>Boxy Run — Tournament</title>
 <link rel="icon" type="image/png" href="unicity-logo.png">
 <script type="text/javascript" src="js/sphere-connect.js"></script>
+<script type="text/javascript" src="js/three.min.js"></script>
+<script type="text/javascript" src="js/inline-game.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
@@ -269,6 +271,7 @@ let currentTournament = null;
 let currentMatches = [];
 let myMatch = null;
 let pollTimer = null;
+let activeGame = null;
 
 const API = '/api';
 const params = new URLSearchParams(location.search);
@@ -348,7 +351,7 @@ function handleWS(msg){
       onMatchStart(msg);
       break;
     case'opponent-input':
-      // TODO: relay to inline game
+      if(activeGame)activeGame.opponentInput(msg.tick,msg.payload);
       break;
     case'match-end':
       onMatchEnd(msg);
@@ -596,29 +599,60 @@ function onMatchStart(msg){
   gc.classList.add('visible');
   const cd=document.getElementById('game-countdown');
   cd.style.display='flex';
+
+  // Destroy any previous game
+  if(activeGame){activeGame.destroy();activeGame=null}
+
   const startsAt=msg.startsAt;
-  function tick(){
+  const seed=parseInt(msg.seed,16)>>>0;
+  const matchId=msg.matchId;
+
+  function countdown(){
     const ms=startsAt-Date.now();
-    if(ms>1000){cd.textContent=Math.ceil(ms/1000);setTimeout(tick,200)}
-    else if(ms>0){cd.textContent='1';setTimeout(tick,ms)}
-    else{cd.textContent='GO!';setTimeout(()=>{cd.style.display='none'},500)}
+    if(ms>1000){cd.textContent=Math.ceil(ms/1000);setTimeout(countdown,200)}
+    else if(ms>0){cd.textContent='1';setTimeout(countdown,ms)}
+    else{
+      cd.textContent='GO!';
+      setTimeout(()=>{
+        cd.style.display='none';
+        // Start the game!
+        const worldEl=document.getElementById('game-world');
+        activeGame=window.InlineGame.create(worldEl,{
+          seed,
+          mySide:msg.youAre,
+          onInput(tick,payload){wsSend({type:'input',matchId,tick,payload})},
+          onDone(){wsSend({type:'match-done',matchId})},
+        });
+      },500);
+    }
   }
-  tick();
-  // TODO: start inline Three.js game here
+  countdown();
 }
 
 // ─ Match End ─
 function onMatchEnd(msg){
+  // Stop the game
+  if(activeGame){activeGame.destroy();activeGame=null}
+
   const gr=document.getElementById('game-result');
   gr.style.display='flex';
   const iWon=msg.winner===myNametag;
   gr.innerHTML=`<h2 class="${iWon?'win':'lose'}">${iWon?'You Win!':'You Lose'}</h2>
     <div style="font-size:16px;color:var(--text2);margin-bottom:16px">
-      ${msg.scoreA.toLocaleString()} — ${msg.scoreB.toLocaleString()}
+      ${(msg.scoreA||0).toLocaleString()} — ${(msg.scoreB||0).toLocaleString()}
     </div>
-    <button class="btn-sm" onclick="location.reload()">Back to Bracket</button>`;
+    <button class="btn-sm btn-primary" onclick="closeGame()">Back to Bracket</button>`;
   // Refresh bracket
-  setTimeout(loadBracket,1000);
+  setTimeout(loadBracket,2000);
+}
+
+function closeGame(){
+  document.getElementById('game-container').classList.remove('visible');
+  document.getElementById('game-result').style.display='none';
+  document.getElementById('game-countdown').style.display='none';
+  document.getElementById('btn-ready').disabled=false;
+  document.getElementById('btn-ready').textContent='Ready to Play';
+  loadBracket();
 }
 
 // ═══════════════════════════════════════════════════════════════

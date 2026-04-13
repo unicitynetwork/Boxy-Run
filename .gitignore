@@ -2,6 +2,7 @@ node_modules/
 js/sphere-connect.js
 js/game.js
 js/game-new.js
+js/inline-game.js
 dist/
 
 # Local Netlify folder

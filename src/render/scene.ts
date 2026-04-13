@@ -21,13 +21,13 @@ export interface SceneHandle {
 }
 
 /**
- * Build the scene, attach the renderer's canvas to the DOM element
- * with id="world", and return a handle for subsequent frame rendering.
+ * Build the scene, attach the renderer's canvas to the given element
+ * (or #world by default). Returns a handle for subsequent rendering.
  */
-export function createScene(): SceneHandle {
-	const element = document.getElementById('world');
+export function createScene(container?: HTMLElement): SceneHandle {
+	const element = container || document.getElementById('world');
 	if (!element) {
-		throw new Error('createScene: #world element not found in DOM');
+		throw new Error('createScene: no container element found');
 	}
 
 	const renderer = new THREE.WebGLRenderer({
