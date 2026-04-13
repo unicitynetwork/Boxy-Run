@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run — Challenge</title>
+<link rel="icon" type="image/png" href="unicity-logo.png">
+<script type="text/javascript" src="js/sphere-connect.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a12;--surface:rgba(12,20,38,0.7);
+  --cyan:#00e5ff;--cyan-dim:rgba(0,229,255,0.15);--cyan-glow:rgba(0,229,255,0.4);
+  --green:#2ea043;--red:#da3633;--orange:#f97316;
+  --text:#e2e8f0;--text2:#94a3b8;--text3:#78859b;
+  --border:rgba(0,229,255,0.12);--border-hi:rgba(0,229,255,0.25);
+  --r:6px;
+  --display:'Orbitron',monospace;--body:'IBM Plex Mono','SF Mono',monospace;
+}
+body{font-family:var(--body);background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
+
+.page{max-width:600px;width:100%}
+
+/* Nav */
+.nav{display:flex;align-items:center;gap:16px;margin-bottom:40px;flex-wrap:wrap}
+.nav a{font-family:var(--display);font-size:12px;color:var(--text3);text-decoration:none;letter-spacing:.1em;transition:.2s}
+.nav a:hover{color:var(--cyan)}
+.nav a.active{color:var(--cyan)}
+.nav-sep{color:rgba(255,255,255,0.1)}
+
+/* Title */
+h1{font-family:var(--display);font-size:28px;font-weight:800;margin-bottom:8px}
+h1 span{color:var(--cyan)}
+.subtitle{color:var(--text2);font-size:14px;margin-bottom:32px}
+
+/* Cards */
+.card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--r);margin-bottom:20px;overflow:hidden}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-head h2{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--text2)}
+.card-body{padding:20px}
+
+/* Identity */
+.id-section{margin-bottom:32px}
+.id-label{font-family:var(--display);font-size:12px;letter-spacing:.1em;color:var(--text2);margin-bottom:10px}
+.id-row{display:flex;gap:10px;align-items:center}
+.id-status{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.id-status.on{background:var(--green);box-shadow:0 0 6px rgba(46,160,67,0.5)}
+.id-input{flex:1;padding:12px 16px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;outline:none;letter-spacing:.05em}
+.id-input:focus{border-color:var(--cyan)}
+.id-input:disabled{opacity:.6}
+.id-connected{font-family:var(--display);font-size:16px;font-weight:600;color:var(--cyan)}
+.btn{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;padding:12px 20px;border-radius:var(--r);border:none;cursor:pointer;transition:.2s}
+.btn-primary{background:var(--cyan);color:var(--bg)}
+.btn-primary:hover{opacity:.85}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border-hi)}
+.btn-ghost:hover{color:var(--cyan);border-color:var(--cyan)}
+.btn-wallet{background:var(--orange);color:#fff;padding:12px 24px;font-size:12px}
+.btn-wallet:hover{opacity:.85}
+
+/* Online players */
+.player-btn{font-family:var(--body);font-size:13px;padding:8px 16px;background:rgba(0,229,255,0.06);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--cyan);cursor:pointer;transition:.2s;margin:4px}
+.player-btn:hover{background:rgba(0,229,255,0.15);border-color:var(--cyan)}
+.empty{color:var(--text3);font-size:14px;padding:12px 0}
+
+/* Incoming challenge */
+.challenge-incoming{padding:14px;background:rgba(0,229,255,0.08);border:1px solid var(--border-hi);border-radius:var(--r);margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.challenge-incoming strong{color:var(--cyan)}
+
+/* Status */
+.status-msg{margin-top:12px;padding:10px 14px;border-radius:var(--r);font-size:13px;display:none}
+
+/* Footer */
+.footer{margin-top:auto;padding-top:40px;font-size:12px;color:var(--text3);text-align:center}
+.footer a{color:var(--text2);text-decoration:none;margin:0 8px}
+.footer a:hover{color:var(--cyan)}
+</style>
+</head>
+<body>
+
+<div class="page">
+  <nav class="nav">
+    <a href="index.html">Single Player</a>
+    <span class="nav-sep">|</span>
+    <a href="challenge.html" class="active">Challenge</a>
+    <span class="nav-sep">|</span>
+    <a href="tournament-v2.html">Tournament</a>
+  </nav>
+
+  <h1>Challenge a <span>Player</span></h1>
+  <p class="subtitle">Play a 1v1 match against anyone online. Same world, same seed. Highest score wins.</p>
+
+  <!-- Identity -->
+  <div class="id-section">
+    <div class="id-label">Your Identity</div>
+    <!-- Wallet not connected -->
+    <div id="id-disconnected" class="id-row">
+      <span class="id-status" id="ws-dot"></span>
+      <button class="btn btn-wallet" id="btn-wallet">Connect Sphere Wallet</button>
+      <span style="color:var(--text3);font-size:12px">or</span>
+      <input type="text" class="id-input" id="id-input" placeholder="@nametag" style="max-width:160px">
+      <button class="btn btn-ghost" id="btn-go">Go</button>
+    </div>
+    <!-- Wallet connected -->
+    <div id="id-connected" style="display:none" class="id-row">
+      <span class="id-status on"></span>
+      <span class="id-connected" id="my-name"></span>
+    </div>
+  </div>
+
+  <!-- Online Players -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Online Players</h2>
+      <span style="font-size:12px;color:var(--text3)" id="online-count">0 online</span>
+    </div>
+    <div class="card-body">
+      <div id="online-list">
+        <div class="empty">Connect to see who's online</div>
+      </div>
+      <div class="status-msg" id="challenge-status"></div>
+      <div id="incoming-challenges"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="index.html">Game</a>
+  <a href="tournament-v2.html">Tournaments</a>
+  <a href="https://discord.gg/PGzNZT5uVp" target="_blank">Discord</a>
+  <div style="margin-top:8px">Powered by Unicity</div>
+</div>
+
+<script>
+const WS_PROTO = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = `${WS_PROTO}//${location.host}`;
+let myNametag = null;
+let ws = null;
+let onlinePlayers = [];
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+// ── Wallet ──
+setInterval(() => {
+  const w = window.SphereWallet;
+  if (w && w.isConnected && w.identity && w.identity.nametag && !myNametag) {
+    setIdentity(w.identity.nametag);
+  }
+}, 500);
+
+document.getElementById('btn-wallet').addEventListener('click', () => {
+  const w = window.SphereWallet;
+  if (w && w.connect) {
+    const btn = document.getElementById('btn-wallet');
+    btn.textContent = 'Connecting...';
+    btn.disabled = true;
+    w.connect();
+  }
+});
+
+document.getElementById('btn-go').addEventListener('click', () => {
+  const v = document.getElementById('id-input').value.trim();
+  if (v) setIdentity(v);
+});
+document.getElementById('id-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btn-go').click();
+});
+
+function setIdentity(tag) {
+  myNametag = tag;
+  document.getElementById('id-disconnected').style.display = 'none';
+  document.getElementById('id-connected').style.display = 'flex';
+  document.getElementById('my-name').textContent = tag;
+  connectWS();
+}
+
+// ── WebSocket ──
+function connectWS() {
+  if (!myNametag) return;
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'register', identity: { nametag: myNametag } }));
+    document.getElementById('ws-dot').classList.add('on');
+  };
+  ws.onmessage = e => {
+    try { handleMsg(JSON.parse(e.data)); } catch {}
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-dot').classList.remove('on');
+    setTimeout(connectWS, 3000);
+  };
+}
+
+function wsSend(msg) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+}
+
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'registered':
+      onlinePlayers = msg.onlinePlayers || [];
+      render();
+      break;
+    case 'player-online':
+      if (msg.online && !onlinePlayers.includes(msg.nametag)) onlinePlayers.push(msg.nametag);
+      else onlinePlayers = onlinePlayers.filter(n => n !== msg.nametag);
+      render();
+      break;
+    case 'challenge-received':
+      showIncoming(msg);
+      break;
+    case 'challenge-sent':
+      showStatus(`Challenge sent to ${esc(msg.opponent)}. Waiting...`, 'var(--cyan-dim)', 'var(--cyan)');
+      break;
+    case 'challenge-declined':
+      showStatus(`${esc(msg.by)} declined.`, 'rgba(218,54,51,0.1)', 'var(--red)');
+      break;
+    case 'challenge-accepted':
+      location.href = `tournament-v2.html?id=${msg.tournamentId}`;
+      break;
+  }
+}
+
+function render() {
+  const el = document.getElementById('online-list');
+  const others = onlinePlayers.filter(n => n !== myNametag);
+  document.getElementById('online-count').textContent = `${others.length} online`;
+  if (!others.length) {
+    el.innerHTML = '<div class="empty">No other players online right now</div>';
+    return;
+  }
+  el.innerHTML = others.map(n =>
+    `<button class="player-btn" onclick="challenge('${esc(n)}')">${esc(n)}</button>`
+  ).join('');
+}
+
+function challenge(opponent) {
+  wsSend({ type: 'challenge', opponent });
+}
+
+function showStatus(text, bg, color) {
+  const el = document.getElementById('challenge-status');
+  el.style.display = 'block';
+  el.style.background = bg;
+  el.style.color = color;
+  el.textContent = text;
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+function showIncoming(msg) {
+  const box = document.getElementById('incoming-challenges');
+  const div = document.createElement('div');
+  div.className = 'challenge-incoming';
+  div.innerHTML = `
+    <span><strong>${esc(msg.from)}</strong> challenges you!</span>
+    <span>
+      <button class="btn btn-primary" style="padding:8px 16px;font-size:10px" onclick="accept('${msg.challengeId}',this)">Accept</button>
+      <button class="btn btn-ghost" style="padding:8px 16px;font-size:10px;margin-left:4px" onclick="decline('${msg.challengeId}',this)">Decline</button>
+    </span>`;
+  box.appendChild(div);
+}
+
+function accept(id, btn) {
+  wsSend({ type: 'challenge-accept', challengeId: id });
+  btn.closest('.challenge-incoming').remove();
+}
+
+function decline(id, btn) {
+  wsSend({ type: 'challenge-decline', challengeId: id });
+  btn.closest('.challenge-incoming').remove();
+}
+</script>
+</body>
+</html>

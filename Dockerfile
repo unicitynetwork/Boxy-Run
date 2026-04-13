@@ -15,6 +15,7 @@ RUN npm ci --omit=dev 2>/dev/null || npm ci
 COPY --from=build /app/dist/server.js ./dist/server.js
 COPY --from=build /app/js ./js
 COPY --from=build /app/index.html ./
+COPY --from=build /app/challenge.html ./
 COPY --from=build /app/tournament.html ./
 COPY --from=build /app/tournament-v2.html ./
 COPY --from=build /app/leaderboard.html ./
