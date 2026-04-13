@@ -6,8 +6,6 @@
 <title>Boxy Run Arena — Tournaments</title>
 <link rel="icon" type="image/png" href="unicity-logo.png">
 <script type="text/javascript" src="js/sphere-connect.js"></script>
-<script type="text/javascript" src="js/three.min.js"></script>
-<script type="text/javascript" src="js/inline-game.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -943,7 +941,6 @@ let currentTournament = null;
 let currentMatches = [];
 let myMatch = null;
 let pollTimer = null;
-let activeGame = null;
 
 const API = '/api';
 const params = new URLSearchParams(location.search);
@@ -1288,65 +1285,20 @@ document.getElementById('btn-ready').addEventListener('click',()=>{
   document.getElementById('ready-you').classList.add('is-ready');
 });
 
-// -- Match Start --
+// -- Match Start -> redirect to full-screen game --
 function onMatchStart(msg){
-  const gc=document.getElementById('game-container');
-  gc.classList.add('visible');
-  const cd=document.getElementById('game-countdown');
-  cd.style.display='flex';
-
-  // Destroy any previous game
-  if(activeGame){activeGame.destroy();activeGame=null}
-
-  const startsAt=msg.startsAt;
-  const seed=parseInt(msg.seed,16)>>>0;
-  const matchId=msg.matchId;
-
-  function countdown(){
-    const ms=startsAt-Date.now();
-    if(ms>1000){cd.textContent=Math.ceil(ms/1000);setTimeout(countdown,200)}
-    else if(ms>0){cd.textContent='1';setTimeout(countdown,ms)}
-    else{
-      cd.textContent='GO!';
-      setTimeout(()=>{
-        cd.style.display='none';
-        // Start the game!
-        const worldEl=document.getElementById('game-world');
-        activeGame=window.InlineGame.create(worldEl,{
-          seed,
-          mySide:msg.youAre,
-          onInput(tick,payload){wsSend({type:'input',matchId,tick,payload})},
-          onDone(){wsSend({type:'match-done',matchId})},
-        });
-      },500);
-    }
-  }
-  countdown();
+  const p=new URLSearchParams({
+    tournament:'1',matchId:msg.matchId,seed:msg.seed,
+    side:msg.youAre,opponent:msg.opponent,
+    startsAt:String(msg.startsAt),name:myNametag||'',
+    tid:tournamentId||'',
+  });
+  location.href='dev.html?'+p;
 }
 
-// -- Match End --
+// -- Match End (handled on dev.html, not here) --
 function onMatchEnd(msg){
-  // Stop the game
-  if(activeGame){activeGame.destroy();activeGame=null}
-
-  const gr=document.getElementById('game-result');
-  gr.style.display='flex';
-  const iWon=msg.winner===myNametag;
-  gr.innerHTML=`<h2 class="${iWon?'win':'lose'}">${iWon?'You Win!':'You Lose'}</h2>
-    <div style="font-size:16px;color:var(--text-dim);margin-bottom:16px">
-      ${(msg.scoreA||0).toLocaleString()} \u2014 ${(msg.scoreB||0).toLocaleString()}
-    </div>
-    <button class="btn-sm btn-primary" onclick="closeGame()">Back to Bracket</button>`;
-  // Refresh bracket
-  setTimeout(loadBracket,2000);
-}
-
-function closeGame(){
-  document.getElementById('game-container').classList.remove('visible');
-  document.getElementById('game-result').style.display='none';
-  document.getElementById('game-countdown').style.display='none';
-  document.getElementById('btn-ready').disabled=false;
-  document.getElementById('btn-ready').textContent='Ready to Play';
+  // Refresh bracket in case we're still on this page
   loadBracket();
 }
 
