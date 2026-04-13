@@ -13,7 +13,9 @@ import { handleApi } from './leaderboard';
 import { handleTournamentApi } from './tournament-api';
 import { ensureTournamentSchema } from './tournament-db';
 import {
+	broadcastToAll,
 	getNametag,
+	getOnlinePlayers,
 	handleDone,
 	handleInput,
 	handleReady,
@@ -21,6 +23,11 @@ import {
 	sendTo,
 	unregisterSocket,
 } from './tournament-ws';
+import {
+	createTournament,
+	registerPlayer,
+} from './tournament-db';
+import { startTournament } from './tournament-logic';
 import { checkForfeits, checkRoundAdvance } from './tournament-logic';
 import { listTournaments } from './tournament-db';
 
@@ -78,8 +85,29 @@ wss.on('connection', (ws) => {
 				if (msg.identity?.nametag) {
 					registerSocket(ws, msg.identity.nametag);
 					const tag = msg.identity.nametag;
-					sendTo(tag, { type: 'registered', v: 0, nametag: tag });
-					console.log(`[ws] ${tag} registered`);
+					const others = getOnlinePlayers().filter(n => n !== tag);
+					sendTo(tag, { type: 'registered', v: 0, nametag: tag, onlinePlayers: others });
+					// Notify everyone that a new player came online
+					broadcastToAll({ type: 'player-online', v: 0, nametag: tag, online: true });
+					console.log(`[ws] ${tag} registered (${getOnlinePlayers().length} online)`);
+				}
+				break;
+
+			case 'challenge':
+				if (nametag && msg.opponent) {
+					await handleChallenge(nametag, msg.opponent);
+				}
+				break;
+
+			case 'challenge-accept':
+				if (nametag && msg.challengeId) {
+					await handleChallengeAccept(nametag, msg.challengeId);
+				}
+				break;
+
+			case 'challenge-decline':
+				if (nametag && msg.challengeId) {
+					handleChallengeDecline(nametag, msg.challengeId);
 				}
 				break;
 
@@ -105,13 +133,83 @@ wss.on('connection', (ws) => {
 
 	ws.on('close', () => {
 		allSockets.delete(ws);
+		const closedTag = getNametag(ws);
 		unregisterSocket(ws);
+		if (closedTag) {
+			broadcastToAll({ type: 'player-online', v: 0, nametag: closedTag, online: false });
+		}
 	});
 
 	ws.on('error', (err) => {
 		console.error('[ws] error:', err.message);
 	});
 });
+
+// ── Challenge system ─────────────────────────────────────────────
+const pendingChallenges = new Map<string, { from: string; to: string; createdAt: number }>();
+let challengeCounter = 0;
+
+async function handleChallenge(from: string, opponent: string) {
+	if (!getOnlinePlayers().includes(opponent)) {
+		sendTo(from, { type: 'error', v: 0, code: 'opponent_offline', message: `${opponent} is not online` });
+		return;
+	}
+	if (from === opponent) {
+		sendTo(from, { type: 'error', v: 0, code: 'self_challenge', message: 'Cannot challenge yourself' });
+		return;
+	}
+	const id = `ch-${++challengeCounter}`;
+	pendingChallenges.set(id, { from, to: opponent, createdAt: Date.now() });
+	sendTo(from, { type: 'challenge-sent', v: 0, challengeId: id, opponent });
+	sendTo(opponent, { type: 'challenge-received', v: 0, challengeId: id, from });
+}
+
+async function handleChallengeAccept(acceptor: string, challengeId: string) {
+	const ch = pendingChallenges.get(challengeId);
+	if (!ch || ch.to !== acceptor) {
+		sendTo(acceptor, { type: 'error', v: 0, code: 'invalid_challenge', message: 'Challenge not found' });
+		return;
+	}
+	pendingChallenges.delete(challengeId);
+
+	try {
+		// Create a 2-player tournament
+		const tId = `challenge-${Date.now()}`;
+		await createTournament({ id: tId, name: `${ch.from} vs ${ch.to}`, maxPlayers: 2, startsAt: new Date().toISOString() });
+		await registerPlayer(tId, ch.from);
+		await registerPlayer(tId, ch.to);
+		await startTournament(tId);
+
+		// Tell both players to go to the tournament page
+		const url = `tournament-v2.html?id=${tId}`;
+		sendTo(ch.from, { type: 'challenge-accepted', v: 0, challengeId, tournamentId: tId, url });
+		sendTo(ch.to, { type: 'challenge-accepted', v: 0, challengeId, tournamentId: tId, url });
+	} catch (err: any) {
+		sendTo(ch.from, { type: 'error', v: 0, code: 'challenge_failed', message: err.message });
+		sendTo(acceptor, { type: 'error', v: 0, code: 'challenge_failed', message: err.message });
+	}
+}
+
+function handleChallengeDecline(decliner: string, challengeId: string) {
+	const ch = pendingChallenges.get(challengeId);
+	if (!ch || ch.to !== decliner) return;
+	pendingChallenges.delete(challengeId);
+	sendTo(ch.from, { type: 'challenge-declined', v: 0, challengeId, by: decliner });
+}
+
+// ── Expire stale challenges every 30s ────────────────────────────
+setInterval(() => {
+	const now = Date.now();
+	for (const [id, ch] of pendingChallenges) {
+		if (now - ch.createdAt > 30000) {
+			pendingChallenges.delete(id);
+			sendTo(ch.from, { type: 'error', v: 0, code: 'challenge_expired', message: 'Challenge expired' });
+		}
+	}
+}, 30000);
+
+// ── Notify when players go offline ──────────────────────────────
+// (handled in ws.on('close') via unregisterSocket + broadcast)
 
 // ── Periodic checks (every 60s) ─────────────────────────────────
 setInterval(async () => {

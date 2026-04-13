@@ -46,6 +46,11 @@ export function getNametag(ws: WebSocket): string | undefined {
 	return sockets.get(ws);
 }
 
+/** Get all connected player nametags. */
+export function getOnlinePlayers(): string[] {
+	return Array.from(players.keys());
+}
+
 export function sendTo(nametag: string, msg: Record<string, unknown>): void {
 	const ws = players.get(nametag);
 	if (ws?.readyState === 1) {

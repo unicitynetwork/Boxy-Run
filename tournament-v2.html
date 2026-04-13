@@ -773,6 +773,23 @@ main {
 
     <!-- LIST VIEW -->
     <div id="view-list" class="reveal">
+      <!-- 1v1 Challenge -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-head">
+          <h2>Challenge a Player</h2>
+          <span style="font-size:12px;color:var(--text-dim)">Click a name to challenge</span>
+        </div>
+        <div class="card-body">
+          <div style="font-size:10px;font-family:var(--font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Online Players</div>
+          <div id="online-players" style="min-height:32px">
+            <span style="color:var(--text-muted);font-size:13px">Connect to see who's online</span>
+          </div>
+          <div id="challenge-status" style="display:none;margin-top:12px;padding:10px 14px;border-radius:var(--radius);font-size:13px"></div>
+          <div id="incoming-challenges" style="margin-top:12px"></div>
+        </div>
+      </div>
+
+      <!-- Tournament List -->
       <div class="card">
         <div class="card-head"><h2>Tournaments</h2></div>
         <div class="card-body tourney-list" id="tourney-list">
@@ -991,9 +1008,32 @@ function wsSend(msg){
   if(ws&&ws.readyState===1)ws.send(JSON.stringify(msg));
 }
 
+let onlinePlayers=[];
+
 function handleWS(msg){
   switch(msg.type){
-    case'registered':break;
+    case'registered':
+      onlinePlayers=msg.onlinePlayers||[];
+      renderOnlinePlayers();
+      break;
+    case'player-online':
+      if(msg.online){if(!onlinePlayers.includes(msg.nametag))onlinePlayers.push(msg.nametag)}
+      else{onlinePlayers=onlinePlayers.filter(n=>n!==msg.nametag)}
+      renderOnlinePlayers();
+      break;
+    case'challenge-received':
+      showIncomingChallenge(msg);
+      break;
+    case'challenge-sent':
+      showChallengeStatus(`Challenge sent to ${msg.opponent}. Waiting...`,'var(--cyan-dim)','var(--cyan)');
+      break;
+    case'challenge-declined':
+      showChallengeStatus(`${msg.by} declined.`,'var(--red-lo,rgba(218,54,51,.1))','#da3633');
+      break;
+    case'challenge-accepted':
+      // Navigate to the tournament page
+      location.href=`tournament-v2.html?id=${msg.tournamentId}`;
+      break;
     case'match-status':
       if(myMatch&&msg.matchId===myMatch.id){
         document.getElementById('ready-you').classList.toggle('is-ready',
@@ -1326,6 +1366,65 @@ setInterval(()=>{
   const m=Math.floor((diff%3600000)/60000);
   document.getElementById('t-countdown').textContent=`${h}h ${m}m remaining`;
 },5000);
+
+// ===============================================================
+// CHALLENGE SYSTEM
+// ===============================================================
+function renderOnlinePlayers(){
+  const el=document.getElementById('online-players');
+  if(!el)return;
+  const others=onlinePlayers.filter(n=>n!==myNametag);
+  if(!myNametag){
+    el.innerHTML='<span style="color:var(--text-muted);font-size:13px">Connect to see who\'s online</span>';
+    return;
+  }
+  if(others.length===0){
+    el.innerHTML='<span style="color:var(--text-muted);font-size:13px">No other players online</span>';
+    return;
+  }
+  el.innerHTML=others.map(n=>
+    `<button class="btn-sm" style="margin:3px" onclick="sendChallenge('${esc(n)}')">${esc(n)}</button>`
+  ).join('');
+}
+
+function sendChallenge(opponent){
+  if(!myNametag||!wsRegistered)return;
+  wsSend({type:'challenge',opponent});
+}
+
+function showChallengeStatus(text,bg,color){
+  const el=document.getElementById('challenge-status');
+  if(!el)return;
+  el.style.display='block';
+  el.style.background=bg;
+  el.style.color=color;
+  el.textContent=text;
+  setTimeout(()=>{el.style.display='none'},5000);
+}
+
+function showIncomingChallenge(msg){
+  const container=document.getElementById('incoming-challenges');
+  if(!container)return;
+  const div=document.createElement('div');
+  div.style.cssText='padding:12px;background:var(--cyan-dim);border:1px solid var(--border-bright);border-radius:var(--radius);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px';
+  div.innerHTML=`
+    <span style="font-size:14px"><strong style="color:var(--cyan)">${esc(msg.from)}</strong> challenges you!</span>
+    <span style="display:flex;gap:6px">
+      <button class="btn-sm btn-primary" onclick="acceptChallenge('${msg.challengeId}',this)">Accept</button>
+      <button class="btn-sm" onclick="declineChallenge('${msg.challengeId}',this)">Decline</button>
+    </span>`;
+  container.appendChild(div);
+}
+
+function acceptChallenge(id,btn){
+  wsSend({type:'challenge-accept',challengeId:id});
+  if(btn)btn.closest('div').remove();
+}
+
+function declineChallenge(id,btn){
+  wsSend({type:'challenge-decline',challengeId:id});
+  if(btn)btn.closest('div').remove();
+}
 
 </script>
 </body>

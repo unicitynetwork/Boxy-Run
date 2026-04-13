@@ -167,6 +167,41 @@ export async function handleTournamentApi(
 		}
 	}
 
+	// POST /api/tournaments/:id/register-and-autostart
+	// For 1v1 challenges: register and auto-start if 2 players reached
+	const autoMatch = path.match(/^\/api\/tournaments\/([^/]+)\/join$/);
+	if (autoMatch && req.method === 'POST') {
+		const id = autoMatch[1];
+		try {
+			const body = JSON.parse(await readBody(req));
+			const nametag = body.nametag;
+			if (!nametag) { json(res, 400, { error: 'nametag required' }); return true; }
+
+			const tournament = await getTournament(id);
+			if (!tournament) { json(res, 404, { error: 'Tournament not found' }); return true; }
+			if (tournament.status !== 'registration') {
+				json(res, 400, { error: 'Registration is closed' });
+				return true;
+			}
+
+			await registerPlayer(id, nametag);
+			const count = await getRegistrationCount(id);
+
+			// Auto-start if we hit max_players (for 1v1 challenges, max=2)
+			if (count >= (tournament.max_players as number)) {
+				const { startTournament: start } = await import('./tournament-logic');
+				await start(id);
+				json(res, 200, { status: 'started', playerCount: count });
+			} else {
+				json(res, 200, { status: 'registered', playerCount: count });
+			}
+			return true;
+		} catch (err: any) {
+			json(res, 400, { error: err.message });
+			return true;
+		}
+	}
+
 	// POST /api/tournaments/:id/start — operator starts the tournament
 	if (startMatch && req.method === 'POST') {
 		const id = startMatch[1];
