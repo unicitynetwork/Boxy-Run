@@ -437,7 +437,7 @@ main {
 }
 
 /* -- Bracket -- */
-.bracket-wrap { overflow-x: auto; padding: 20px 0; }
+.draw-wrap { overflow-x: auto; padding: 20px 0; }
 .bracket { display: flex; align-items: stretch; gap: 0; min-width: min-content; }
 .bracket-round {
   display: flex;
@@ -761,7 +761,7 @@ main {
 
     <!-- Identity bar -->
     <div class="reveal" style="max-width:560px;margin-bottom:32px">
-      <div style="font-size:10px;font-family:var(--font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Your Identity</div>
+      <div style="font-size:14px;font-family:var(--font-display);letter-spacing:0.1em;color:var(--text);margin-bottom:10px">Enter Your Name</div>
       <div class="identity" id="identity-bar">
         <span class="identity-dot off" id="ws-dot"></span>
         <input type="text" id="id-input" placeholder="@nametag">
@@ -775,12 +775,12 @@ main {
       <div class="card" style="margin-bottom:24px">
         <div class="card-head">
           <h2>Challenge a Player</h2>
-          <span style="font-size:12px;color:var(--text-dim)">Click a name to challenge</span>
+          <span style="font-size:12px;color:var(--text-dim)">Click a player to challenge them</span>
         </div>
         <div class="card-body">
-          <div style="font-size:10px;font-family:var(--font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Online Players</div>
+          <div style="font-size:13px;font-family:var(--font-display);letter-spacing:0.1em;color:var(--text);margin-bottom:12px">Online Players</div>
           <div id="online-players" style="min-height:32px">
-            <span style="color:var(--text-muted);font-size:13px">Connect to see who's online</span>
+            <span style="color:var(--text-dim);font-size:14px">Enter your name above to see who's online</span>
           </div>
           <div id="challenge-status" style="display:none;margin-top:12px;padding:10px 14px;border-radius:var(--radius);font-size:13px"></div>
           <div id="incoming-challenges" style="margin-top:12px"></div>
@@ -830,8 +830,8 @@ main {
       <!-- Bracket section -->
       <div id="section-bracket" style="display:none" class="reveal">
         <div class="card" style="margin-bottom:24px">
-          <div class="card-head"><h2>Bracket</h2></div>
-          <div class="card-body bracket-wrap" id="bracket-wrap">
+          <div class="card-head"><h2>Tournament Draw</h2></div>
+          <div class="card-body draw-wrap" id="draw-wrap">
             <div class="loading"><span class="spin"></span>Loading bracket...</div>
           </div>
         </div>
@@ -1179,7 +1179,7 @@ async function loadBracket(){
 }
 
 function renderBracket(){
-  const wrap=document.getElementById('bracket-wrap');
+  const wrap=document.getElementById('draw-wrap');
   if(!currentMatches.length){wrap.innerHTML='<div class="empty">Bracket not yet generated</div>';return}
 
   const rounds=new Map();
