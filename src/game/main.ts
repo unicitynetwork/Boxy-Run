@@ -137,13 +137,36 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 
 	let matchActive = false;
 	let matchDone = false;
+	let oppDeathNotified = false;
+	let myDeathNotified = false;
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
+	const backUrl = tournamentId ? `tournament-v2.html?id=${tournamentId}` : 'tournament-v2.html';
+
+	// Opponent score HUD
+	let oppHud: HTMLElement | null = null;
+	function updateOppHud() {
+		if (!oppHud) {
+			oppHud = document.createElement('div');
+			oppHud.style.cssText =
+				'position:fixed;top:16px;right:16px;z-index:100;' +
+				'background:rgba(0,0,0,0.7);color:#e35d6a;' +
+				'padding:10px 16px;border-radius:6px;' +
+				'font-family:monospace;font-size:14px;' +
+				'border:1px solid rgba(227,93,106,0.3);pointer-events:none;';
+			document.body.appendChild(oppHud);
+		}
+		const dead = opponentState.gameOver ? ' [DEAD]' : '';
+		oppHud.innerHTML =
+			`<span style="font-size:11px;opacity:0.6">OPPONENT</span><br>` +
+			`Score: ${opponentState.score}${dead}`;
+	}
 
 	// Connect WebSocket
 	const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const wsUrl = `${wsProto}//${location.host}`;
 	let ws: WebSocket | null = null;
+	let intentionalClose = false;
 
 	function connectWS() {
 		ws = new WebSocket(wsUrl);
@@ -163,25 +186,53 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 					} catch {}
 				}
 				if (msg.type === 'match-end' && msg.matchId === matchId) {
-					const iWon = msg.winner === playerName;
-					const myScore = msg.scoreA ?? 0;
-					const oppScore = msg.scoreB ?? 0;
-					const backUrl = tournamentId ? `tournament-v2.html?id=${tournamentId}` : 'tournament-v2.html';
-					showOverlay(
-						(iWon
-							? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
-							: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>') +
-						`<div style="font-size:16px;margin-bottom:16px">${myScore.toLocaleString()} — ${oppScore.toLocaleString()}</div>` +
-						`<a href="${backUrl}" style="${BTN_STYLE}font-size:14px">BACK TO TOURNAMENT</a>`,
-					);
+					onMatchEnd(msg);
+				}
+				// Handle rematch: challenge-accepted → redirect to new match
+				if (msg.type === 'challenge-accepted') {
+					location.href = `tournament-v2.html?id=${msg.tournamentId}`;
+				}
+				if (msg.type === 'challenge-received') {
+					// Auto-accept rematches from the same opponent
+					if (msg.from === opponentName) {
+						wsSend({ type: 'challenge-accept', challengeId: msg.challengeId });
+					}
 				}
 			} catch {}
 		};
 		ws.onclose = () => {
-			setTimeout(connectWS, 3000);
+			if (!intentionalClose) setTimeout(connectWS, 3000);
 		};
 	}
 	connectWS();
+
+	function onMatchEnd(msg: any) {
+		matchDone = true;
+		if (oppHud) { oppHud.remove(); oppHud = null; }
+
+		const iWon = msg.winner === playerName;
+		const myScore = msg.scoreA ?? 0;
+		const oppScore = msg.scoreB ?? 0;
+
+		const resultHtml = iWon
+			? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
+			: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
+
+		const rematchBtn = `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>`;
+		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO TOURNAMENT</a>`;
+
+		showOverlay(
+			resultHtml +
+			`<div style="font-size:16px;margin-bottom:16px">${myScore.toLocaleString()} — ${oppScore.toLocaleString()}</div>` +
+			rematchBtn + backBtn,
+		);
+	}
+
+	// Rematch: send a challenge to the same opponent
+	(window as any).__v2rematch = () => {
+		showOverlay('<div style="font-size:16px">Sending rematch...</div>');
+		wsSend({ type: 'challenge', opponent: opponentName });
+	};
 
 	function wsSend(msg: Record<string, unknown>) {
 		if (ws?.readyState === 1) ws.send(JSON.stringify(msg));
@@ -261,22 +312,38 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 				tick(myState, config);
 				tick(opponentState, config);
 
-				// Both dead → match done
+				// Opponent died — notify + hide ghost
+				if (opponentState.gameOver && !oppDeathNotified) {
+					oppDeathNotified = true;
+					if (render.opponent) render.opponent.root.visible = false;
+					showDeathBanner('OPPONENT DOWN',
+						`Their score: ${opponentState.score}. Keep running!`);
+				}
+
+				// I died — notify
+				if (myState.gameOver && !myDeathNotified) {
+					myDeathNotified = true;
+					if (!opponentState.gameOver) {
+						showDeathBanner('YOU DIED',
+							`Your score: ${myState.score}. Watching opponent...`);
+					}
+				}
+
+				// Both dead → match done, send to server
 				if (myState.gameOver && opponentState.gameOver && !matchDone) {
 					matchDone = true;
+					removeDeathBanner();
 					wsSend({ type: 'match-done', matchId });
 					showOverlay('<div style="font-size:16px">Waiting for result...</div>');
 					break;
 				}
 
-				// Opponent died
-				if (opponentState.gameOver && render.opponent) {
-					render.opponent.root.visible = false;
-				}
-
 				tickAccumulator -= TICK_SECONDS;
 			}
 		}
+
+		// Update opponent HUD
+		if (matchActive && !matchDone) updateOppHud();
 
 		syncRender(myState, render, scene, config);
 		if (!opponentState.gameOver) syncOpponent(opponentState, render, config);
