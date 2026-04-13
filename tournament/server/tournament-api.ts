@@ -150,6 +150,23 @@ export async function handleTournamentApi(
 		return true;
 	}
 
+	// DELETE /api/tournaments/:id — operator deletes a tournament
+	if (tournamentMatch && req.method === 'DELETE') {
+		const id = tournamentMatch[1];
+		try {
+			const db = (await import('./db')).getDb();
+			await db.execute({ sql: 'DELETE FROM registrations WHERE tournament_id = ?', args: [id] });
+			await db.execute({ sql: 'DELETE FROM match_inputs WHERE match_id LIKE ?', args: [id + '/%'] });
+			await db.execute({ sql: 'DELETE FROM matches WHERE tournament_id = ?', args: [id] });
+			await db.execute({ sql: 'DELETE FROM tournaments WHERE id = ?', args: [id] });
+			json(res, 200, { deleted: id });
+			return true;
+		} catch (err: any) {
+			json(res, 400, { error: err.message });
+			return true;
+		}
+	}
+
 	// POST /api/tournaments/:id/start — operator starts the tournament
 	if (startMatch && req.method === 'POST') {
 		const id = startMatch[1];
