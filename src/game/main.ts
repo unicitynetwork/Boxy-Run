@@ -38,6 +38,9 @@ import {
 import { tick } from '../sim/tick';
 import { getSkin, type CharacterSkin } from '../render/skins';
 import { showSkinSelector } from './skin-selector';
+import { connectMatchWS } from './match-ws';
+import { createChatPanel } from './match-chat';
+import { startStatePoll, startMatchRedirectPoll } from './match-poll';
 import {
 	showOverlay,
 	hideOverlay,
@@ -280,83 +283,26 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			`Score: ${opponentState.score}${dead}`;
 	}
 
-	// Connect WebSocket
-	const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-	const wsUrl = `${wsProto}//${location.host}`;
-	let ws: WebSocket | null = null;
-	let intentionalClose = false;
-	let wsLastMessageAt = 0;
-	let wsWatchdog: ReturnType<typeof setInterval> | null = null;
-
-	// Outgoing queue. Anything sent while the WS is reconnecting (CLOSED /
-	// CONNECTING) MUST be queued, not dropped — silent drops here is the
-	// "I won locally but server says I lost" bug: the local game keeps
-	// applying inputs from queuedActions, so the player sees themselves
-	// jumping, but the server's deterministic replay never sees those
-	// inputs and the character dies earlier on the server side. Order is
-	// preserved: the queue flushes (FIFO) on the next onopen, AFTER the
-	// register message, so inputs land server-side tagged with their
-	// original tick number.
-	const pendingSends: string[] = [];
-	function connectWS() {
-		ws = new WebSocket(wsUrl);
-		wsLastMessageAt = Date.now();
-		ws.onopen = () => {
-			wsLastMessageAt = Date.now();
-			ws!.send(JSON.stringify({ type: 'register', identity: { nametag: playerName } }));
-			// Flush anything queued while the WS was down.
-			while (pendingSends.length && ws!.readyState === 1) {
-				ws!.send(pendingSends.shift()!);
-			}
-		};
-		ws.onmessage = (e) => {
-			wsLastMessageAt = Date.now();
-			try {
-				const msg = JSON.parse(e.data);
-				if (msg.type === 'heartbeat') return;
-
-				// WS is used ONLY for real-time input relay and chat.
-				// All flow transitions (ready, countdown, result, series)
-				// are driven by the REST reconcile loop. This eliminates
-				// the entire class of "missed WS push" bugs.
-				if (msg.type === 'opponent-input' && msg.matchId === matchId) {
-					try {
-						const action = atob(msg.payload) as CharacterAction;
-						if (action === 'up' || action === 'left' || action === 'right' || action === 'fire') {
-							if (!oppBuffer.has(msg.tick)) oppBuffer.set(msg.tick, []);
-							oppBuffer.get(msg.tick)!.push(action);
-						}
-					} catch {}
-				}
-				// Incoming rematch challenge — only on result screen
-				if (msg.type === 'challenge-received' && phase === 'series_end') {
-					const wagerText = msg.wager > 0 ? ` for ${msg.wager} UCT` : '';
-					showOverlay(
-						`<div style="font-size:16px;margin-bottom:12px"><strong>${msg.from}</strong> challenges you${wagerText}</div>` +
-						`<button onclick="window.__acceptRematch('${msg.challengeId}')" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">ACCEPT</button>` +
-						`<button onclick="window.__declineRematch('${msg.challengeId}')" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">DECLINE</button>`,
-					);
-				}
-				if (msg.type === 'chat' && msg.from) {
-					showChatBubble(msg.from, msg.message);
-				}
-			} catch {}
-		};
-		ws.onclose = () => {
-			if (wsWatchdog) { clearInterval(wsWatchdog); wsWatchdog = null; }
-			if (!intentionalClose) setTimeout(connectWS, 3000);
-		};
-
-		// Watchdog: server heartbeats every 10s. If >25s silence the socket is
-		// a zombie (network drop without close frame) — force close & reconnect.
-		wsWatchdog = setInterval(() => {
-			if (ws && ws.readyState === WebSocket.OPEN && Date.now() - wsLastMessageAt > 25_000) {
-				console.warn('[ws] idle >25s — forcing reconnect');
-				try { ws.close(); } catch {}
-			}
-		}, 5000);
-	}
-	connectWS();
+	// ── WebSocket (input relay + chat only) ──────────────────────────
+	const matchWs = connectMatchWS({
+		playerName,
+		matchId,
+		onOpponentInput(tick, action) {
+			if (!oppBuffer.has(tick)) oppBuffer.set(tick, []);
+			oppBuffer.get(tick)!.push(action);
+		},
+		onChallengeReceived(msg) {
+			if (phase !== 'series_end') return;
+			const wagerText = msg.wager > 0 ? ` for ${msg.wager} UCT` : '';
+			showOverlay(
+				`<div style="font-size:16px;margin-bottom:12px"><strong>${msg.from}</strong> challenges you${wagerText}</div>` +
+				`<button onclick="window.__acceptRematch('${msg.challengeId}')" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">ACCEPT</button>` +
+				`<button onclick="window.__declineRematch('${msg.challengeId}')" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">DECLINE</button>`,
+			);
+		},
+		onChat(from, message) { chat.addMessage(from, message, false); },
+	});
+	function wsSend(msg: Record<string, unknown>) { matchWs.send(msg); }
 
 	let lastWager = 0; // track wager for rematch
 
@@ -435,10 +381,25 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		fetchGameBalance().then(updateBalanceDisplay);
 	}
 
-	// Rematch: send via REST, then poll for the match to start.
-	// Old code used WS for challenge-start redirect — but we stripped
-	// all WS flow handlers. REST poll catches the new match.
-	let rematchPolling = false;
+	// ── Rematch (REST + redirect poll) ───────────────────────────────
+	let activePoll: { stop: () => void } | null = null;
+
+	function doMatchPoll() {
+		if (activePoll) return;
+		activePoll = startMatchRedirectPoll({
+			playerName,
+			backUrl,
+			lastWager,
+			onBeforeRedirect() { matchWs.close(); },
+			onExpired() {
+				activePoll = null;
+				const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
+				showOverlay(`<div style="font-size:14px;margin-bottom:12px">Rematch expired</div>` +
+					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
+			},
+		});
+	}
+
 	(window as any).__v2rematch = async () => {
 		showOverlay('<div style="font-size:16px">Sending rematch...</div><div style="font-size:12px;margin-top:8px;opacity:0.6">Waiting for opponent to accept...</div>');
 		try {
@@ -447,8 +408,8 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ from: playerName, opponent: opponentName, wager: lastWager, bestOf }),
 			});
-			const data = await r.json();
 			if (!r.ok) {
+				const data = await r.json();
 				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">${data.message || 'Challenge failed'}</div>` +
 					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
 				return;
@@ -458,53 +419,9 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
 			return;
 		}
-		startMatchPoll();
+		doMatchPoll();
 	};
 
-	/** Poll /api/tournaments for a new match involving us → redirect. */
-	function startMatchPoll() {
-		if (rematchPolling) return;
-		rematchPolling = true;
-		const poll = setInterval(async () => {
-			try {
-				const r = await fetch('/api/tournaments');
-				if (!r.ok) return;
-				const { tournaments } = await r.json();
-				for (const t of tournaments) {
-					if (t.status !== 'active' || !t.id.startsWith('challenge-')) continue;
-					const br = await fetch(`/api/tournaments/${encodeURIComponent(t.id)}/bracket`);
-					if (!br.ok) continue;
-					const { matches } = await br.json();
-					const m = matches?.find((m: any) =>
-						(m.playerA === playerName || m.playerB === playerName)
-						&& (m.status === 'ready_wait' || m.status === 'active'),
-					);
-					if (m) {
-						clearInterval(poll);
-						const side = m.playerA === playerName ? 'A' : 'B';
-						const opp = side === 'A' ? m.playerB : m.playerA;
-						const p = new URLSearchParams({
-							tournament: '1', matchId: m.id, seed: m.seed || '0',
-							side, opponent: opp, name: playerName,
-							tid: t.id, bestOf: String(t.best_of || 1),
-							wager: String(lastWager), startsAt: String(Date.now() + 3000),
-						});
-						location.href = 'dev.html?' + p;
-						return;
-					}
-				}
-			} catch {}
-		}, 2000);
-		setTimeout(() => {
-			clearInterval(poll);
-			rematchPolling = false;
-			const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
-			showOverlay(`<div style="font-size:14px;margin-bottom:12px">Rematch expired</div>` +
-				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
-		}, 35000);
-	}
-
-	// Accept/decline incoming rematch — also via REST
 	(window as any).__acceptRematch = async (challengeId: string) => {
 		showOverlay('<div style="font-size:16px">Starting match...</div>');
 		try {
@@ -514,8 +431,9 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				body: JSON.stringify({ by: playerName }),
 			});
 		} catch {}
-		startMatchPoll(); // ← was missing — acceptor needs the poll too
+		doMatchPoll();
 	};
+
 	(window as any).__declineRematch = async (challengeId: string) => {
 		try {
 			await fetch(`/api/challenges/${challengeId}/decline`, {
@@ -524,89 +442,18 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				body: JSON.stringify({ by: playerName }),
 			});
 		} catch {}
-		const backLabel = isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT';
-		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
+		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT'}</a>`;
 		showOverlay('Challenge declined.' + backBtn);
 	};
 
-	// ── In-game chat ──
-	function createChatPanel() {
-		const panel = document.createElement('div');
-		panel.id = 'game-chat';
-		panel.style.cssText =
-			'position:fixed;bottom:16px;right:16px;z-index:150;width:280px;' +
-			'background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.1);' +
-			'border-radius:8px;font-family:monospace;font-size:12px;' +
-			'backdrop-filter:blur(8px);display:flex;flex-direction:column;';
-		panel.innerHTML =
-			'<div id="game-chat-messages" style="height:120px;overflow-y:auto;padding:8px 10px;color:#ccc"></div>' +
-			'<div style="display:flex;border-top:1px solid rgba(255,255,255,0.1)">' +
-			'<input id="game-chat-input" type="text" maxlength="200" placeholder="Chat..." style="flex:1;padding:8px 10px;background:transparent;border:none;color:#fff;font-family:monospace;font-size:12px;outline:none">' +
-			'<button id="game-chat-send" style="padding:8px 12px;background:transparent;border:none;border-left:1px solid rgba(255,255,255,0.1);color:#00e5ff;font-size:10px;font-weight:bold;cursor:pointer">SEND</button>' +
-			'</div>';
-		// Quick messages
-		const quickBar = document.createElement('div');
-		quickBar.style.cssText = 'display:flex;gap:4px;padding:6px 8px;border-top:1px solid rgba(255,255,255,0.1);flex-wrap:wrap;';
-		['GG', 'Nice!', 'GL', '😂'].forEach(text => {
-			const btn = document.createElement('button');
-			btn.textContent = text;
-			btn.style.cssText = 'padding:3px 8px;background:rgba(255,255,255,0.1);border:none;border-radius:4px;color:#aaa;font-size:11px;cursor:pointer;font-family:monospace;';
-			btn.addEventListener('click', () => sendGameChat(text));
-			quickBar.appendChild(btn);
-		});
-		panel.appendChild(quickBar);
-		document.body.appendChild(panel);
-
-		const input = document.getElementById('game-chat-input')!;
-		const sendBtn = document.getElementById('game-chat-send')!;
-		sendBtn.addEventListener('click', () => {
-			const text = (input as HTMLInputElement).value.trim();
-			if (text) { sendGameChat(text); (input as HTMLInputElement).value = ''; }
-		});
-		input.addEventListener('keydown', (e) => {
-			e.stopPropagation(); // Don't trigger game controls
-			if (e.key === 'Enter') {
-				const text = (input as HTMLInputElement).value.trim();
-				if (text) { sendGameChat(text); (input as HTMLInputElement).value = ''; }
-			}
-		});
-		input.addEventListener('keyup', (e) => e.stopPropagation());
-	}
-
-	function sendGameChat(text: string) {
-		wsSend({ type: 'chat', to: opponentName, message: text });
-		addGameChatMessage(playerName, text, true);
-	}
-
-	function addGameChatMessage(from: string, text: string, isMe: boolean) {
-		const el = document.getElementById('game-chat-messages');
-		if (!el) return;
-		const div = document.createElement('div');
-		div.style.marginBottom = '3px';
-		const color = isMe ? '#00e5ff' : '#f97316';
-		div.innerHTML = `<span style="color:${color};font-weight:bold">${from.replace(/</g, '&lt;')}</span> ${text.replace(/</g, '&lt;')}`;
-		el.appendChild(div);
-		el.scrollTop = el.scrollHeight;
-	}
-
-	function showChatBubble(from: string, text: string) {
-		addGameChatMessage(from, text, false);
-	}
-
-	createChatPanel();
-
-	function wsSend(msg: Record<string, unknown>) {
-		const json = JSON.stringify(msg);
-		if (ws?.readyState === 1) {
-			ws.send(json);
-		} else {
-			// WS down (CLOSED/CONNECTING). Queue and let onopen flush. This
-			// is critical for `input` and `match-done`: dropping them would
-			// desync server replay from the local sim → player thinks they
-			// won, server says they lost.
-			pendingSends.push(json);
-		}
-	}
+	// ── Chat ─────────────────────────────────────────────────────────
+	const chat = createChatPanel({
+		onSend(text) {
+			wsSend({ type: 'chat', to: opponentName, message: text });
+			chat.addMessage(playerName, text, true);
+		},
+		playerName,
+	});
 
 	// Keyboard + touch input
 	const keysAllowed: Record<number, boolean> = {};
@@ -759,8 +606,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	}
 
 	// ── REST poll — the ONLY flow driver ─────────────────────────────
-	// WS is used exclusively for input relay. ALL state transitions are
-	// driven by this poll. No missed WS push can cause a stuck screen.
 	const reconcileMatchRegex = matchId.match(/^(.+)\/R(\d+)M(\d+)$/);
 	const stateUrl = reconcileMatchRegex
 		? `/api/tournaments/${encodeURIComponent(reconcileMatchRegex[1])}/matches/${reconcileMatchRegex[2]}/${reconcileMatchRegex[3]}/state`
@@ -799,85 +644,65 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	}
 
 	if (stateUrl) {
-		setInterval(async () => {
-			if (phase === 'series_end') return;
-			try {
-				const r = await fetch(stateUrl);
-				if (!r.ok) return;
-				const s = await r.json();
-
-				// 1. Match complete → show result.
-				if (s.phase === 'complete' && s.winner) {
-					console.log('[poll] → series_end');
-					onMatchEnd({
-						matchId: s.matchId, winner: s.winner,
-						scoreA: s.scoreA ?? 0, scoreB: s.scoreB ?? 0,
-						seriesEnd: (s.bestOf || 1) > 1, bestOf: s.bestOf || 1,
-						wager: lastWager,
-					});
-					return;
-				}
-
-				// 2. Series advanced → show game result, then reset.
-				if (s.series && s.series.currentGame > currentGameNumber) {
-					console.log(`[poll] game ${s.series.currentGame} > ${currentGameNumber}`);
-					// Determine who won the PREVIOUS game from series score delta
-					const prevWinsA = currentWinsA;
-					const prevWinsB = currentWinsB;
-					const newWinsA = s.series.winsA || 0;
-					const newWinsB = s.series.winsB || 0;
-					const iWonGame = (mySide === 'A')
-						? (newWinsA > prevWinsA)
-						: (newWinsB > prevWinsB);
-					const myWins = mySide === 'A' ? newWinsA : newWinsB;
-					const oppWins = mySide === 'A' ? newWinsB : newWinsA;
-					// Show result briefly before resetting
-					setPhase('game_result');
-					removeDeathBanner();
-					showOverlay(
-						`<div style="font-size:26px;font-weight:bold;color:${iWonGame ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">Game ${currentGameNumber}: ${iWonGame ? 'WIN' : 'LOSS'}</div>` +
-						`<div style="font-size:12px;color:#666;letter-spacing:.2em;margin-bottom:4px">SERIES (Best of ${bestOf})</div>` +
-						`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myWins} — ${oppWins}</div>` +
-						`<div style="font-size:13px;opacity:0.7">Next game starting…</div>`,
-					);
-					setTimeout(() => resetForNextGame(s), 3000);
-					return;
-				}
-
-				// 3. Both ready → countdown.
-				if (s.ready?.A && s.ready?.B
-						&& (phase === 'waiting' || phase === 'ready_prompt')) {
-					console.log('[poll] both ready → countdown');
-					kickCountdown(Date.now() + 3000);
-					return;
-				}
-
-				// 4. Ready expired — only if we've actually been waiting
-				//    long enough for the TTL to fire (readyDeadline passed).
-				//    Without this, the very first poll sees both=false (server
-				//    hasn't processed our ready yet) and falsely expires.
-				if (phase === 'waiting' && s.ready && !s.ready.A && !s.ready.B
-						&& Date.now() > readyDeadline) {
-					console.log('[poll] ready expired');
-					showReadyPrompt('Ready expired — opponent didn\'t ready in time');
-					return;
-				}
-
-				// 5. Opponent confirmed dead by server → stop game, show win.
-				const oppSide = mySide === 'A' ? 'B' : 'A';
-				if (phase === 'playing' && s.done?.[oppSide]) {
-					setPhase('done_sent');
-					sendMatchDone();
-					removeDeathBanner();
-					showOverlay(
-						`<div style="font-size:32px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>` +
-						`<div style="font-size:16px;margin-bottom:8px">Score: ${myState.score.toLocaleString()}</div>` +
-						`<div style="font-size:13px;opacity:0.6">Waiting for final result…</div>`,
-					);
-					return;
-				}
-			} catch {}
-		}, 2000);
+		startStatePoll(stateUrl, {
+			getPhase: () => phase,
+			getMySide: () => mySide,
+			getPlayerName: () => playerName,
+			getCurrentGameNumber: () => currentGameNumber,
+			getCurrentWins: () => ({ a: currentWinsA, b: currentWinsB }),
+			getReadyDeadline: () => readyDeadline,
+			onMatchComplete(s) {
+				console.log('[poll] → series_end');
+				onMatchEnd({
+					matchId: s.matchId, winner: s.winner,
+					scoreA: s.scoreA ?? 0, scoreB: s.scoreB ?? 0,
+					seriesEnd: (s.bestOf || 1) > 1, bestOf: s.bestOf || 1,
+					wager: lastWager,
+				});
+			},
+			onSeriesAdvance(s) {
+				console.log(`[poll] game ${s.series.currentGame} > ${currentGameNumber}`);
+				const prevWinsA = currentWinsA;
+				const prevWinsB = currentWinsB;
+				const newWinsA = s.series.winsA || 0;
+				const newWinsB = s.series.winsB || 0;
+				const iWonGame = (mySide === 'A') ? (newWinsA > prevWinsA) : (newWinsB > prevWinsB);
+				const myWins = mySide === 'A' ? newWinsA : newWinsB;
+				const oppWins = mySide === 'A' ? newWinsB : newWinsA;
+				const gameJustPlayed = currentGameNumber;
+				currentGameNumber = s.series.currentGame;
+				currentWinsA = newWinsA;
+				currentWinsB = newWinsB;
+				setPhase('game_result');
+				removeDeathBanner();
+				showOverlay(
+					`<div style="font-size:26px;font-weight:bold;color:${iWonGame ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">Game ${gameJustPlayed}: ${iWonGame ? 'WIN' : 'LOSS'}</div>` +
+					`<div style="font-size:12px;color:#666;letter-spacing:.2em;margin-bottom:4px">SERIES (Best of ${bestOf})</div>` +
+					`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myWins} — ${oppWins}</div>` +
+					`<div style="font-size:13px;opacity:0.7">Next game starting…</div>`,
+				);
+				setTimeout(() => resetForNextGame(s), 3000);
+			},
+			onBothReady() {
+				console.log('[poll] both ready → countdown');
+				kickCountdown(Date.now() + 3000);
+			},
+			onReadyExpired() {
+				console.log('[poll] ready expired');
+				showReadyPrompt('Ready expired — opponent didn\'t ready in time');
+			},
+			onOpponentDone() {
+				console.log('[poll] opponent done → YOU WIN');
+				setPhase('done_sent');
+				sendMatchDone();
+				removeDeathBanner();
+				showOverlay(
+					`<div style="font-size:32px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>` +
+					`<div style="font-size:16px;margin-bottom:8px">Score: ${myState.score.toLocaleString()}</div>` +
+					`<div style="font-size:13px;opacity:0.6">Waiting for final result…</div>`,
+				);
+			},
+		});
 	}
 
 	/** Send match-done to server via WS + REST. Idempotent. */
@@ -930,6 +755,18 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 					playCrash();
 					setPhase('done_sent');
 					sendMatchDone();
+					// Safety: if the poll never detects the result (server
+					// down, network issue), stop ticking after 45s.
+					setTimeout(() => {
+						if (phase === 'done_sent') {
+							setPhase('series_end');
+							const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
+							showOverlay(
+								`<div style="font-size:16px;color:#c1121f;margin-bottom:12px">Result unavailable — connection issue</div>` +
+								backBtn,
+							);
+						}
+					}, 45_000);
 					if (oppGhostDead) {
 						showDeathBanner('CALCULATING RESULT', 'Both finished — server is replaying…');
 					} else {
