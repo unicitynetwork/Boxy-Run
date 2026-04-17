@@ -13,5 +13,6 @@
       "@unicitylabs/sphere-sdk/connect/browser": ["./node_modules/@unicitylabs/sphere-sdk/dist/impl/browser/connect/index.d.ts"]
     }
   },
-  "include": ["src/**/*.ts", "tournament/**/*.ts"]
+  "include": ["src/**/*.ts", "tournament/**/*.ts"],
+  "exclude": ["tournament/tests/_legacy/**"]
 }

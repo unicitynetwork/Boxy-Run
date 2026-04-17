@@ -7,7 +7,7 @@
  * tweak without running the visual-parity acceptance test.
  */
 
-import type { CharacterState, CoinState, TreeState } from './state';
+import type { CharacterState, CoinState, PowerupState, TreeState } from './state';
 
 /** Axis-aligned bounding box in world coordinates. */
 export interface BoundingBox {
@@ -68,6 +68,18 @@ export function coinBox(coin: CoinState): BoundingBox {
 		maxY: coin.y + 80,
 		minZ: coin.z - 100,
 		maxZ: coin.z + 100,
+	};
+}
+
+/** Powerup hitbox. Generous to make them easy to collect. */
+export function powerupBox(p: PowerupState): BoundingBox {
+	return {
+		minX: p.x - 120,
+		maxX: p.x + 120,
+		minY: p.y - 120,
+		maxY: p.y + 120,
+		minZ: p.z - 150,
+		maxZ: p.z + 150,
 	};
 }
 

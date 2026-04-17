@@ -47,34 +47,63 @@ execSync(
 	{ cwd: REPO_ROOT, stdio: 'inherit' },
 );
 
-// Run each compiled test in sequence.
-console.log('\nrunning tests:');
-const TEST_TIMEOUT_MS = 15000; // 15s per test, kills zombies
+// Run test files in parallel — each picks a random port and uses a unique
+// DB path, so there's no contention. Output is captured per-file and
+// streamed after completion to keep the console readable.
+console.log('\nrunning tests (parallel):');
+// 10 min ceiling — the bot-e2e tests need several minutes to play out
+// full Bo3 series. Individual tests still exit fast on success; this
+// just prevents a wedged test from running forever.
+const TEST_TIMEOUT_MS = 600_000;
+const CONCURRENCY = parseInt(process.env.TEST_CONCURRENCY || '0', 10)
+	|| Math.min(testFiles.length, Math.max(4, (await import('node:os')).cpus().length));
 
-let failures = 0;
-for (const src of testFiles) {
+async function runOne(src) {
 	const js = src.replace(/\.ts$/, '.js');
 	const bundle = join(DIST_DIR, js);
-	const result = await new Promise((resolveRun) => {
-		// detached: true puts the child in its own process group so we
-		// can kill it AND any server subprocesses it spawned.
-		const child = spawn('node', [bundle], { stdio: 'inherit', detached: true });
+	return new Promise((resolveRun) => {
+		const child = spawn('node', [bundle], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+		let stdout = '';
+		let stderr = '';
+		child.stdout.on('data', (c) => { stdout += c.toString(); });
+		child.stderr.on('data', (c) => { stderr += c.toString(); });
 		const timer = setTimeout(() => {
-			console.error(`  TIMEOUT: ${src} exceeded ${TEST_TIMEOUT_MS}ms, killing`);
 			try { process.kill(-child.pid, 'SIGKILL'); } catch {}
-			resolveRun(1);
+			resolveRun({ src, code: 1, stdout, stderr: stderr + `\n  TIMEOUT: exceeded ${TEST_TIMEOUT_MS}ms` });
 		}, TEST_TIMEOUT_MS);
 		child.on('exit', (code) => {
 			clearTimeout(timer);
-			resolveRun(code ?? 1);
+			resolveRun({ src, code: code ?? 1, stdout, stderr });
 		});
 	});
-	if (result !== 0) failures++;
+}
+
+async function runPool(files, n) {
+	const results = [];
+	let idx = 0;
+	async function worker() {
+		while (idx < files.length) {
+			const my = idx++;
+			results[my] = await runOne(files[my]);
+		}
+	}
+	await Promise.all(Array.from({ length: n }, worker));
+	return results;
+}
+
+const results = await runPool(testFiles, CONCURRENCY);
+
+// Print outputs in deterministic order (test file order) so logs are stable.
+let failures = 0;
+for (const r of results) {
+	if (r.stdout) process.stdout.write(r.stdout);
+	if (r.stderr) process.stderr.write(r.stderr);
+	if (r.code !== 0) failures++;
 }
 
 console.log(
 	failures === 0
-		? `\nall ${testFiles.length} tests passed`
-		: `\n${failures}/${testFiles.length} tests failed`,
+		? `\nall ${testFiles.length} test file(s) passed`
+		: `\n${failures}/${testFiles.length} test file(s) failed`,
 );
 process.exit(failures === 0 ? 0 : 1);

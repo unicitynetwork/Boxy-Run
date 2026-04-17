@@ -5,11 +5,13 @@
   "scripts": {
     "build:sdk": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020",
     "build:game": "esbuild src/game/main.ts --bundle --outfile=js/game.js --format=iife --target=es2020",
-    "build:inline": "esbuild src/game/inline-game.ts --bundle --outfile=js/inline-game.js --format=iife --target=es2020",
-    "build:server": "esbuild tournament/server/server-v2.ts --bundle --outfile=dist/server.js --platform=node --format=cjs --packages=external",
-    "build": "npm run build:sdk && npm run build:game && npm run build:inline",
+    "build:server": "esbuild tournament/server/server.ts --bundle --outfile=dist/server.js --platform=node --format=cjs --packages=external",
+    "build:pages": "esbuild src/pages/challenge.ts --bundle --outfile=js/challenge-page.js --format=iife --target=es2020",
+    "build": "npm run build:sdk && npm run build:game && npm run build:pages",
     "server": "npm run build:server && node dist/server.js",
     "test:server": "npm run build:server && node tournament/tests/run-all.mjs",
+    "test:browser": "npm run build && npm run build:server && playwright test",
+    "test:all": "npm run test:server && npm run test:browser",
     "typecheck": "tsc --noEmit",
     "watch": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020 --watch",
     "dev": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020 --watch=forever --servedir=."
@@ -21,6 +23,7 @@
   },
   "devDependencies": {
     "@netlify/functions": "^5.2.0",
+    "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.24.0",

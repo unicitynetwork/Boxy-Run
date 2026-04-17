@@ -99,18 +99,19 @@ export function makeGhostly(mesh: CharacterMesh): void {
 		if (child.isMesh && child.material) {
 			child.material = child.material.clone();
 			child.material.transparent = true;
-			child.material.opacity = 0.35;
+			child.material.opacity = 0.18;
 			child.material.depthWrite = false;
-			// Add a slight emissive glow in the shirt color
+			// Cyan-tinted emissive glow so the ghost is clearly
+			// "not your character" — distinct from any skin color.
 			if (child.material.emissive) {
-				child.material.emissive.setHex(child.material.color.getHex());
-				child.material.emissiveIntensity = 0.3;
+				child.material.emissive.setHex(0x00ccff);
+				child.material.emissiveIntensity = 0.6;
 			}
 		}
 	});
-	// Make the label more transparent too
+	// Make the label very faint
 	if (mesh.label) {
-		mesh.label.material.opacity = 0.5;
+		mesh.label.material.opacity = 0.3;
 	}
 }
 

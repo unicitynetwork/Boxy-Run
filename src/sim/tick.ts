@@ -15,12 +15,13 @@ import {
 	aabbIntersect,
 	characterBox,
 	coinBox,
+	powerupBox,
 	treeBox,
 } from './collision';
 import { rngNext } from './rng';
-import { spawnCoinRow, spawnTreeRow } from './spawn';
+import { maybeSpawnPowerup, spawnCoinRow, spawnTreeRow } from './spawn';
 import type { GameConfig, GameState } from './state';
-import { TICK_SECONDS } from './state';
+import { COIN_TIER_VALUES, TICK_SECONDS } from './state';
 
 /** Number of difficulty increments per "level". */
 const LEVEL_LENGTH = 30;
@@ -120,6 +121,8 @@ export function tick(state: GameState, config: GameConfig): void {
 				0.2,
 			);
 		}
+		// Maybe spawn flamethrower powerup
+		maybeSpawnPowerup(state, config, NEW_ROW_SPAWN_Z + COIN_ROW_Z_OFFSET);
 	}
 
 	// --- 2. Move all world objects toward the character.
@@ -130,16 +133,20 @@ export function tick(state: GameState, config: GameConfig): void {
 	for (const coin of state.coins) {
 		coin.z += moveDistance;
 	}
+	for (const p of state.powerups) {
+		p.z += moveDistance;
+	}
 
-	// --- 3. Cull off-screen entities. Both arrays are re-assigned
-	// because splice-in-place would change indices mid-loop.
+	// --- 3. Cull off-screen entities.
 	state.trees = state.trees.filter((t) => t.z < 0);
 	state.coins = state.coins.filter((c) => c.z < 0);
+	state.powerups = state.powerups.filter((p) => p.z < 0);
 
 	// --- 4. Character physics (jump / lane switch / bob).
 	updateCharacter(state, config);
 
 	// --- 5. Coin collection. Iterate in reverse so splicing is safe.
+	state.lastCollectedTier = null;
 	const charBox = characterBox(state.character);
 	for (let i = state.coins.length - 1; i >= 0; i--) {
 		const coin = state.coins[i];
@@ -147,9 +154,32 @@ export function tick(state: GameState, config: GameConfig): void {
 		if (aabbIntersect(charBox, coinBox(coin))) {
 			coin.collected = true;
 			state.coinCount += 1;
-			state.score += config.coinScoreBonus;
+			state.score += COIN_TIER_VALUES[coin.tier] ?? config.coinScoreBonus;
+			state.lastCollectedTier = coin.tier;
 			state.coins.splice(i, 1);
 		}
+	}
+
+	// --- 5b. Powerup collection.
+	for (let i = state.powerups.length - 1; i >= 0; i--) {
+		const p = state.powerups[i];
+		if (p.collected) continue;
+		if (aabbIntersect(charBox, powerupBox(p))) {
+			p.collected = true;
+			state.flamethrowerCharges++;
+			state.powerups.splice(i, 1);
+		}
+	}
+
+	// --- 5c. Flamethrower effect: burn the nearest trees ahead.
+	if (state.flameTicks > 0) {
+		state.flameTicks--;
+		const charZ = state.character.z;
+		// Burn range: only the next ~5000 units ahead (roughly one row)
+		state.trees = state.trees.filter(t => {
+			if (t.z < charZ && t.z > charZ - 5000) return false;
+			return true;
+		});
 	}
 
 	// --- 6. Tree collision. Set gameOver on first hit but still fall

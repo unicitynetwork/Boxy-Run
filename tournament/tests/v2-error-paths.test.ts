@@ -5,6 +5,7 @@
 
 import WebSocket from 'ws';
 import {
+	api,
 	assert,
 	assertEqual,
 	runTest,
@@ -12,13 +13,6 @@ import {
 	startServer,
 	stopServer,
 } from './harness';
-
-async function api(baseUrl: string, path: string, method = 'GET', body?: any) {
-	const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
-	if (body) opts.body = JSON.stringify(body);
-	const r = await fetch(`${baseUrl}${path}`, opts);
-	return r.json();
-}
 
 function wsConnect(port: number, nametag: string): Promise<{
 	ws: WebSocket; messages: any[]; send: (msg: any) => void; close: () => void;
@@ -60,7 +54,6 @@ function wsConnect(port: number, nametag: string): Promise<{
 
 runTest('v2: error paths — invalid ready, full tournament, wrong match', async () => {
 	const server = await startServer();
-	const base = `http://127.0.0.1:${server.port}/api`;
 	try {
 		// ── 1. Ready for nonexistent match ──
 		{
@@ -74,12 +67,20 @@ runTest('v2: error paths — invalid ready, full tournament, wrong match', async
 
 		// ── 2. Ready for match you're not in ──
 		{
-			await api(base, '/tournaments', 'POST', { id: 'err-t1', name: 'Err Test' });
-			await api(base, '/tournaments/err-t1/register', 'POST', { nametag: 'alice' });
-			await api(base, '/tournaments/err-t1/register', 'POST', { nametag: 'bob' });
-			await api(base, '/tournaments/err-t1/start', 'POST');
+			await api(server, '/api/tournaments', {
+				method: 'POST', asAdmin: true, body: { id: 'err-t1', name: 'Err Test' },
+			});
+			await api(server, '/api/tournaments/err-t1/register', {
+				method: 'POST', body: { nametag: 'alice' },
+			});
+			await api(server, '/api/tournaments/err-t1/register', {
+				method: 'POST', body: { nametag: 'bob' },
+			});
+			await api(server, '/api/tournaments/err-t1/start', {
+				method: 'POST', asAdmin: true,
+			});
 
-			const bracket = await api(base, '/tournaments/err-t1/bracket');
+			const bracket = await api(server, '/api/tournaments/err-t1/bracket');
 			const matchId = bracket.matches[0].id;
 
 			const eve = await wsConnect(server.port, 'eve_outsider');
@@ -92,27 +93,46 @@ runTest('v2: error paths — invalid ready, full tournament, wrong match', async
 
 		// ── 3. Register for full tournament ──
 		{
-			await api(base, '/tournaments', 'POST', { id: 'full-t', name: 'Full', maxPlayers: 2 });
-			await api(base, '/tournaments/full-t/register', 'POST', { nametag: 'p1' });
-			await api(base, '/tournaments/full-t/register', 'POST', { nametag: 'p2' });
-			const full = await api(base, '/tournaments/full-t/register', 'POST', { nametag: 'p3' });
+			await api(server, '/api/tournaments', {
+				method: 'POST', asAdmin: true,
+				body: { id: 'full-t', name: 'Full', maxPlayers: 2 },
+			});
+			await api(server, '/api/tournaments/full-t/register', {
+				method: 'POST', body: { nametag: 'p1' },
+			});
+			await api(server, '/api/tournaments/full-t/register', {
+				method: 'POST', body: { nametag: 'p2' },
+			});
+			const full = await api(server, '/api/tournaments/full-t/register', {
+				method: 'POST', body: { nametag: 'p3' }, allowError: true,
+			});
 			assert(full.error, 'should error when full');
 		}
 
 		// ── 4. Start already-started tournament ──
 		{
-			const started = await api(base, '/tournaments/err-t1/start', 'POST');
+			const started = await api(server, '/api/tournaments/err-t1/start', {
+				method: 'POST', asAdmin: true, allowError: true,
+			});
 			assert(started.error, 'should error on double start');
 		}
 
 		// ── 5. Input for match not in active state ──
 		{
-			await api(base, '/tournaments', 'POST', { id: 'err-t2', name: 'Input Err' });
-			await api(base, '/tournaments/err-t2/register', 'POST', { nametag: 'inputA' });
-			await api(base, '/tournaments/err-t2/register', 'POST', { nametag: 'inputB' });
-			await api(base, '/tournaments/err-t2/start', 'POST');
+			await api(server, '/api/tournaments', {
+				method: 'POST', asAdmin: true, body: { id: 'err-t2', name: 'Input Err' },
+			});
+			await api(server, '/api/tournaments/err-t2/register', {
+				method: 'POST', body: { nametag: 'inputA' },
+			});
+			await api(server, '/api/tournaments/err-t2/register', {
+				method: 'POST', body: { nametag: 'inputB' },
+			});
+			await api(server, '/api/tournaments/err-t2/start', {
+				method: 'POST', asAdmin: true,
+			});
 
-			const bracket = await api(base, '/tournaments/err-t2/bracket');
+			const bracket = await api(server, '/api/tournaments/err-t2/bracket');
 			const matchId = bracket.matches[0].id;
 
 			// Send input before match starts (still in ready_wait)

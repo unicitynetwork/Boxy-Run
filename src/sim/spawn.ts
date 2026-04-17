@@ -9,8 +9,11 @@
  * would diverge between init and later ticks.
  */
 
-import type { GameConfig, GameState } from './state';
+import type { CoinTier, GameConfig, GameState } from './state';
 import { rngNext } from './rng';
+
+/** Vertical position of a powerup's center. Slightly higher than coins. */
+const POWERUP_Y = 350;
 
 /** Vertical position of a tree's base. Hardcoded in the original game. */
 const TREE_Y = -400;
@@ -59,12 +62,38 @@ export function spawnCoinRow(
 ): void {
 	for (let lane = -1; lane <= 1; lane++) {
 		if (rngNext(state) < probability) {
+			// Tier roll: 80% gold, 15% blue, 5% red
+			const tierRoll = rngNext(state);
+			const tier: CoinTier = tierRoll < 0.05 ? 'red' : tierRoll < 0.20 ? 'blue' : 'gold';
 			state.coins.push({
 				x: lane * config.laneWidth,
 				y: COIN_Y,
 				z,
+				tier,
 				collected: false,
 			});
 		}
+	}
+}
+
+/**
+ * Maybe spawn a flamethrower powerup at the given z.
+ * Consumes 2 rng calls unconditionally for determinism.
+ */
+export function maybeSpawnPowerup(
+	state: GameState,
+	config: GameConfig,
+	z: number,
+): void {
+	const roll = rngNext(state);
+	const lane = Math.floor(rngNext(state) * 3) - 1; // -1, 0, or 1
+	// ~3% chance per eligible spawn point
+	if (roll < 0.03) {
+		state.powerups.push({
+			x: (lane as -1 | 0 | 1) * config.laneWidth,
+			y: POWERUP_Y,
+			z,
+			collected: false,
+		});
 	}
 }

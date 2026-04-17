@@ -1,10 +1,17 @@
 node_modules/
 js/sphere-connect.js
 js/game.js
-js/game-new.js
-js/inline-game.js
+js/challenge-page.js
 dist/
 
 # Local Netlify folder
 .netlify
 local.db
+
+# Arena wallet secrets — NEVER commit these.
+# Contains BIP-39 mnemonic that controls every UCT held by the game.
+arena-wallet.json
+arena-wallet.json.bak
+arena-data/
+test-results/
+playwright-report/

@@ -42,4 +42,25 @@ export function updateHud(state: GameState): void {
 	if (els.coins) els.coins.innerHTML = coinsText;
 	if (els.mobileScoreStrong) els.mobileScoreStrong.innerHTML = scoreText;
 	if (els.mobileCoinsStrong) els.mobileCoinsStrong.innerHTML = coinsText;
+
+	// Flamethrower indicator
+	let flameEl = document.getElementById('flame-indicator');
+	if (state.flamethrowerCharges > 0) {
+		if (!flameEl) {
+			flameEl = document.createElement('div');
+			flameEl.id = 'flame-indicator';
+			flameEl.style.cssText =
+				'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:100;' +
+				'font-family:monospace;font-size:16px;font-weight:bold;padding:8px 20px;' +
+				'border-radius:6px;text-align:center;pointer-events:none;';
+			document.body.appendChild(flameEl);
+		}
+		flameEl.style.background = 'rgba(255,102,0,0.2)';
+		flameEl.style.color = '#ff6600';
+		flameEl.style.border = '1px solid #ff6600';
+		const charges = state.flamethrowerCharges;
+		flameEl.textContent = `🔥 FLAME x${charges} (F / Down)`;
+	} else if (flameEl) {
+		flameEl.remove();
+	}
 }

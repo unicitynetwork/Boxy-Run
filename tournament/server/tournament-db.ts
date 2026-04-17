@@ -18,11 +18,22 @@ export async function ensureTournamentSchema(): Promise<void> {
 			max_players INTEGER NOT NULL DEFAULT 32,
 			round_hours INTEGER NOT NULL DEFAULT 24,
 			current_round INTEGER NOT NULL DEFAULT -1,
+			prize_pool INTEGER NOT NULL DEFAULT 0,
+			entry_fee INTEGER NOT NULL DEFAULT 0,
+			best_of INTEGER NOT NULL DEFAULT 1,
 			created_at TEXT NOT NULL,
 			starts_at TEXT NOT NULL,
 			completed_at TEXT
 		)
 	`);
+
+	// Migrations for existing DBs (must run after CREATE TABLE so the
+	// table exists; SQLite ALTER TABLE on a missing table fails silently
+	// in our try/catch and the column is then never added).
+	try { await db.execute('ALTER TABLE tournaments ADD COLUMN prize_pool INTEGER NOT NULL DEFAULT 0'); } catch {}
+	try { await db.execute('ALTER TABLE tournaments ADD COLUMN best_of INTEGER NOT NULL DEFAULT 1'); } catch {}
+	try { await db.execute('ALTER TABLE tournaments ADD COLUMN prize_paid INTEGER NOT NULL DEFAULT 0'); } catch {}
+	try { await db.execute('ALTER TABLE tournaments ADD COLUMN entry_fee INTEGER NOT NULL DEFAULT 0'); } catch {}
 
 	await db.execute(`
 		CREATE TABLE IF NOT EXISTS registrations (
@@ -57,6 +68,14 @@ export async function ensureTournamentSchema(): Promise<void> {
 		ON matches (tournament_id, round, slot)
 	`);
 
+	// Series progress: persisted on every game-resolve so a server restart
+	// mid-Bo3 can rebuild the machine state with the right wins/currentGame.
+	// Defaults reflect "fresh match, game 1, 0-0".
+	try { await db.execute('ALTER TABLE matches ADD COLUMN series_wins_a INTEGER NOT NULL DEFAULT 0'); } catch {}
+	try { await db.execute('ALTER TABLE matches ADD COLUMN series_wins_b INTEGER NOT NULL DEFAULT 0'); } catch {}
+	try { await db.execute('ALTER TABLE matches ADD COLUMN current_game INTEGER NOT NULL DEFAULT 1'); } catch {}
+	try { await db.execute('ALTER TABLE matches ADD COLUMN current_seed TEXT'); } catch {}
+
 	await db.execute(`
 		CREATE TABLE IF NOT EXISTS match_inputs (
 			match_id TEXT NOT NULL,
@@ -81,13 +100,17 @@ export async function createTournament(opts: {
 	name: string;
 	maxPlayers?: number;
 	roundHours?: number;
+	prizePool?: number;
+	entryFee?: number;
+	bestOf?: number;
 	startsAt: string; // ISO date string
 }): Promise<void> {
 	const db = getDb();
 	await db.execute({
-		sql: `INSERT INTO tournaments (id, name, max_players, round_hours, created_at, starts_at)
-		      VALUES (?, ?, ?, ?, ?, ?)`,
+		sql: `INSERT INTO tournaments (id, name, max_players, round_hours, prize_pool, entry_fee, best_of, created_at, starts_at)
+		      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		args: [opts.id, opts.name, opts.maxPlayers ?? 32, opts.roundHours ?? 24,
+		       opts.prizePool ?? 0, opts.entryFee ?? 0, opts.bestOf ?? 1,
 		       new Date().toISOString(), opts.startsAt],
 	});
 }
@@ -238,6 +261,25 @@ export async function updateMatchPlayers(matchId: string, playerA: string | null
 	await db.execute({
 		sql: 'UPDATE matches SET player_a = ?, player_b = ? WHERE id = ?',
 		args: [playerA, playerB, matchId],
+	});
+}
+
+/**
+ * Persist series progress so a server restart mid-series can rebuild
+ * the machine state with the correct game number + per-side wins.
+ * Called from the machine after each game-resolved (interim or final).
+ */
+export async function updateMatchSeriesProgress(
+	matchId: string,
+	winsA: number,
+	winsB: number,
+	currentGame: number,
+	currentSeed: string,
+): Promise<void> {
+	const db = getDb();
+	await db.execute({
+		sql: 'UPDATE matches SET series_wins_a = ?, series_wins_b = ?, current_game = ?, current_seed = ? WHERE id = ?',
+		args: [winsA, winsB, currentGame, currentSeed, matchId],
 	});
 }
 

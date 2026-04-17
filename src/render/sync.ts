@@ -28,12 +28,18 @@ import {
 	syncTreeMeshes,
 	type TreeMeshPool,
 } from './tree-mesh';
+import {
+	createPowerupMeshPool,
+	syncPowerupMeshes,
+	type PowerupMeshPool,
+} from './powerup-mesh';
 
 /** Owns all per-entity mesh state. Created once per game. */
 export interface RenderState {
 	readonly character: CharacterMesh;
 	readonly trees: TreeMeshPool;
 	readonly coins: CoinMeshPool;
+	readonly powerups: PowerupMeshPool;
 	opponent: CharacterMesh | null;
 	playerSkin: CharacterSkin;
 }
@@ -57,6 +63,7 @@ export function createRenderState(
 		),
 		trees: createTreeMeshPool(scene.scene),
 		coins: createCoinMeshPool(scene.scene),
+		powerups: createPowerupMeshPool(scene.scene),
 		opponent: null,
 		playerSkin,
 	};
@@ -98,6 +105,7 @@ export function syncRender(
 	syncCharacterMesh(render.character, state, config);
 	syncTreeMeshes(render.trees, state.trees);
 	syncCoinMeshes(render.coins, state.coins, state.tick);
+	syncPowerupMeshes(render.powerups, state.powerups, state.tick);
 	syncFog(scene, state.fogDistance);
 	updateHud(state);
 }

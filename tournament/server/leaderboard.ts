@@ -161,6 +161,99 @@ const historyLeaderboard: Handler = async (_req, res, url) => {
 	});
 };
 
+const recordDeposit: Handler = async (req, res) => {
+	await ensureSchema();
+	const db = getDb();
+	const body = JSON.parse(await readBody(req));
+	const { nametag, amount } = body as { nametag: string; amount: number };
+
+	if (!nametag || typeof amount !== 'number' || amount === 0) {
+		json(res, 400, { error: 'nametag and amount required' });
+		return;
+	}
+
+	// For deductions, check sufficient balance
+	if (amount < 0) {
+		const cur = await db.execute({
+			sql: 'SELECT COALESCE(SUM(amount), 0) as balance FROM player_transactions WHERE nametag = ?',
+			args: [nametag],
+		});
+		const balance = cur.rows[0].balance as number;
+		if (balance + amount < 0) {
+			json(res, 400, { error: 'insufficient_balance', balance });
+			return;
+		}
+	}
+
+	const timestamp = new Date().toISOString();
+	const type = amount > 0 ? 'deposit' : 'entry_fee';
+	const memo = amount > 0 ? 'UCT deposit' : 'Game entry fee';
+	await db.execute({
+		sql: 'INSERT INTO player_transactions (nametag, amount, type, memo, timestamp) VALUES (?, ?, ?, ?, ?)',
+		args: [nametag, amount, type, memo, timestamp],
+	});
+
+	const bal = await db.execute({
+		sql: 'SELECT COALESCE(SUM(amount), 0) as balance FROM player_transactions WHERE nametag = ?',
+		args: [nametag],
+	});
+
+	json(res, 200, { status: 'ok', balance: bal.rows[0].balance });
+};
+
+const clientLog: Handler = async (req, res) => {
+	try {
+		const body = JSON.parse(await readBody(req));
+		const { nametag, event, data } = body as { nametag?: string; event: string; data?: any };
+		console.log(`[client-log] ${nametag || 'anon'}: ${event}`, data ? JSON.stringify(data) : '');
+		json(res, 200, { ok: true });
+	} catch (err: any) {
+		json(res, 400, { error: err.message });
+	}
+};
+
+const getTransactions: Handler = async (_req, res, url) => {
+	await ensureSchema();
+	const db = getDb();
+	const parts = url.pathname.split('/');
+	const nametag = parts[parts.length - 1];
+	if (!nametag) { json(res, 400, { error: 'nametag required' }); return; }
+	const decoded = decodeURIComponent(nametag);
+	const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10), 200);
+	const rows = await db.execute({
+		sql: 'SELECT id, amount, type, memo, timestamp FROM player_transactions WHERE nametag = ? ORDER BY id DESC LIMIT ?',
+		args: [decoded, limit],
+	});
+	json(res, 200, {
+		nametag: decoded,
+		transactions: rows.rows.map(r => ({
+			id: r.id,
+			amount: r.amount,
+			type: r.type,
+			memo: r.memo,
+			timestamp: r.timestamp,
+		})),
+	});
+};
+
+const getBalance: Handler = async (_req, res, url) => {
+	await ensureSchema();
+	const db = getDb();
+	const nametag = url.pathname.split('/').pop();
+
+	if (!nametag) {
+		json(res, 400, { error: 'nametag required' });
+		return;
+	}
+
+	const bal = await db.execute({
+		sql: 'SELECT COALESCE(SUM(amount), 0) as balance FROM player_transactions WHERE nametag = ?',
+		args: [decodeURIComponent(nametag)],
+	});
+
+	json(res, 200, { nametag: decodeURIComponent(nametag), balance: bal.rows[0].balance });
+};
+
 /** Route an HTTP request to the right handler. Returns true if handled. */
 export async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
 	const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -186,6 +279,22 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 		}
 		if (path === '/api/leaderboard/history' && req.method === 'GET') {
 			await historyLeaderboard(req, res, url);
+			return true;
+		}
+		if (path === '/api/deposit' && req.method === 'POST') {
+			await recordDeposit(req, res, url);
+			return true;
+		}
+		if (path === '/api/log' && req.method === 'POST') {
+			await clientLog(req, res, url);
+			return true;
+		}
+		if (path.startsWith('/api/balance/') && req.method === 'GET') {
+			await getBalance(req, res, url);
+			return true;
+		}
+		if (path.startsWith('/api/transactions/') && req.method === 'GET') {
+			await getTransactions(req, res, url);
 			return true;
 		}
 	} catch (err) {

@@ -5,6 +5,7 @@
  */
 
 import { generateBracket, hashString } from './bracket';
+import { now } from './clock';
 import {
 	completeTournament,
 	createMatch,
@@ -44,9 +45,10 @@ export async function startTournament(tournamentId: string): Promise<void> {
 	// Generate bracket
 	const bracket = generateBracket(players, tournamentId);
 	const roundHours = (tournament.round_hours as number) || 24;
-	const deadline = new Date(Date.now() + roundHours * 60 * 60 * 1000).toISOString();
+	const deadline = new Date(now() + roundHours * 60 * 60 * 1000).toISOString();
 
-	// Create all matches in the database
+	// First pass: create all matches in the database
+	const r0Byes: Array<{ slot: number; winner: string }> = [];
 	for (let r = 0; r < bracket.length; r++) {
 		for (let s = 0; s < bracket[r].length; s++) {
 			const slot = bracket[r][s];
@@ -73,15 +75,18 @@ export async function startTournament(tournamentId: string): Promise<void> {
 				roundDeadline: isRound0 ? deadline : null,
 			});
 
-			// Auto-resolve byes
+			// Defer bye advancement until all matches exist
 			if (isBye && isRound0) {
 				const winner = slot.playerA ?? slot.playerB;
-				if (winner) {
-					await updateMatchResult(`${tournamentId}/R${r}M${s}`, winner, 0, 0);
-					await advanceWinner(tournamentId, r, s, winner);
-				}
+				if (winner) r0Byes.push({ slot: s, winner });
 			}
 		}
+	}
+
+	// Second pass: now that all matches exist, advance R0 byes into R1
+	for (const bye of r0Byes) {
+		await updateMatchResult(`${tournamentId}/R0M${bye.slot}`, bye.winner, 0, 0);
+		await advanceWinner(tournamentId, 0, bye.slot, bye.winner);
 	}
 
 	await updateTournamentStatus(tournamentId, 'active', 0);
@@ -91,6 +96,10 @@ export async function startTournament(tournamentId: string): Promise<void> {
 /**
  * Advance a match winner to the next round's bracket slot.
  */
+export async function advanceWinnerExternal(tournamentId: string, fromRound: number, fromSlot: number, winner: string): Promise<void> {
+	return advanceWinner(tournamentId, fromRound, fromSlot, winner);
+}
+
 async function advanceWinner(tournamentId: string, fromRound: number, fromSlot: number, winner: string): Promise<void> {
 	const nextRound = fromRound + 1;
 	const nextSlot = Math.floor(fromSlot / 2);
@@ -141,15 +150,15 @@ export async function checkRoundAdvance(tournamentId: string): Promise<boolean> 
 	const nextRound = round + 1;
 
 	if (nextRound >= totalRounds) {
-		// Tournament is complete
+		// Tournament is complete — admin must manually trigger prize payout
 		await completeTournament(tournamentId);
-		console.log(`[tournament] ${tournamentId} complete!`);
+		console.log(`[tournament] ${tournamentId} complete (prize pending admin payout)`);
 		return true;
 	}
 
 	// Open the next round
 	const roundHours = (tournament.round_hours as number) || 24;
-	const deadline = new Date(Date.now() + roundHours * 60 * 60 * 1000).toISOString();
+	const deadline = new Date(now() + roundHours * 60 * 60 * 1000).toISOString();
 
 	const nextMatches = await getMatchesForRound(tournamentId, nextRound);
 	for (const m of nextMatches) {
@@ -189,7 +198,7 @@ export async function checkForfeits(tournamentId: string): Promise<string[]> {
 		if (!m.round_deadline) continue;
 
 		const deadline = new Date(m.round_deadline as string).getTime();
-		if (Date.now() <= deadline) continue;
+		if (now() <= deadline) continue;
 
 		// Deadline passed — forfeit
 		// TODO: in future, check who was "ready" and award to them
@@ -266,6 +275,10 @@ export async function resolveMatch(matchId: string): Promise<{
 /**
  * Replay a player's sim from seed + inputs. Returns final score.
  */
+export function replayGame(seed: number, inputs: Array<{ tick: number; payload: string }>): number {
+	return replaySim(seed, inputs);
+}
+
 function replaySim(seed: number, inputs: Array<{ tick: number; payload: string }>): number {
 	const config = DEFAULT_CONFIG;
 	const state = makeInitialState(seed, config);
@@ -275,7 +288,7 @@ function replaySim(seed: number, inputs: Array<{ tick: number; payload: string }
 	for (const inp of inputs) {
 		try {
 			const action = atob(inp.payload) as CharacterAction;
-			if (action === 'up' || action === 'left' || action === 'right') {
+			if (action === 'up' || action === 'left' || action === 'right' || action === 'fire') {
 				if (!inputsByTick.has(inp.tick)) inputsByTick.set(inp.tick, []);
 				inputsByTick.get(inp.tick)!.push(action);
 			}

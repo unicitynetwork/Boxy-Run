@@ -16,7 +16,10 @@ import type {
 
 // ── Configuration ──────────────────────────────────────────────────────────
 const WALLET_URL = 'https://sphere.unicity.network';
-const GAME_WALLET_ADDRESS = '@boxyrun'; // Game operator's Unicity nametag
+// The arena wallet is the single on-chain source of truth. Every UCT held
+// by a player on the game ledger corresponds to a UCT sitting in this wallet.
+// Distinct from any @boxyrun personal wallet to avoid co-mingling.
+const GAME_WALLET_ADDRESS = '@boxyrunarena';
 const ENTRY_FEE = 10;
 const COIN_ID = 'UCT';
 const UCT_COIN_ID_HEX = '455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89';
@@ -102,6 +105,13 @@ const dappPermissions = [
 
 // ── Wallet operations ──────────────────────────────────────────────────────
 async function connect(): Promise<void> {
+  // If already connected with a valid client, just refresh and return
+  if (state.isConnected && client) {
+    updateUI('connected');
+    try { await refreshBalance(); } catch { /* ignore */ }
+    return;
+  }
+
   updateUI('connecting');
 
   try {
@@ -113,6 +123,7 @@ async function connect(): Promise<void> {
       transport = ExtensionTransport.forClient();
     } else {
       // Popup mode
+      const popupWasAlreadyOpen = popupWindow && !popupWindow.closed;
       if (!popupWindow || popupWindow.closed) {
         popupWindow = window.open(
           WALLET_URL + '/connect?origin=' + encodeURIComponent(location.origin),
@@ -130,7 +141,15 @@ async function connect(): Promise<void> {
         targetOrigin: WALLET_URL,
       });
 
-      await waitForHostReady();
+      // Only wait for HOST_READY if we just opened the popup fresh.
+      // An already-open popup won't re-send that message.
+      if (!popupWasAlreadyOpen) {
+        try {
+          await waitForHostReady();
+        } catch {
+          // Timeout waiting for popup ready — continue anyway, client.connect will fail fast if needed
+        }
+      }
       resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? undefined;
     }
 
@@ -214,7 +233,9 @@ async function refreshBalance(): Promise<void> {
   }
 }
 
-async function deposit(): Promise<boolean> {
+async function deposit(amount?: number): Promise<boolean> {
+  const sendAmount = amount ?? ENTRY_FEE;
+
   if (!client || !state.isConnected) {
     state.error = 'Not connected';
     return false;
@@ -226,8 +247,8 @@ async function deposit(): Promise<boolean> {
     return false;
   }
 
-  if (state.balance !== null && state.balance < ENTRY_FEE) {
-    state.error = `Insufficient balance. You need at least ${ENTRY_FEE} ${COIN_ID}.`;
+  if (state.balance !== null && state.balance < sendAmount) {
+    state.error = `Insufficient balance. You need at least ${sendAmount} ${COIN_ID}.`;
     updateUI('connected');
     return false;
   }
@@ -240,7 +261,7 @@ async function deposit(): Promise<boolean> {
     }
     await client.intent(INTENT_ACTIONS.SEND, {
       to: GAME_WALLET_ADDRESS,
-      amount: ENTRY_FEE,
+      amount: sendAmount,
       coinId: uctCoinId,
       memo: 'Boxy Run entry fee',
     });

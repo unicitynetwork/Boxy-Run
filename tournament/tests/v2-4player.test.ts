@@ -4,6 +4,7 @@
 
 import WebSocket from 'ws';
 import {
+	api,
 	assert,
 	assertEqual,
 	runTest,
@@ -11,13 +12,6 @@ import {
 	startServer,
 	stopServer,
 } from './harness';
-
-async function api(baseUrl: string, path: string, method = 'GET', body?: any) {
-	const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
-	if (body) opts.body = JSON.stringify(body);
-	const r = await fetch(`${baseUrl}${path}`, opts);
-	return r.json();
-}
 
 function wsConnect(port: number, nametag: string): Promise<{
 	ws: WebSocket; messages: any[];
@@ -82,16 +76,19 @@ async function playMatch(port: number, matchId: string, playerA: string, playerB
 
 runTest('v2: 4-player tournament — 2 rounds, bracket advancement', async () => {
 	const server = await startServer();
-	const base = `http://127.0.0.1:${server.port}/api`;
 	try {
-		await api(base, '/tournaments', 'POST', { id: '4p', name: '4P Test' });
+		await api(server, '/api/tournaments', {
+			method: 'POST', asAdmin: true, body: { id: '4p', name: '4P Test' },
+		});
 		for (const p of ['alice', 'bob', 'charlie', 'dave']) {
-			await api(base, '/tournaments/4p/register', 'POST', { nametag: p });
+			await api(server, '/api/tournaments/4p/register', {
+				method: 'POST', body: { nametag: p },
+			});
 		}
-		await api(base, '/tournaments/4p/start', 'POST');
+		await api(server, '/api/tournaments/4p/start', { method: 'POST', asAdmin: true });
 
 		// Round 0: play both matches
-		let bracket = await api(base, '/tournaments/4p/bracket');
+		let bracket = await api(server, '/api/tournaments/4p/bracket');
 		assertEqual(bracket.tournament.current_round, 0);
 		const r0 = bracket.matches.filter((m: any) => m.round === 0 && m.status === 'ready_wait');
 		assertEqual(r0.length, 2, 'two round-0 matches');
@@ -101,8 +98,8 @@ runTest('v2: 4-player tournament — 2 rounds, bracket advancement', async () =>
 		}
 
 		// Wait for round advancement
-		await sleep(500);
-		bracket = await api(base, '/tournaments/4p/bracket');
+		await sleep(1200);
+		bracket = await api(server, '/api/tournaments/4p/bracket');
 		assertEqual(bracket.tournament.current_round, 1, 'advanced to round 1');
 
 		// Round 1: final
@@ -114,8 +111,8 @@ runTest('v2: 4-player tournament — 2 rounds, bracket advancement', async () =>
 
 		await playMatch(server.port, final.id, final.playerA, final.playerB);
 
-		await sleep(500);
-		bracket = await api(base, '/tournaments/4p/bracket');
+		await sleep(1200);
+		bracket = await api(server, '/api/tournaments/4p/bracket');
 		assertEqual(bracket.tournament.status, 'complete', 'tournament complete');
 
 		// Verify all round-0 matches have winners

@@ -2,8 +2,8 @@
 <html>
 	<head>
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-		<title>Boxy Run — Dev (new sim+render)</title>
-		<link rel="icon" type="image/png" href="unicity-logo.png">
+		<title>Boxy Run</title>
+		<link rel="icon" type="image/png" href="logo.png">
 		<link href="https://fonts.googleapis.com/css?family=Playfair+Display:400,700" rel="stylesheet">
 		<script type="text/javascript" src="js/three.min.js"></script>
 		<script type="text/javascript" src="js/game.js"></script>
@@ -13,7 +13,15 @@
 		<div class="panel">
 			<div class="game-title">
 				<div class="title">boxy run</div>
-				<div class="byline">dev build — new sim+render</div>
+				<div class="byline">by <a target="_blank" href="https://wanfungchui.github.io/">wan fung chui</a></div>
+			</div>
+			<div style="margin-top:1em;display:flex;gap:6px;flex-wrap:wrap">
+				<a href="index.html" style="padding:8px 16px;font-family:'Playfair Display',serif;font-size:0.7em;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;text-decoration:none;color:#333;border:1px solid #aaa;border-radius:4px">&#8592; Menu</a>
+				<button onclick="localStorage.removeItem('boxyrun-skin');location.reload()" style="padding:8px 16px;font-family:'Playfair Display',serif;font-size:0.7em;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#333;background:transparent;border:1px solid #aaa;border-radius:4px;cursor:pointer">Change Skin</button>
+			</div>
+			<div class="stat">
+				<label>Balance</label>
+				<p id="balance">--</p>
 			</div>
 			<div class="stat">
 				<label>Score</label>
@@ -23,13 +31,21 @@
 				<label>Coins</label>
 				<p id="coins">0</p>
 			</div>
-			<div class="animate-flicker" id="variable-content">Press any key to start</div>
-			<table id="controls">
-				<tr><td>Up:</td><td>Jump</td></tr>
-				<tr><td>Left:</td><td>Left lane switch</td></tr>
-				<tr><td>Right:</td><td>Right lane switch</td></tr>
-				<tr><td>p:</td><td>Pause</td></tr>
-			</table>
+			<div class="animate-flicker" id="variable-content">Loading...</div>
+			<div id="coin-values" style="margin-top:1.5em;font-size:0.7em;text-transform:uppercase;letter-spacing:0.1em">
+				<div style="color:#ffd700;margin-bottom:4px">&#9679; Gold coin - 250 pts</div>
+				<div style="color:#00bfff;margin-bottom:4px">&#9679; Blue coin - 1,000 pts</div>
+				<div style="color:#ff2050;margin-bottom:4px">&#9679; Red coin - 5,000 pts</div>
+				<div style="color:#ff6600">&#9679; Flamethrower - clears trees</div>
+			</div>
+			<div style="margin-top:1.5em;font-size:0.65em;text-transform:uppercase;letter-spacing:0.1em;color:#555">
+				<div style="font-weight:600;margin-bottom:6px">Controls</div>
+				<div style="margin-bottom:3px">&#8593; / W - Jump</div>
+				<div style="margin-bottom:3px">&#8592; / A - Move left</div>
+				<div style="margin-bottom:3px">&#8594; / D - Move right</div>
+				<div style="margin-bottom:3px">&#8595; / F - Use flamethrower</div>
+				<div>P - Pause</div>
+			</div>
 		</div>
 		<div id="world"></div>
 	</body>

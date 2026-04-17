@@ -1,52 +1,50 @@
 /**
- * All-in-one game server: static files + leaderboard REST API +
- * multi-tournament WebSocket.
- *
- * Players register on connect, then use the lobby system to:
- *   - Challenge a specific player (1v1)
- *   - Join the rolling quick-match queue
- *   - (Future) Enter the weekly Grand Final
- *
- * Once assigned to a tournament, the existing bracket/match flow
- * takes over.
+ * Server V2 — clean rewrite for the tournament redesign.
+ * HTTP: static files + leaderboard API + tournament API
+ * WebSocket: live match ready/input/done only
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
-
 import { WebSocketServer, WebSocket } from 'ws';
 
-import {
-	PROTOCOL_VERSION,
-	type ClientMessage,
-	type ErrorMessage,
-} from '../protocol/messages';
 import { handleApi } from './leaderboard';
-import { TournamentManager, type ManagerDelivery } from './manager';
-import { Tournament, type Delivery } from './state';
+import { handleTournamentApi } from './tournament-api';
+import { getDb, ensureSchema } from './db';
+import { ensureTournamentSchema } from './tournament-db';
+import {
+	broadcastToAll,
+	getNametag,
+	getOnlinePlayers,
+	handleDone,
+	handleInput,
+	handleReady,
+	reconcileMatch,
+	registerSocket,
+	sendTo,
+	unregisterSocket,
+} from './tournament-ws';
+import {
+	createTournament,
+	getMatchesForRound,
+	getRegistrationCount,
+	registerPlayer,
+	listTournaments,
+} from './tournament-db';
+import { startMatch, startTournament } from './tournament-logic';
+import { checkForfeits, checkRoundAdvance } from './tournament-logic';
+import { now, advanceClock, resetClock, getClockOffset } from './clock';
+import {
+	applyChallenge,
+	applyChallengeAccept,
+	applyChallengeDecline,
+	reconcileChallenges,
+} from './challenge';
 
 const PORT = parseInt(process.env.PORT || '7101', 10);
-const READY_RATE_LIMIT_MS = parseInt(process.env.READY_RATE_LIMIT_MS || '3000', 10);
-const QUEUE_COUNTDOWN_MS = parseInt(process.env.QUEUE_COUNTDOWN_MS || '120000', 10);
-const QUEUE_MIN = parseInt(process.env.QUEUE_MIN_PLAYERS || '4', 10);
-const QUEUE_MAX = parseInt(process.env.QUEUE_MAX_PLAYERS || '8', 10);
 const STATIC_DIR = resolve(process.env.STATIC_DIR || join(__dirname, '..'));
 
-const manager = new TournamentManager({
-	queueCountdownMs: QUEUE_COUNTDOWN_MS,
-	queueMinPlayers: QUEUE_MIN,
-	queueMaxPlayers: QUEUE_MAX,
-	readyRateLimitMs: READY_RATE_LIMIT_MS,
-});
-
-/** Two-way nametag ↔ socket mapping. */
-const socketToNametag = new Map<WebSocket, string>();
-const nametagToSocket = new Map<string, WebSocket>();
-/** All connected sockets including unregistered spectators. */
-const allSockets = new Set<WebSocket>();
-
-// ── MIME types ───────────────────────────────────────────────────
 const MIME: Record<string, string> = {
 	'.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
 	'.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
@@ -55,283 +53,248 @@ const MIME: Record<string, string> = {
 };
 
 // ── HTTP server ──────────────────────────────────────────────────
+const TEST_MODE = process.env.TEST_MODE === '1';
+
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+	// Test-only endpoints: fake-clock controls. Available only when TEST_MODE=1.
+	if (TEST_MODE && req.url?.startsWith('/__test/')) {
+		const urlPath = new URL(req.url, `http://${req.headers.host}`).pathname;
+		if (urlPath === '/__test/advance-clock' && req.method === 'POST') {
+			try {
+				let body = '';
+				for await (const chunk of req) body += chunk;
+				const { ms } = JSON.parse(body || '{}');
+				advanceClock(Number(ms) || 0);
+				res.writeHead(200, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ ok: true, offset: getClockOffset() }));
+			} catch (e: any) {
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: e.message }));
+			}
+			return;
+		}
+		if (urlPath === '/__test/reset-clock' && req.method === 'POST') {
+			resetClock();
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true, offset: getClockOffset() }));
+			return;
+		}
+	}
+
+	// Tournament API
+	if (await handleTournamentApi(req, res)) return;
+	// Leaderboard API
 	if (await handleApi(req, res)) return;
 
+	// Static files
 	const urlPath = new URL(req.url ?? '/', `http://${req.headers.host}`).pathname;
 	let filePath = join(STATIC_DIR, urlPath === '/' ? 'index.html' : urlPath);
 	if (!resolve(filePath).startsWith(STATIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
 	if (existsSync(filePath) && statSync(filePath).isDirectory()) filePath = join(filePath, 'index.html');
 	if (!existsSync(filePath) || !statSync(filePath).isFile()) { res.writeHead(404); res.end('Not found'); return; }
-
 	const ext = extname(filePath);
-	res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+	const headers: Record<string, string> = {
+		'Content-Type': MIME[ext] || 'application/octet-stream',
+	};
+	// HTML and JS bundles must always revalidate on deploy — otherwise users
+	// keep running yesterday's client against today's server (stale-bundle
+	// bugs are nightmare to diagnose: server logs show one thing, the user
+	// sees another, and there's no obvious signal). `no-cache` still allows
+	// the browser to serve from cache on a 304, so we don't pay bandwidth
+	// for unchanged files — we just guarantee freshness.
+	if (ext === '.html' || ext === '.js') {
+		headers['Cache-Control'] = 'no-cache, must-revalidate';
+	}
+	res.writeHead(200, headers);
 	createReadStream(filePath).pipe(res);
 });
 
 // ── WebSocket server ─────────────────────────────────────────────
 const wss = new WebSocketServer({ server: httpServer });
+const allSockets = new Set<WebSocket>();
 
-// Ping all connected sockets every 20 seconds to keep Fly.io's
-// proxy from killing idle WebSocket connections.
+// Every 10s: WebSocket protocol ping (keeps Fly's ~60s idle proxy alive + Node
+// clients can use it as a heartbeat) + app-level heartbeat message (browser
+// clients can't observe protocol-level pings, so we need an app-layer signal).
 setInterval(() => {
-	for (const socket of allSockets) {
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.ping();
+	const hb = JSON.stringify({ type: 'heartbeat', v: 0, ts: Date.now() });
+	for (const ws of allSockets) {
+		if (ws.readyState === WebSocket.OPEN) {
+			ws.ping();
+			try { ws.send(hb); } catch {}
 		}
 	}
-}, 20_000);
+}, 10_000);
 
-wss.on('connection', (ws, req) => {
-	const addr = req.socket.remoteAddress ?? 'unknown';
+wss.on('connection', (ws) => {
 	allSockets.add(ws);
 
-	ws.on('message', (raw) => {
-		let msg: ClientMessage;
+	ws.on('message', async (raw) => {
+		let msg: any;
 		try {
-			const parsed = JSON.parse(raw.toString());
-			if (typeof parsed !== 'object' || parsed === null || typeof parsed.type !== 'string') {
-				sendError(ws, 'bad_message', 'missing type field');
-				return;
-			}
-			msg = parsed as ClientMessage;
-		} catch {
-			sendError(ws, 'bad_json', 'malformed JSON');
-			return;
-		}
+			msg = JSON.parse(raw.toString());
+		} catch { return; }
 
-		const nametag = socketToNametag.get(ws);
-
-		// Log all non-input messages for debugging
-		if (msg.type !== 'input' && msg.type !== 'heartbeat') {
-			console.log(`[msg] ${nametag || '?'}: ${msg.type}`);
-		}
+		const nametag = getNametag(ws);
 
 		switch (msg.type) {
-			// ── Registration ──
 			case 'register':
-				handleRegister(ws, msg);
+				if (msg.identity?.nametag) {
+					registerSocket(ws, msg.identity.nametag);
+					const tag = msg.identity.nametag;
+					const others = getOnlinePlayers().filter(n => n !== tag);
+					sendTo(tag, {
+						type: 'registered', v: 0, nametag: tag, onlinePlayers: others,
+						protocolVersion: 0,
+					});
+					// Notify everyone that a new player came online
+					broadcastToAll({ type: 'player-online', v: 0, nametag: tag, online: true });
+					console.log(`[ws] ${tag} registered (${getOnlinePlayers().length} online)`);
+				}
 				break;
 
-			// ── Legacy join (for tests) ──
-			case 'join':
-				handleLegacyJoin(ws, msg);
-				break;
-
-			// ── Lobby actions ──
 			case 'challenge':
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
-				deliverManager(manager.sendChallenge(nametag, msg.opponent, msg.wager));
-				break;
-			case 'challenge-accept':
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
-				deliverManager(manager.acceptChallenge(nametag, msg.challengeId));
-				break;
-			case 'challenge-decline':
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
-				deliverManager(manager.declineChallenge(nametag, msg.challengeId));
-				break;
-			case 'queue-join':
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
-				deliverManager(manager.joinQueue(nametag));
-				break;
-			case 'queue-leave':
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
-				deliverManager(manager.leaveQueue(nametag));
+				if (nametag && msg.opponent) {
+					await handleChallenge(nametag, msg.opponent, msg.wager || 0, msg.bestOf || 1);
+				}
 				break;
 
-			// ── Match actions (routed to the player's tournament) ──
+			case 'challenge-accept':
+				if (nametag && msg.challengeId) {
+					await handleChallengeAccept(nametag, msg.challengeId);
+				}
+				break;
+
+			case 'challenge-decline':
+				if (nametag && msg.challengeId) {
+					handleChallengeDecline(nametag, msg.challengeId);
+				}
+				break;
+
+			case 'chat':
+				if (nametag && msg.message && typeof msg.message === 'string') {
+					const text = msg.message.slice(0, 200);
+					if (msg.to) {
+						console.log(`[chat] ${nametag} → ${msg.to}: ${text}`);
+						sendTo(msg.to, { type: 'chat', v: 0, from: nametag, message: text });
+					} else {
+						console.log(`[chat] ${nametag} (lobby): ${text}`);
+						broadcastToAll({ type: 'chat', v: 0, from: nametag, message: text });
+					}
+				}
+				break;
+
 			case 'match-ready':
-			case 'match-unready': {
-				if (!nametag) { sendError(ws, 'not_registered', 'register first'); break; }
-				const t = manager.getTournament(nametag);
-				if (!t) { sendError(ws, 'no_tournament', 'not in a tournament'); break; }
-				const d = msg.type === 'match-ready'
-					? t.setReady(nametag, msg.matchId)
-					: t.setUnready(nametag, msg.matchId);
-				deliverTournament(d);
-				break;
-			}
-			case 'input': {
-				if (!nametag) { console.log('[input] DROP: no nametag'); break; }
-				const t = manager.getTournament(nametag);
-				if (!t) { console.log(`[input] DROP: no tournament for ${nametag} (registered=${manager.isRegistered(nametag)})`); break; }
-				const inputDeliveries = t.relayInput(nametag, msg.matchId, msg.tick, msg.payload);
-				if (inputDeliveries.length > 0) {
-					const target = inputDeliveries[0].to;
-					const hasSocket = nametagToSocket.has(target);
-					if (!hasSocket) console.log('[input] DROP: no socket for', target);
+				if (nametag && msg.matchId) {
+					await handleReady(nametag, msg.matchId);
 				}
-				deliverTournament(inputDeliveries);
 				break;
-			}
-			case 'result': {
-				if (!nametag) { console.log('[result] DROP: no nametag'); break; }
-				const t = manager.getTournament(nametag);
-				if (!t) {
-					console.log(`[result] DROP: no tournament for ${nametag} (registered=${manager.isRegistered(nametag)})`);
-					break;
+
+			case 'input':
+				if (nametag && msg.matchId) {
+					await handleInput(nametag, msg.matchId, msg.tick, msg.payload);
 				}
-				try {
-					console.log(`[result] ${nametag} submitting for ${msg.matchId}`);
-					const d = t.submitResult(
-						nametag, msg.matchId, msg.finalTick,
-						msg.score as Record<string, number>,
-						msg.winner, msg.inputsHash, msg.resultHash,
-					);
-					console.log(`[result] ${nametag}: ${d.length} deliveries`);
-					deliverTournament(d);
-				} catch (err) {
-					console.error(`[result] EXCEPTION during submitResult:`, err);
+				break;
+
+			case 'match-done':
+				if (nametag && msg.matchId) {
+					await handleDone(nametag, msg.matchId);
 				}
-				manager.cleanupDone();
-				break;
-			}
-			case 'leave':
-				ws.close(1000, 'client leave');
-				break;
-			default:
-				// Ignore unknown types (forward compatibility)
 				break;
 		}
 	});
 
 	ws.on('close', () => {
 		allSockets.delete(ws);
-		const nametag = socketToNametag.get(ws);
-		if (nametag) {
-			socketToNametag.delete(ws);
-			// Only unregister if this socket is still the active one AND
-			// after a grace period (5s) to allow page redirects where
-			// the old WS closes before the new page's WS connects.
-			if (nametagToSocket.get(nametag) === ws) {
-				nametagToSocket.delete(nametag);
-				setTimeout(() => {
-					// If the player hasn't re-registered on a new socket
-					// within the grace period, unregister them.
-					if (!nametagToSocket.has(nametag)) {
-						deliverManager(manager.unregister(nametag));
-					}
-				}, 5000);
-			}
+		const closedTag = getNametag(ws);
+		unregisterSocket(ws);
+		if (closedTag) {
+			broadcastToAll({ type: 'player-online', v: 0, nametag: closedTag, online: false });
 		}
 	});
 
 	ws.on('error', (err) => {
-		console.error(`[ws] error from ${addr}:`, err.message);
+		console.error('[ws] error:', err.message);
 	});
 });
 
-function handleRegister(ws: WebSocket, msg: ClientMessage & { type: 'register' }): void {
-	const nametag = msg.identity.nametag;
-	if (socketToNametag.has(ws)) {
-		sendError(ws, 'already_registered', 'already registered on this connection');
-		return;
-	}
+// ── Challenge WS wrappers ─────────────────────────────────────────
+// Core logic lives in ./challenge.ts so REST and WS share the same path.
 
-	socketToNametag.set(ws, nametag);
-	nametagToSocket.set(nametag, ws);
-	console.log(`[ws] ${nametag} registered (${manager.getOnlineCount() + 1} online)`);
-	deliverManager(manager.register(msg.identity));
+async function handleChallenge(from: string, opponent: string, wager: number, bestOf: number = 1) {
+	const r = await applyChallenge(from, opponent, wager, bestOf);
+	if (!r.ok) {
+		sendTo(from, { type: 'error', v: 0, code: r.code, message: r.message });
+	}
 }
 
-/**
- * Legacy `join` handler for backward compatibility with existing tests.
- * Creates a standalone tournament and adds the player directly.
- */
-function handleLegacyJoin(ws: WebSocket, msg: ClientMessage & { type: 'join' }): void {
-	const nametag = msg.identity.nametag;
-
-	// Register if not already
-	if (!socketToNametag.has(ws)) {
-		socketToNametag.set(ws, nametag);
-		nametagToSocket.set(nametag, ws);
-		manager.register(msg.identity); // ignore deliveries for legacy path
+async function handleChallengeAccept(acceptor: string, challengeId: string) {
+	const r = await applyChallengeAccept(acceptor, challengeId);
+	if (!r.ok) {
+		sendTo(acceptor, { type: 'error', v: 0, code: r.code, message: r.message });
 	}
-
-	// Find or create the legacy tournament
-	let t = manager.getTournamentById(msg.tournamentId);
-	if (!t) {
-		const capacity = parseInt(process.env.LOBBY_CAPACITY || '32', 10);
-		const minPlayers = parseInt(process.env.MIN_PLAYERS || String(capacity), 10);
-		t = new Tournament({
-			id: msg.tournamentId,
-			capacity,
-			minPlayers,
-			readyRateLimitMs: READY_RATE_LIMIT_MS,
-		});
-		// Store it so subsequent joins find it
-		(manager as any).tournaments.set(msg.tournamentId, t);
-		(manager as any).playerToTournament.set(nametag, msg.tournamentId);
-		const player = (manager as any).registered.get(nametag);
-		if (player) player.tournamentId = msg.tournamentId;
-	} else {
-		(manager as any).playerToTournament.set(nametag, msg.tournamentId);
-		const player = (manager as any).registered.get(nametag);
-		if (player) player.tournamentId = msg.tournamentId;
-	}
-
-	const deliveries = t!.addPlayer(msg.identity);
-	const firstMsg = deliveries[0];
-	if (firstMsg && firstMsg.to === nametag && firstMsg.message.type === 'error') {
-		ws.send(JSON.stringify(firstMsg.message));
-		return;
-	}
-
-	console.log(`[ws] ${nametag} joined ${msg.tournamentId} (legacy)`);
-	deliverTournament(deliveries);
 }
 
-// ── Delivery routing ─────────────────────────────────────────────
+function handleChallengeDecline(decliner: string, challengeId: string) {
+	applyChallengeDecline(decliner, challengeId);
+}
 
-function deliverManager(deliveries: ManagerDelivery[]): void {
-	for (const d of deliveries) {
-		const encoded = JSON.stringify(d.message);
-		if (d.to === '*') {
-			for (const socket of allSockets) {
-				if (socket.readyState === WebSocket.OPEN) socket.send(encoded);
+// ── Notify when players go offline ──────────────────────────────
+// (handled in ws.on('close') via unregisterSocket + broadcast)
+
+// ── Periodic reconciliation (every 1s) ──────────────────────────
+setInterval(async () => {
+	try {
+		// Expire stale challenge invitations
+		reconcileChallenges();
+		const tournaments = await listTournaments();
+		for (const t of tournaments) {
+			// Auto-start tournaments whose starts_at has passed
+			if (t.status === 'registration') {
+				const startsAt = new Date(t.starts_at as string).getTime();
+				if (now() >= startsAt) {
+					const count = await getRegistrationCount(t.id as string);
+					if (count >= 2) {
+						console.log(`[auto-start] starting tournament ${t.id} with ${count} players`);
+						await startTournament(t.id as string);
+					}
+				}
 			}
-			continue;
-		}
-		const socket = nametagToSocket.get(d.to);
-		if (socket?.readyState === WebSocket.OPEN) socket.send(encoded);
-	}
-}
-
-function deliverTournament(deliveries: Delivery[]): void {
-	for (const d of deliveries) {
-		const encoded = JSON.stringify(d.message);
-		if (d.to === '*') {
-			for (const socket of allSockets) {
-				if (socket.readyState === WebSocket.OPEN) socket.send(encoded);
+			if (t.status === 'active') {
+				await checkForfeits(t.id as string);
+				await checkRoundAdvance(t.id as string);
+				// Reconcile in-memory match state — includes force-resolve of
+				// both-offline matches (previously a separate forceResolveStuck).
+				const { getMatchesForTournament } = await import('./tournament-db');
+				const matches = await getMatchesForTournament(t.id as string);
+				for (const m of matches) {
+					if (m.status === 'ready_wait' || m.status === 'active') {
+						await reconcileMatch(m.id as string);
+					}
+				}
 			}
-			continue;
 		}
-		const socket = nametagToSocket.get(d.to);
-		if (socket?.readyState === WebSocket.OPEN) socket.send(encoded);
+	} catch (err) {
+		console.error('[tick] error:', err);
 	}
+}, 1_000);
+
+
+async function boot() {
+	await ensureTournamentSchema();
+	httpServer.listen(PORT, '::', () => {
+		console.log(`[server] listening on http://0.0.0.0:${PORT}`);
+		console.log(`[server] static files: ${STATIC_DIR}`);
+	});
 }
 
-function sendError(ws: WebSocket, code: string, message: string): void {
-	const err: ErrorMessage = { type: 'error', v: PROTOCOL_VERSION, code, message };
-	if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(err));
-}
-
-// ── Queue tick (checks countdown timer) ──────────────────────────
-setInterval(() => {
-	const deliveries = manager.tick();
-	if (deliveries.length > 0) deliverManager(deliveries);
-}, 1000);
-
-// ── Start ────────────────────────────────────────────────────────
-httpServer.listen(PORT, '::', () => {
-	console.log(`[server] listening on http://0.0.0.0:${PORT}`);
-	console.log(`[server] static files: ${STATIC_DIR}`);
-	console.log(`[server] queue: ${QUEUE_MIN}-${QUEUE_MAX} players, ${QUEUE_COUNTDOWN_MS / 1000}s countdown`);
+boot().catch((err) => {
+	console.error('[server] boot failed:', err);
+	process.exit(1);
 });
 
 process.on('SIGINT', () => {
 	console.log('\n[server] shutting down');
-	for (const socket of allSockets) socket.close(1001, 'server shutting down');
+	for (const ws of allSockets) ws.close(1001);
 	wss.close(() => httpServer.close(() => process.exit(0)));
 });

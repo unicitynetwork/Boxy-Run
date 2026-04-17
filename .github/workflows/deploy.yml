@@ -49,7 +49,7 @@ jobs:
       - name: Stage site files
         run: |
           mkdir _site
-          cp index.html display.html leaderboard.html tournament.html style.css _site/
+          cp index.html leaderboard.html tournament-v2.html challenge.html dev.html admin.html style.css _site/
           cp logo.png unicity-logo.png _site/ 2>/dev/null || true
           cp -r js _site/js
 

@@ -41,6 +41,11 @@ export function makeInitialState(
 		lastTreeRowZ: -120000,
 		trees: [],
 		coins: [],
+		powerups: [],
+		flamethrowerCharges: 0,
+		flameTicks: 0,
+		flameJustFired: false,
+		lastCollectedTier: null,
 		character: {
 			x: 0,
 			y: 0,

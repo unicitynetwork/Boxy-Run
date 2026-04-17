@@ -1,117 +1,607 @@
-<html>
-	<head>
-		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-		<title>Boxy Run</title>
-		<script async src="https://www.googletagmanager.com/gtag/js?id=G-GDPMNZ80YY"></script>
-		<script>
-		  window.dataLayer = window.dataLayer || [];
-		  function gtag(){dataLayer.push(arguments);}
-		  gtag('js', new Date());
-		  gtag('config', 'G-GDPMNZ80YY');
-		</script>
-		<link rel="icon" type="image/png" href="unicity-logo.png">
-		<link href="https://fonts.googleapis.com/css?family=Playfair+Display:400,700" rel="stylesheet">
-		<script type="text/javascript" src="js/three.min.js"></script>
-		<script type="text/javascript" src="js/sphere-connect.js"></script>
-		<script type="text/javascript" src="js/game.js"></script>
-		<link href="style.css" rel="stylesheet">
-	</head>
-	<body>
-		<div class="panel">
-			<button id="mobile-panel-close" aria-label="Close">&times;</button>
-			<div class="game-title">
-				<div class="title">boxy run</div>
-				<div class="byline">by <a target="_blank" href="https://wanfungchui.github.io/">wan fung chui</a></div>
-			</div>
-			<div class="stat">
-				<label>Score</label>
-				<p id="score">0</p>
-			</div>
-			<div class="stat">
-				<label>Coins</label>
-				<p id="coins">0</p>
-			</div>
-			<div id="sphere-wallet-section">
-				<button id="sphere-connect-btn" class="sphere-btn">Connect Sphere Wallet</button>
-				<div id="sphere-wallet-info" style="display: none;">
-					<div class="sphere-wallet-row">
-						<label>Wallet</label>
-						<p id="sphere-address">-</p>
-					</div>
-					<div class="sphere-wallet-row">
-						<label>Balance</label>
-						<p id="sphere-balance">-</p>
-					</div>
-					<button id="sphere-disconnect-btn" class="sphere-btn-small" style="display: none;">Disconnect</button>
-				</div>
-				<button id="sphere-deposit-btn" class="sphere-btn" style="display: none;">Play (10 UCT)</button>
-				<div id="sphere-error" style="display: none;"></div>
-			</div>
-			<div class="animate-flicker" id="variable-content">Connect your Sphere wallet to play</div>
-			<div class="player-info" style="display: none;">
-				<label>Player</label>
-				<p id="current-nickname">—</p>
-			</div>
-			<table id="controls">
-			  	<tr>
-			    	<td>Up:</td>
-			    	<td>Jump</td>
-			  	</tr>
-			  	<tr>
-			    	<td>Left:</td>
-			    	<td>Left lane switch</td>
-			  	</tr>
-			  	<tr>
-			    	<td>Right:</td>
-			    	<td>Right lane switch</td>
-			  	</tr>
-			  	<tr>
-			    	<td>p:</td>
-			    	<td>Pause</td>
-			  	</tr>
-			</table>
-			<table id="ranks"></table>
-			<div id="leaderboard" style="display: none;">
-				<h3>Daily Leaderboard</h3>
-				<a href="leaderboard.html" style="display: block; text-align: center; margin: 10px 0; color: #1976D2;">View Full Leaderboard →</a>
-				<table id="leaderboard-table">
-					<thead>
-						<tr>
-							<th>Rank</th>
-							<th>Player</th>
-							<th>Score</th>
-							<th>Coins</th>
-						</tr>
-					</thead>
-					<tbody id="leaderboard-body">
-						<tr><td colspan="4">Loading...</td></tr>
-					</tbody>
-				</table>
-			</div>
-			</div>
-		<!-- Mobile: hamburger button, backdrop, floating HUD -->
-	<button id="mobile-menu-btn" aria-label="Menu"><span></span><span></span><span></span></button>
-	<div id="mobile-backdrop"></div>
-	<div id="mobile-hud">
-		<div id="mobile-score"><span>Score</span><strong>0</strong></div>
-		<div id="mobile-coins"><span>Coins</span><strong>0</strong></div>
-	</div>
-	<button id="mobile-start-btn" style="display:none;">Tap to Start</button>
-	<button id="mobile-restart-btn" style="display:none;">Play Again</button>
-	<div id="mobile-gameover" style="display:none;">
-		<div id="mobile-gameover-text"></div>
-	</div>
-	<div id="world"></div>
-		<button id="sound-toggle" title="Toggle Sound">
-			<svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-				<path id="sound-on" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-				<path id="sound-off" style="display: none;" d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-			</svg>
-		</button>
-		<a href="https://discord.gg/PGzNZT5uVp" target="_blank" id="discord-button" title="Join Discord">
-			<svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-				<path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/>
-			</svg>
-		</a>
-	</body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run Arena</title>
+<link rel="icon" type="image/png" href="logo.png">
+<script type="text/javascript" src="js/sphere-connect.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a12;--surface:rgba(20,32,56,0.85);
+  --cyan:#5feaff;--cyan-dim:rgba(95,234,255,0.2);--cyan-glow:rgba(95,234,255,0.5);
+  --orange:#ff9534;--gold:#FFD700;--silver:#C0C0C0;--bronze:#CD7F32;
+  --red:#ef4444;
+  --text:#f8fafc;--text2:#cbd5e1;--text3:#94a3b8;
+  --border:rgba(95,234,255,0.25);--border-hi:rgba(95,234,255,0.4);
+  --r:6px;
+  --display:'Orbitron',monospace;--body:'IBM Plex Mono','SF Mono',monospace;
+}
+body{font-family:var(--body);background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
+
+/* Grid bg */
+.grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,229,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.02) 1px,transparent 1px);
+  background-size:60px 60px;mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,black 20%,transparent 70%)}
+
+/* Particles */
+#particles{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
+
+/* Hero */
+.hero{min-height:85vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 0}
+.hero-logo{width:120px;height:120px;border-radius:20px;margin-bottom:32px;animation:float 6s ease-in-out infinite;filter:drop-shadow(0 0 30px var(--cyan-glow))}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.hero-title{font-family:var(--display);font-size:clamp(42px,8vw,96px);font-weight:900;line-height:1;margin-bottom:20px}
+.hero-title .w1{color:var(--text)}
+.hero-title .w2{color:var(--cyan);text-shadow:0 0 40px var(--cyan-glow)}
+.hero-title .w3{display:block;font-size:.35em;letter-spacing:.5em;color:var(--text2);margin-top:8px}
+.hero-sub{font-size:18px;color:var(--text2);max-width:550px;margin-bottom:40px;line-height:1.6}
+.hero-actions{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+
+/* Buttons */
+.btn{font-family:var(--display);font-size:12px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;text-decoration:none;padding:14px 32px;border-radius:var(--r);border:none;cursor:pointer;transition:.25s;display:inline-block}
+.btn-play{background:var(--cyan);color:var(--bg);box-shadow:0 0 20px var(--cyan-glow)}
+.btn-play:hover{transform:translateY(-2px);box-shadow:0 0 40px var(--cyan-glow)}
+.btn-challenge{background:var(--orange);color:#fff}
+.btn-challenge:hover{opacity:.85;transform:translateY(-2px)}
+.btn-tournament{background:transparent;color:var(--text2);border:1px solid var(--border-hi)}
+.btn-tournament:hover{color:var(--cyan);border-color:var(--cyan);background:var(--cyan-dim)}
+
+/* Section */
+.section{padding:60px 0}
+.section-label{font-family:var(--display);font-size:10px;font-weight:600;letter-spacing:.5em;text-transform:uppercase;color:var(--cyan);margin-bottom:10px}
+.section-title{font-family:var(--display);font-size:clamp(20px,3vw,32px);font-weight:800;color:var(--text);margin-bottom:32px}
+
+/* Cards */
+.card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-head h3{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--text2)}
+.card-body{padding:20px}
+
+/* Leaderboard grid */
+.lb-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:768px){.lb-grid{grid-template-columns:1fr}}
+
+/* Table */
+.lb-table{width:100%;border-collapse:collapse}
+.lb-table th{font-family:var(--display);font-size:9px;font-weight:600;letter-spacing:.3em;text-transform:uppercase;color:var(--text3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--border-hi)}
+.lb-table th:last-child{text-align:right}
+.lb-table td{padding:12px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+.lb-table td:last-child{text-align:right}
+.lb-table tr:hover{background:rgba(0,229,255,0.03)}
+.lb-rank{font-family:var(--display);font-weight:700;font-size:14px;width:40px;display:inline-flex;align-items:center;justify-content:center}
+.lb-rank.gold{color:var(--gold)}.lb-rank.silver{color:var(--silver)}.lb-rank.bronze{color:var(--bronze)}
+.lb-name{color:var(--text);font-weight:500}
+.lb-score{font-family:var(--display);font-weight:600;font-size:14px;color:var(--cyan)}
+.lb-coins{color:var(--gold);font-size:12px}
+.lb-empty{text-align:center;padding:40px;color:var(--text3);font-size:13px}
+
+.lb-date-picker input[type="date"]{padding:6px 10px;background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-family:var(--body);font-size:12px;outline:none}
+.lb-date-picker input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.7)}
+
+/* Footer */
+.footer{border-top:1px solid var(--border);padding:40px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px;font-size:12px;color:var(--text3)}
+.footer a{color:var(--text2);text-decoration:none;margin:0 12px}
+.footer a:hover{color:var(--cyan)}
+.footer img{width:24px;height:24px;border-radius:4px;opacity:.6;margin-right:8px;vertical-align:middle}
+
+/* Identity bar */
+.id-bar{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:16px;flex-wrap:wrap}
+.id-bar .dot{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.id-bar .dot.on{background:#2ea043;box-shadow:0 0 6px rgba(46,160,67,0.5)}
+.id-bar .tag{font-family:var(--display);font-size:14px;font-weight:600;color:var(--cyan)}
+.btn-wallet{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:12px 24px;border-radius:var(--r);border:none;cursor:pointer;background:var(--orange);color:#fff;transition:.2s}
+.btn-wallet:hover{opacity:.85}
+.btn-disconnect{font-family:var(--body);font-size:11px;padding:6px 14px;border-radius:var(--r);border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:.2s}
+.btn-disconnect:hover{color:var(--text);border-color:var(--text3)}
+
+/* Balance card */
+.balance-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border-hi);border-radius:var(--r);padding:20px 28px;margin-bottom:32px;text-align:center;max-width:400px;width:100%}
+.balance-amount{font-family:var(--display);font-size:clamp(28px,5vw,42px);font-weight:900;color:var(--cyan);text-shadow:0 0 30px var(--cyan-glow);line-height:1.2}
+.balance-label{font-family:var(--display);font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<canvas id="particles"></canvas>
+
+<main>
+  <section class="hero">
+    <img src="logo.png" alt="Boxy Run" class="hero-logo">
+    <h1 class="hero-title">
+      <span class="w1">BOXY</span> <span class="w2">RUN</span>
+      <span class="w3">ARENA</span>
+    </h1>
+    <p class="hero-sub">Play single player, challenge other players or participate in prize money tournaments.</p>
+
+    <!-- Identity -->
+    <div class="id-bar" id="id-detecting" style="display:none">
+      <span class="dot"></span>
+      <span style="color:var(--text3);font-size:12px">Detecting wallet...</span>
+    </div>
+    <div class="id-bar" id="id-disconnected" style="display:none">
+      <span class="dot" id="id-dot"></span>
+      <button class="btn-wallet" id="btn-wallet">Connect Sphere Wallet</button>
+    </div>
+    <div class="id-bar" id="id-connected" style="display:none">
+      <span class="dot on"></span>
+      <span class="tag" id="id-name"></span>
+      <button class="btn-disconnect" id="btn-disconnect">Disconnect</button>
+    </div>
+    <div class="balance-card" id="balance-card" style="display:none">
+      <div class="balance-label">Your Balance</div>
+      <div class="balance-amount" id="balance-amount">--</div>
+      <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:14px">
+        <input type="number" style="width:80px;padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;text-align:center;outline:none" id="transfer-amount" value="10" min="1" step="1">
+        <button class="btn btn-play" id="btn-transfer" style="font-size:10px;padding:8px 20px">Transfer</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;min-height:16px" id="transfer-status"></div>
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <button id="btn-toggle-tx" style="background:transparent;border:none;color:var(--text2);font-family:var(--body);font-size:11px;cursor:pointer;text-transform:uppercase;letter-spacing:.1em">Show Transactions ▾</button>
+        <div id="tx-list" style="display:none;margin-top:10px;max-height:240px;overflow-y:auto;font-size:12px;text-align:left"></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+        <button id="btn-toggle-diag" style="background:transparent;border:none;color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;letter-spacing:.1em">Show Diagnostics ▾</button>
+        <button onclick="window.__forceReset()" style="background:transparent;border:1px solid var(--text3);color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;padding:2px 10px;border-radius:4px">Reset Wallet</button>
+      </div>
+      <div id="diag-panel" style="display:none;margin-top:8px;max-height:260px;overflow-y:auto;background:rgba(0,0,0,0.5);padding:8px;border-radius:4px;text-align:left"></div>
+    </div>
+
+    <div class="hero-actions">
+      <a href="dev.html" class="btn btn-play">Single Player</a>
+      <a href="challenge.html" class="btn btn-challenge">Challenge</a>
+      <a href="tournament-v2.html" class="btn btn-tournament">Tournaments</a>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-label">Rankings</div>
+    <div class="section-title">Leaderboards</div>
+    <div class="lb-grid">
+      <div class="card">
+        <div class="card-head"><h3>All-Time</h3><span style="font-size:11px;color:var(--text3)">Hall of Fame</span></div>
+        <div class="card-body" id="alltime-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Daily</h3>
+          <div class="lb-date-picker"><input type="date" id="daily-date"></div>
+        </div>
+        <div class="card-body" id="daily-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div></div>
+    <div>
+      <a href="dev.html">Game</a>
+      <a href="challenge.html">Challenge</a>
+      <a href="tournament-v2.html">Tournaments</a>
+      <a href="https://discord.gg/PGzNZT5uVp" target="_blank">Discord</a>
+    </div>
+  </footer>
+</main>
+
+<script>
+// Particles
+(function(){
+  const c=document.getElementById('particles'),x=c.getContext('2d');
+  let w,h,ps=[];
+  function resize(){w=c.width=innerWidth;h=c.height=innerHeight}
+  resize();addEventListener('resize',resize);
+  for(let i=0;i<40;i++)ps.push({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:Math.random()*1.5+.5,a:Math.random()*.3+.05});
+  (function draw(){x.clearRect(0,0,w,h);for(const p of ps){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=w;if(p.x>w)p.x=0;if(p.y<0)p.y=h;if(p.y>h)p.y=0;x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fillStyle=`rgba(0,229,255,${p.a})`;x.fill()}requestAnimationFrame(draw)})();
+})();
+
+// ── Identity (localStorage + Sphere wallet) ──
+const STORAGE_KEY='boxyrun-nametag';
+let myNametag=localStorage.getItem(STORAGE_KEY);
+
+function showConnected(tag){
+  document.getElementById('id-detecting').style.display='none';
+  document.getElementById('id-disconnected').style.display='none';
+  document.getElementById('id-connected').style.display='flex';
+  document.getElementById('id-name').textContent=tag;
+  updateBalance();
+}
+function showDisconnected(){
+  document.getElementById('id-detecting').style.display='none';
+  document.getElementById('id-disconnected').style.display='flex';
+  document.getElementById('id-connected').style.display='none';
+  document.getElementById('balance-card').style.display='none';
+}
+function setIdentity(tag){
+  myNametag=tag;
+  localStorage.setItem(STORAGE_KEY,tag);
+  showConnected(tag);
+}
+
+let gameBalance=null;
+async function fetchGameBalance(){
+  if(!myNametag)return;
+  try{
+    const r=await fetch('/api/balance/'+encodeURIComponent(myNametag));
+    const d=await r.json();
+    gameBalance=d.balance||0;
+  }catch{gameBalance=null}
+}
+function updateBalance(){
+  const card=document.getElementById('balance-card');
+  const amountEl=document.getElementById('balance-amount');
+  if(!myNametag){card.style.display='none';return}
+  card.style.display='block';
+  if(gameBalance!==null){
+    amountEl.textContent=Number(gameBalance).toLocaleString()+' UCT';
+  }else{
+    amountEl.textContent='Loading...';
+  }
+}
+
+// ── Transaction history ──
+let txVisible=false;
+async function loadTransactions(){
+  if(!myNametag)return;
+  const el=document.getElementById('tx-list');
+  if(!el)return;
+  el.innerHTML='<div style="color:var(--text3);padding:6px 0">Loading...</div>';
+  try{
+    const r=await fetch('/api/transactions/'+encodeURIComponent(myNametag)+'?limit=100');
+    const d=await r.json();
+    const rows=d.transactions||[];
+    if(!rows.length){el.innerHTML='<div style="color:var(--text3);padding:6px 0">No transactions yet</div>';return}
+    const typeLabel={deposit:'Deposit',entry_fee:'Entry fee',wager_win:'Wager win',wager_loss:'Wager loss',tournament_prize:'Tournament prize',game_earn:'Game earnings'};
+    el.innerHTML=rows.map(t=>{
+      const sign=t.amount>0?'+':'';
+      const color=t.amount>0?'var(--cyan)':'var(--orange)';
+      const date=new Date(t.timestamp).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      const label=typeLabel[t.type]||t.type;
+      return`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+        <div><div style="color:var(--text);font-size:12px">${label}</div><div style="color:var(--text3);font-size:10px">${date} · ${esc(t.memo||'')}</div></div>
+        <div style="color:${color};font-family:var(--display);font-weight:600;white-space:nowrap">${sign}${t.amount} UCT</div>
+      </div>`;
+    }).join('');
+  }catch{
+    el.innerHTML='<div style="color:var(--text3);padding:6px 0">Failed to load</div>';
+  }
+}
+document.getElementById('btn-toggle-diag')?.addEventListener('click',()=>{
+  const el=document.getElementById('diag-panel');
+  const btn=document.getElementById('btn-toggle-diag');
+  if(el.style.display==='none'||!el.style.display){
+    el.style.display='block';
+    btn.textContent='Hide Diagnostics ▴';
+    // Render all existing entries
+    el.innerHTML='';
+    diagLog.forEach(entry=>{
+      const line=document.createElement('div');
+      line.style.cssText='font-size:10px;font-family:monospace;border-bottom:1px solid #333;padding:3px 0;word-break:break-all';
+      line.innerHTML=`<span style="color:#666">${entry.t.substring(11,19)}</span> <strong>${esc(entry.event)}</strong> <span style="color:#888">${esc(JSON.stringify(entry.data||{}))}</span>`;
+      el.appendChild(line);
+    });
+    el.scrollTop=el.scrollHeight;
+  }else{
+    el.style.display='none';
+    btn.textContent='Show Diagnostics ▾';
+  }
+});
+
+document.getElementById('btn-toggle-tx')?.addEventListener('click',()=>{
+  txVisible=!txVisible;
+  const btn=document.getElementById('btn-toggle-tx');
+  const el=document.getElementById('tx-list');
+  if(txVisible){
+    btn.textContent='Hide Transactions ▴';
+    el.style.display='block';
+    loadTransactions();
+  }else{
+    btn.textContent='Show Transactions ▾';
+    el.style.display='none';
+  }
+});
+
+// If already stored, show connected immediately
+if(myNametag){
+  showConnected(myNametag);
+}else{
+  // Show "Detecting wallet..." while SDK initializes, then fall back to button
+  document.getElementById('id-detecting').style.display='flex';
+  setTimeout(()=>{
+    if(!myNametag)showDisconnected();
+  },2000);
+}
+
+// Sphere wallet auto-detect — keeps header state aligned with the
+// actual wallet, not just localStorage. Cases handled:
+//   1. wallet connected, no cached tag → adopt + show connected
+//   2. wallet connected with the same nametag → confirmed; refresh balance
+//   3. wallet connected with a DIFFERENT nametag than cached → user
+//      switched wallet identities (e.g. logged out + back in as someone
+//      else). Adopt the wallet's identity — operations would otherwise
+//      silently send to the wrong account.
+//   4. cached tag but wallet not connected after grace → cache is stale
+//      (new tab, extension locked, popup blocked). Show disconnected so
+//      the user can hit Connect — otherwise they'd see "connected" but
+//      every wallet op would silently fail with "Wallet not connected".
+let walletProbeUntil=Date.now()+4000; // grace window for the SDK to come up
+setInterval(()=>{
+  const w=window.SphereWallet;
+  const walletConnected=!!(w&&w.isConnected&&w.identity?.nametag);
+  if(walletConnected){
+    walletProbeUntil=0;
+    const liveTag=w.identity.nametag;
+    if(!myNametag){
+      setIdentity(liveTag);
+    }else if(myNametag!==liveTag){
+      // Wallet identity changed under us. Adopt the new one so wagers
+      // and prizes route correctly.
+      diag('wallet.identity_changed',{cached:myNametag,live:liveTag});
+      setIdentity(liveTag);
+    }
+  }else if(myNametag&&Date.now()>walletProbeUntil){
+    // Cached nametag but wallet is not actually connected after grace.
+    diag('wallet.cache_stale',{cached:myNametag,sdkLoaded:!!w});
+    myNametag=null;
+    showDisconnected();
+  }
+},500);
+// Fetch game balance every 5s
+if(myNametag)fetchGameBalance().then(updateBalance);
+setInterval(()=>{if(myNametag)fetchGameBalance().then(updateBalance)},5000);
+
+document.getElementById('btn-wallet').addEventListener('click',()=>{
+  const w=window.SphereWallet;
+  diag('wallet.connect_click',{hasWallet:!!w});
+  if(w&&w.connect){
+    const btn=document.getElementById('btn-wallet');
+    btn.textContent='Connecting...';
+    btn.disabled=true;
+    w.connect()
+      .then(()=>diag('wallet.connect_resolved',{isConnected:w.isConnected,identity:w.identity?.nametag}))
+      .catch(e=>{
+        diag('wallet.connect_err',{err:String(e)});
+        btn.textContent='Connect Sphere Wallet';
+        btn.disabled=false;
+      });
+    // Recovery timeout — if the SDK spinner hangs (Safari blocks
+    // third-party cookies/popups), reset the button after 10s so the
+    // user isn't stuck on a permanent loading state.
+    setTimeout(()=>{
+      if(!myNametag){
+        btn.textContent='Connect Sphere Wallet';
+        btn.disabled=false;
+        diag('wallet.connect_timeout');
+      }
+    },10000);
+  }
+});
+
+// ── Diagnostic logging ──
+const diagLog=[];
+function diag(event,data){
+  const entry={t:new Date().toISOString(),event,data};
+  diagLog.push(entry);
+  if(diagLog.length>500)diagLog.shift();
+  console.log('[boxy]',event,data||'');
+  // Fire-and-forget to server
+  try{
+    fetch('/api/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({nametag:myNametag,event,data})}).catch(()=>{});
+  }catch{}
+  // Update diagnostic panel if open
+  const el=document.getElementById('diag-panel');
+  if(el&&el.style.display==='block'){
+    const line=document.createElement('div');
+    line.style.cssText='font-size:10px;font-family:monospace;border-bottom:1px solid #333;padding:3px 0;word-break:break-all';
+    line.innerHTML=`<span style="color:#666">${entry.t.substring(11,19)}</span> <strong>${esc(event)}</strong> <span style="color:#888">${esc(JSON.stringify(data||{}))}</span>`;
+    el.appendChild(line);
+    el.scrollTop=el.scrollHeight;
+  }
+}
+
+document.getElementById('btn-transfer').addEventListener('click',async()=>{
+  const w=window.SphereWallet;
+  const btn=document.getElementById('btn-transfer');
+  const status=document.getElementById('transfer-status');
+  const amount=parseInt(document.getElementById('transfer-amount').value,10);
+  const txId='tx-'+Date.now().toString(36);
+  diag('transfer.click',{txId,amount,isConnected:w?.isConnected,identity:w?.identity?.nametag,balance:w?.balance});
+
+  if(!w){
+    diag('transfer.no_wallet');
+    status.textContent='Wallet SDK not loaded. Refresh the page.';
+    return;
+  }
+  if(!w.isConnected){
+    diag('transfer.not_connected_trying_reconnect');
+    status.textContent='Reconnecting wallet...';
+    try{
+      await w.connect();
+      if(!w.isConnected){
+        status.textContent='Wallet not connected. Click Connect first.';
+        return;
+      }
+    }catch(e){
+      diag('transfer.reconnect_failed',{err:String(e)});
+      status.textContent='Wallet not connected. Click Connect first.';
+      return;
+    }
+  }
+  if(!amount||amount<1){
+    status.textContent='Enter a valid amount';
+    return;
+  }
+
+  btn.disabled=true;
+  btn.textContent='Confirming...';
+  status.textContent='Approve in your Sphere wallet...';
+
+  const balanceBefore=typeof w.balance==='number'?w.balance:null;
+  diag('transfer.before',{txId,balanceBefore});
+
+  // Health check: verify client is responsive (ping with refreshBalance, short timeout)
+  let healthy=false;
+  try{
+    const pingTimeout=new Promise(r=>setTimeout(()=>r('ping-timeout'),5000));
+    const pingResult=await Promise.race([
+      w.refreshBalance?.().then(()=>'ok').catch(e=>'err:'+e.message),
+      pingTimeout,
+    ]);
+    diag('transfer.healthcheck',{txId,result:pingResult});
+    healthy=pingResult==='ok';
+  }catch(e){
+    diag('transfer.healthcheck_error',{txId,err:String(e)});
+  }
+
+  if(!healthy){
+    diag('transfer.unhealthy');
+    status.innerHTML='Wallet is not responding. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Click here to reset</button>';
+    btn.disabled=false;
+    btn.textContent='Transfer';
+    return;
+  }
+
+  // Kick off the deposit
+  let done=false;
+  let depositResult='pending';
+  const depositPromise=w.deposit(amount).then(ok=>{
+    done=true;
+    depositResult=ok?'ok':'fail';
+    diag('transfer.deposit_resolved',{txId,result:depositResult,isDepositPaid:w.isDepositPaid});
+    return depositResult;
+  }).catch(e=>{
+    done=true;
+    depositResult='err';
+    diag('transfer.deposit_error',{txId,err:String(e)});
+    return 'err';
+  });
+
+  // Poll wallet balance every 2s to detect the drop
+  async function pollForDrop(maxAttempts){
+    for(let i=0;i<maxAttempts;i++){
+      await new Promise(r=>setTimeout(r,2000));
+      if(done)return null;
+      let balAfter=null;
+      if(w.refreshBalance){
+        try{await w.refreshBalance();balAfter=w.balance}catch(e){diag('transfer.refresh_err',{txId,i,err:String(e)})}
+      }
+      diag('transfer.poll',{txId,iter:i,balance:balAfter,isDepositPaid:w.isDepositPaid});
+      if(balanceBefore!==null&&typeof w.balance==='number'&&w.balance<=balanceBefore-amount+0.01){
+        diag('transfer.balance_dropped',{txId,before:balanceBefore,after:w.balance});
+        return 'balance-dropped';
+      }
+    }
+    return 'timeout';
+  }
+
+  const result=await Promise.race([
+    depositPromise,
+    pollForDrop(45),
+  ]);
+  diag('transfer.race_result',{txId,result,isDepositPaid:w.isDepositPaid,balanceAfter:w.balance});
+
+  const succeeded = result==='ok' || result==='balance-dropped' || (result==='timeout'&&w.isDepositPaid);
+
+  if(succeeded){
+    diag('transfer.succeeded',{txId,via:result});
+    try{
+      const r=await fetch('/api/deposit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nametag:myNametag,amount})});
+      const d=await r.json();
+      diag('transfer.ledger_credit',{txId,status:r.status,response:d});
+    }catch(e){
+      diag('transfer.ledger_err',{txId,err:String(e)});
+    }
+    await fetchGameBalance();
+    updateBalance();
+    if(txVisible)loadTransactions();
+    status.textContent='Transfer complete! +'+amount+' UCT';
+    status.style.color='var(--cyan)';
+  }else if(result==='timeout'){
+    diag('transfer.timeout',{txId});
+    status.innerHTML='Timed out. If UCT left your wallet, your balance will update on refresh. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Reset wallet</button>';
+    status.style.color='var(--orange)';
+  }else{
+    diag('transfer.failed',{txId,result,err:w.error});
+    const msg=w.error||'Transfer cancelled';
+    // Distinguish hard errors (insufficient balance, etc.) from a user-cancel.
+    // Red for errors that require action; muted gray for plain cancellation.
+    const isError=/insufficient|not connected|required|failed|error/i.test(msg);
+    status.textContent=msg;
+    status.style.color=isError?'var(--red,#ef4444)':'var(--text3)';
+    status.style.fontSize=isError?'12px':'11px';
+    status.style.fontWeight=isError?'600':'400';
+  }
+  btn.disabled=false;
+  btn.textContent='Transfer';
+});
+
+// Force-reset: disconnect wallet and reload
+window.__forceReset=function(){
+  diag('forceReset');
+  try{window.SphereWallet?.disconnect?.()}catch{}
+  try{sessionStorage.clear()}catch{}
+  setTimeout(()=>location.reload(),200);
+};
+
+document.getElementById('btn-disconnect').addEventListener('click',()=>{
+  myNametag=null;
+  localStorage.removeItem(STORAGE_KEY);
+  const w=window.SphereWallet;
+  if(w&&w.disconnect)w.disconnect();
+  showDisconnected();
+});
+
+// Leaderboards
+const API='/api';
+const medals=['','\u{1F947}','\u{1F948}','\u{1F949}'];
+function rc(i){return i===0?'gold':i===1?'silver':i===2?'bronze':''}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+function buildTable(entries,showCoins,showDate){
+  if(!entries||!entries.length)return'<div class="lb-empty">No scores yet</div>';
+  let h='<table class="lb-table"><thead><tr><th>Rank</th><th>Player</th>';
+  if(showCoins)h+='<th>Coins</th>';
+  if(showDate)h+='<th>Date</th>';
+  h+='<th>Score</th></tr></thead><tbody>';
+  entries.forEach((e,i)=>{
+    const rank=e.rank||i+1;
+    h+=`<tr><td><span class="lb-rank ${rc(i)}">${medals[rank]||rank}</span></td>`;
+    h+=`<td class="lb-name">${esc(e.nickname)}</td>`;
+    if(showCoins)h+=`<td class="lb-coins">${e.coins??''}</td>`;
+    if(showDate)h+=`<td style="font-size:12px;color:var(--text3)">${e.date||new Date(e.timestamp).toLocaleDateString()}</td>`;
+    h+=`<td class="lb-score">${Number(e.score).toLocaleString()}</td></tr>`;
+  });
+  return h+'</tbody></table>';
+}
+
+async function loadAllTime(){
+  const el=document.getElementById('alltime-body');
+  try{const r=await fetch(`${API}/leaderboard/alltime?limit=10`);const d=await r.json();el.innerHTML=buildTable(d.leaderboard,false,true)}
+  catch{el.innerHTML='<div class="lb-empty">Could not load</div>'}
+}
+async function loadDaily(date){
+  const el=document.getElementById('daily-body');
+  try{
+    const today=new Date().toISOString().split('T')[0];
+    const isToday=!date||date===today;
+    const url=isToday?`${API}/leaderboard/daily?limit=10`:`${API}/leaderboard/history?date=${date}&limit=10`;
+    const r=await fetch(url);const d=await r.json();el.innerHTML=buildTable(d.leaderboard,true,false);
+  }catch{el.innerHTML='<div class="lb-empty">Could not load</div>'}
+}
+
+const dp=document.getElementById('daily-date');
+dp.value=new Date().toISOString().split('T')[0];
+dp.max=dp.value;
+dp.addEventListener('change',()=>loadDaily(dp.value));
+
+loadAllTime();loadDaily();
+setInterval(loadDaily,30000);
+setInterval(loadAllTime,60000);
+</script>
+</body>
 </html>

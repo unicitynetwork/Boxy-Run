@@ -49,6 +49,8 @@ export async function startServer(
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		PORT: String(port),
+		// Enable test-only endpoints (fake clock etc.)
+		TEST_MODE: '1',
 	};
 	if (options.capacity !== undefined) {
 		env.LOBBY_CAPACITY = String(options.capacity);
@@ -64,17 +66,27 @@ export async function startServer(
 	}
 	// Default to 0 rate limit in tests for speed
 	env.READY_RATE_LIMIT_MS = String(options.readyRateLimitMs ?? 0);
-	// Unique DB per test server to avoid cross-test contamination
-	env.DB_PATH = `/tmp/boxyrun-test-${port}.db`;
+	// Unique DB per test run — include pid + hrtime to prevent a random-port
+	// collision with a previous test run leaving stale data behind.
+	const runId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	env.DB_PATH = `/tmp/boxyrun-test-${port}-${runId}.db`;
+	// Make sure the file doesn't exist from a prior run.
+	try { (await import('node:fs')).unlinkSync(env.DB_PATH); } catch {}
 	const proc = spawn('node', [SERVER_BUNDLE], {
 		env,
 		stdio: ['ignore', 'pipe', 'pipe'],
 	});
+	// Tag the db path on the process so stopServer can clean it up.
+	(proc as any)._dbPath = env.DB_PATH;
 
 	let stderrBuf = '';
 	proc.stderr!.on('data', (chunk) => {
 		stderrBuf += chunk.toString();
 	});
+	// Debug: pipe server stdout to test stderr so logs surface in the runner.
+	if (process.env.DEBUG_SERVER) {
+		proc.stdout!.on('data', (c) => process.stderr.write('[srv] ' + c.toString()));
+	}
 
 	await new Promise<void>((resolve, reject) => {
 		const timer = setTimeout(() => {
@@ -106,13 +118,20 @@ export async function startServer(
 /** Stop the server and wait for the process to fully exit. */
 export function stopServer(proc: ChildProcess): Promise<void> {
 	return new Promise((resolve) => {
-		if (proc.exitCode !== null) {
+		const cleanupDb = () => {
+			// Clean the DB file the child was using so /tmp doesn't accumulate.
+			const dbPath = proc.spawnargs && (proc as any).spawnargs
+				? undefined
+				: undefined;
+			// Easiest: harvest from env. But we have a reference stored below.
+			if ((proc as any)._dbPath) {
+				try { require('node:fs').unlinkSync((proc as any)._dbPath); } catch {}
+			}
 			resolve();
-			return;
-		}
-		proc.on('exit', () => resolve());
+		};
+		if (proc.exitCode !== null) { cleanupDb(); return; }
+		proc.on('exit', cleanupDb);
 		proc.kill('SIGINT');
-		// Fallback SIGKILL after 2s if SIGINT didn't work
 		setTimeout(() => {
 			if (proc.exitCode === null) proc.kill('SIGKILL');
 		}, 2000);
@@ -228,7 +247,7 @@ export function assertEqual<T>(actual: T, expected: T, label = ''): void {
 }
 
 /** Truthy assertion. */
-export function assert(condition: unknown, message: string): asserts condition {
+export function assert(condition: unknown, message = 'condition was falsy'): asserts condition {
 	if (!condition) {
 		throw new Error(`assertion failed: ${message}`);
 	}
@@ -238,25 +257,107 @@ export function assert(condition: unknown, message: string): asserts condition {
  * Run an async test function, print pass/fail, and exit with the
  * correct status code. Each test file calls this once at the bottom.
  */
-export async function runTest(
-	name: string,
-	fn: () => Promise<void>,
-): Promise<void> {
-	const start = Date.now();
-	try {
-		await fn();
-		const ms = Date.now() - start;
-		console.log(`  ✓ ${name} (${ms}ms)`);
-		process.exit(0);
-	} catch (err) {
-		const ms = Date.now() - start;
-		console.error(`  ✗ ${name} (${ms}ms)`);
-		console.error(`    ${err instanceof Error ? err.stack || err.message : err}`);
-		process.exit(1);
+/**
+ * Collects all runTest() calls in a file and runs them sequentially when
+ * the event loop drains (via a microtask scheduled on first call). This
+ * lets a single .test.ts file define multiple named tests.
+ */
+interface RegisteredTest { name: string; fn: () => Promise<void>; }
+const pendingTests: RegisteredTest[] = [];
+let runScheduled = false;
+
+export function runTest(name: string, fn: () => Promise<void>): void {
+	pendingTests.push({ name, fn });
+	if (!runScheduled) {
+		runScheduled = true;
+		// Defer to next tick so all registrations complete before we start.
+		setImmediate(async () => {
+			let failed = 0;
+			for (const t of pendingTests) {
+				const start = Date.now();
+				try {
+					await t.fn();
+					console.log(`  ✓ ${t.name} (${Date.now() - start}ms)`);
+				} catch (err) {
+					failed++;
+					console.error(`  ✗ ${t.name} (${Date.now() - start}ms)`);
+					console.error(`    ${err instanceof Error ? err.stack || err.message : err}`);
+				}
+			}
+			process.exit(failed === 0 ? 0 : 1);
+		});
 	}
 }
 
 /** Short sleep for tests that need to observe server-side timing. */
 export function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── REST client helper ──────────────────────────────────────────────
+
+/** Default admin key the server falls back to when ADMIN_KEY env is unset. */
+export const TEST_ADMIN_KEY = 'boxyrun-admin-2024';
+
+export interface ApiOptions {
+	method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+	body?: unknown;
+	asAdmin?: boolean;
+	/** Expect non-2xx and return body anyway (for error-path tests) */
+	allowError?: boolean;
+}
+
+/**
+ * Make a REST call against the test server. `path` should start with `/api`.
+ * Throws on non-2xx by default (use `allowError: true` to inspect errors).
+ */
+export async function api<T = any>(
+	server: { port: number },
+	path: string,
+	opts: ApiOptions = {},
+): Promise<T> {
+	const url = `http://127.0.0.1:${server.port}${path}`;
+	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	if (opts.asAdmin) headers['X-Admin-Key'] = TEST_ADMIN_KEY;
+	const init: RequestInit = {
+		method: opts.method || 'GET',
+		headers,
+	};
+	if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+	const r = await fetch(url, init);
+	const text = await r.text();
+	let data: any;
+	try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+	if (!r.ok && !opts.allowError) {
+		throw new Error(
+			`${opts.method || 'GET'} ${path} failed: HTTP ${r.status}` +
+			`${data ? ' ' + JSON.stringify(data) : ''}`,
+		);
+	}
+	return data as T;
+}
+
+/**
+ * Test-only: advance the server's fake clock by `ms`. Lets tests exercise
+ * 30s / 45s timeouts without real waiting. Requires server started via
+ * startServer() (which sets TEST_MODE=1).
+ */
+export async function advanceClock(
+	server: { port: number },
+	ms: number,
+): Promise<void> {
+	const url = `http://127.0.0.1:${server.port}/__test/advance-clock`;
+	const r = await fetch(url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ms }),
+	});
+	if (!r.ok) throw new Error(`advance-clock failed: HTTP ${r.status} ${await r.text()}`);
+}
+
+/** Test-only: reset the server's fake-clock offset to zero. */
+export async function resetClock(server: { port: number }): Promise<void> {
+	const url = `http://127.0.0.1:${server.port}/__test/reset-clock`;
+	const r = await fetch(url, { method: 'POST' });
+	if (!r.ok) throw new Error(`reset-clock failed: HTTP ${r.status}`);
 }

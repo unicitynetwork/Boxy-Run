@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "type": "sphere-wallet",
+  "createdAt": "2026-04-15T07:22:10.635Z",
+  "wallet": {
+    "masterPrivateKey": "4633757a72cc74734fb1fbd8f4b4f48ca59f8fbb666485564a2fd1694252ae70",
+    "chainCode": "74c1079ac3597105695744d8b179adf23e7618c5a63cfd0045d842353494172a",
+    "addresses": [
+      {
+        "address": "alpha1q2h0ew5u5gtjv2gykm29k3dczj5mm37v5glv63s",
+        "publicKey": "03e232b0743e8e998a9a98914fe3b44b3987e70bcd4a7204c32eb1e0a3024579d8",
+        "path": "m/44'/0'/0'/0/0",
+        "index": 0
+      }
+    ],
+    "isBIP32": true,
+    "descriptorPath": "44'/0'/0'"
+  },
+  "mnemonic": "speed assault remove return laptop gravity outer wrap online differ push core",
+  "encrypted": false,
+  "source": "mnemonic",
+  "derivationMode": "bip32"
+}

@@ -56,6 +56,20 @@ export async function ensureSchema(): Promise<void> {
 		CREATE INDEX IF NOT EXISTS idx_alltime_score
 		ON alltime (score DESC)
 	`);
+	await db.execute(`
+		CREATE TABLE IF NOT EXISTS player_transactions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			nametag TEXT NOT NULL,
+			amount INTEGER NOT NULL,
+			type TEXT NOT NULL,
+			memo TEXT DEFAULT '',
+			timestamp TEXT NOT NULL
+		)
+	`);
+	await db.execute(`
+		CREATE INDEX IF NOT EXISTS idx_player_tx_nametag
+		ON player_transactions (nametag)
+	`);
 	schemaReady = true;
 	console.log('[db] schema ready');
 }

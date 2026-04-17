@@ -34,11 +34,31 @@ import {
 	TICK_SECONDS,
 	type CharacterAction,
 	type GameConfig,
-	type GameState,
 } from '../sim/state';
 import { tick } from '../sim/tick';
-import { getSkin, SKINS, type CharacterSkin } from '../render/skins';
-import { TournamentClient } from '../../tournament/client/client';
+import { getSkin, type CharacterSkin } from '../render/skins';
+import { showSkinSelector } from './skin-selector';
+import {
+	showOverlay,
+	hideOverlay,
+	updateOpponentHud,
+	removeOpponentHud,
+	showDeathBanner,
+	removeDeathBanner,
+	installTouchControls,
+} from './ui';
+import {
+	initAudio,
+	resumeAudio,
+	playBeep,
+	playCoinCollect,
+	playCrash,
+	playFlameActivate,
+	playGameStart,
+	playJump,
+	playLaneSwitch,
+	playPowerupCollect,
+} from '../render/audio';
 
 // ── Sphere wallet bridge ─────────────────────────────────────────
 // sphere-connect.ts (loaded before this script) exposes
@@ -70,9 +90,42 @@ function walletCanPlay(): boolean {
 	return w.isDepositPaid;
 }
 
-// Shared state for rematch
-let lastOpponentName = '';
-let lastTournamentType = '';
+// ── Game balance (server-side ledger) ────────────────────────────
+const ENTRY_FEE = 10;
+const STORAGE_KEY = 'boxyrun-nametag';
+
+function getPlayerNametag(): string | null {
+	return walletNametag() || localStorage.getItem(STORAGE_KEY);
+}
+
+async function fetchGameBalance(): Promise<number | null> {
+	const tag = getPlayerNametag();
+	if (!tag) return null;
+	try {
+		const r = await fetch('/api/balance/' + encodeURIComponent(tag));
+		const d = await r.json();
+		return typeof d.balance === 'number' ? d.balance : 0;
+	} catch { return null; }
+}
+
+async function deductEntryFee(): Promise<boolean> {
+	const tag = getPlayerNametag();
+	if (!tag) return true; // no identity = dev mode, allow
+	try {
+		const r = await fetch('/api/deposit', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ nametag: tag, amount: -ENTRY_FEE }),
+		});
+		const d = await r.json();
+		return d.status === 'ok';
+	} catch { return false; }
+}
+
+function updateBalanceDisplay(balance: number | null) {
+	const el = document.getElementById('balance');
+	if (el) el.textContent = balance !== null ? balance.toLocaleString() + ' UCT' : '--';
+}
 
 // Key codes
 const KEY_LEFT = 37;
@@ -81,72 +134,131 @@ const KEY_RIGHT = 39;
 const KEY_P = 80;
 const KEY_A = 65;
 const KEY_W = 87;
+const KEY_DOWN = 40;
 const KEY_D = 68;
+const KEY_F = 70;
 const KEY_ENTER = 13;
 
 window.addEventListener('load', () => {
+	initAudio();
 	const params = new URLSearchParams(location.search);
 	const skinParam = params.get('skin');
 	const isTournament = params.get('tournament') === '1';
 	const hasMatchId = params.has('matchId');
 
-	// V2 tournament match: seed + matchId in URL, simple WS for inputs
+	const savedSkin = localStorage.getItem('boxyrun-skin');
+	const resolvedSkin = skinParam || savedSkin;
+
+	function pickSkin(cb: (skin: CharacterSkin) => void) {
+		if (resolvedSkin) {
+			cb(getSkin(resolvedSkin));
+		} else {
+			showSkinSelector((skin) => {
+				localStorage.setItem('boxyrun-skin', skin.name);
+				cb(skin);
+			});
+		}
+	}
+
+	// Tournament / challenge match: seed + matchId in URL.
 	if (isTournament && hasMatchId) {
-		startV2Match(params, getSkin(skinParam));
+		pickSkin((skin) => startMatch(params, skin));
 		return;
 	}
 
-	// Legacy tournament mode (v1)
-	if (isTournament) {
-		const skin = getSkin(skinParam);
-		startTournamentMode(params, skin);
-		return;
-	}
-
-	// Single-player: show skin selector if no param
-	if (skinParam) {
-		startSinglePlayer(params, getSkin(skinParam));
-		return;
-	}
-	showSkinSelector((skin) => startSinglePlayer(params, skin));
+	// Single-player
+	pickSkin((skin) => startSinglePlayer(params, skin));
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// V2 Tournament Match — seed in URL, simple WS, full-screen game
+// Tournament / challenge match — seed in URL, WS for input relay
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
+function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	const matchId = params.get('matchId')!;
-	const seed = parseInt(params.get('seed') || '0', 16) >>> 0;
 	const mySide = (params.get('side') || 'A') as 'A' | 'B';
-	const opponentName = params.get('opponent') || 'Opponent';
+	let opponentName = params.get('opponent') || 'Opponent';
 	const playerName = params.get('name') || 'Player';
-	const startsAt = parseInt(params.get('startsAt') || '0', 10);
 	const tournamentId = params.get('tid') || '';
+	const bestOf = parseInt(params.get('bestOf') || '1', 10);
 
-	console.log(`V2 Match: ${matchId} seed=${seed} side=${mySide} vs ${opponentName}`);
+	// Per-game state — mutated on series-next instead of navigating (preserves AudioContext)
+	let currentSeed = parseInt(params.get('seed') || '0', 16) >>> 0;
+	let currentGameNumber = parseInt(params.get('gameNum') || '1', 10);
+	let currentWinsA = parseInt(params.get('winsA') || '0', 10);
+	let currentWinsB = parseInt(params.get('winsB') || '0', 10);
+	let currentStartsAt = parseInt(params.get('startsAt') || '0', 10);
+
+	console.log(`V2 Match: ${matchId} seed=${currentSeed} side=${mySide} vs ${opponentName} (game ${currentGameNumber}/${bestOf})`);
+
+	// Fetch and display game balance
+	fetchGameBalance().then(updateBalanceDisplay);
+
+	// Series score HUD (updated on series-next)
+	let seriesHud: HTMLElement | null = null;
+	function updateSeriesHud() {
+		if (bestOf <= 1) return;
+		if (!seriesHud) {
+			seriesHud = document.createElement('div');
+			seriesHud.id = 'series-hud';
+			seriesHud.style.cssText =
+				'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:100;' +
+				'background:rgba(0,0,0,0.7);color:#fff;padding:6px 16px;border-radius:6px;' +
+				'font-family:monospace;font-size:13px;text-align:center;pointer-events:none;';
+			document.body.appendChild(seriesHud);
+		}
+		const myWins = mySide === 'A' ? currentWinsA : currentWinsB;
+		const oppWins = mySide === 'A' ? currentWinsB : currentWinsA;
+		seriesHud.innerHTML = `<span style="font-size:10px;opacity:0.6">BEST OF ${bestOf} | GAME ${currentGameNumber}</span><br><span style="color:#00e5ff">${myWins}</span> - <span style="color:#f97316">${oppWins}</span>`;
+	}
+	updateSeriesHud();
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
 	const render = createRenderState(scene, skin, true);
 	addOpponentMesh(render, scene);
 
-	const myState = makeInitialState(seed, config);
-	const opponentState = makeInitialState(seed, config);
-	const oppBuffer = new Map<number, CharacterAction[]>();
+	// Mutable per-game sim state — reassigned on series-next
+	let myState = makeInitialState(currentSeed, config);
+	let opponentState = makeInitialState(currentSeed, config);
+	let oppBuffer = new Map<number, CharacterAction[]>();
 
-	let matchActive = false;
-	let matchDone = false;
-	let oppDeathNotified = false;
-	let myDeathNotified = false;
+	// ── Client-side state machine ────────────────────────────────────
+	// ONE source of truth. Every handler checks `phase` — never a combo
+	// of booleans. Transitions are explicit and logged.
+	//
+	//  ready_prompt → waiting → countdown → playing → done_sent → game_result → ready_prompt
+	//                                                           → series_end (terminal)
+	//
+	type ClientPhase =
+		| 'ready_prompt'  // showing ready button (game 1) or auto-readying (game 2+)
+		| 'waiting'       // I readied, waiting for opponent
+		| 'countdown'     // 3-2-1-GO
+		| 'playing'       // game active, player has control
+		| 'done_sent'     // match-done sent (self died or guaranteed win), waiting for server
+		| 'game_result'   // showing interim game result (Bo3 series)
+		| 'series_end';   // final result shown (terminal until navigate/rematch)
+
+	let phase: ClientPhase = 'ready_prompt';
+	let oppGhostDead = false; // visual-only: hide ghost mesh when opp sim dies
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
+
+	function setPhase(next: ClientPhase) {
+		if (phase === next) return;
+		console.log(`[phase] ${phase} → ${next}`);
+		phase = next;
+		(window as any).__currentPhase = next; // exposed for Playwright tests
+	}
+	// Derived helpers used by input handlers + game loop guard
+	function isPlaying() { return phase === 'playing'; }
+	function isGameActive() { return phase === 'playing' || phase === 'done_sent'; }
 	// For 1v1 challenges (tournament name contains "vs"), go back to
 	// the main page's challenge section. For bracket tournaments, go
 	// to the tournament detail page.
 	const isChallenge = !tournamentId || tournamentId.startsWith('challenge-');
 	const backUrl = isChallenge
-		? 'tournament-v2.html#challenge-section'
+		? 'challenge.html'
 		: `tournament-v2.html?id=${tournamentId}`;
 
 	// Opponent score HUD
@@ -173,82 +285,335 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 	const wsUrl = `${wsProto}//${location.host}`;
 	let ws: WebSocket | null = null;
 	let intentionalClose = false;
+	let wsLastMessageAt = 0;
+	let wsWatchdog: ReturnType<typeof setInterval> | null = null;
 
+	// Outgoing queue. Anything sent while the WS is reconnecting (CLOSED /
+	// CONNECTING) MUST be queued, not dropped — silent drops here is the
+	// "I won locally but server says I lost" bug: the local game keeps
+	// applying inputs from queuedActions, so the player sees themselves
+	// jumping, but the server's deterministic replay never sees those
+	// inputs and the character dies earlier on the server side. Order is
+	// preserved: the queue flushes (FIFO) on the next onopen, AFTER the
+	// register message, so inputs land server-side tagged with their
+	// original tick number.
+	const pendingSends: string[] = [];
 	function connectWS() {
 		ws = new WebSocket(wsUrl);
+		wsLastMessageAt = Date.now();
 		ws.onopen = () => {
+			wsLastMessageAt = Date.now();
 			ws!.send(JSON.stringify({ type: 'register', identity: { nametag: playerName } }));
+			// Flush anything queued while the WS was down.
+			while (pendingSends.length && ws!.readyState === 1) {
+				ws!.send(pendingSends.shift()!);
+			}
 		};
 		ws.onmessage = (e) => {
+			wsLastMessageAt = Date.now();
 			try {
 				const msg = JSON.parse(e.data);
+				if (msg.type === 'heartbeat') return;
+
+				// WS is used ONLY for real-time input relay and chat.
+				// All flow transitions (ready, countdown, result, series)
+				// are driven by the REST reconcile loop. This eliminates
+				// the entire class of "missed WS push" bugs.
 				if (msg.type === 'opponent-input' && msg.matchId === matchId) {
 					try {
 						const action = atob(msg.payload) as CharacterAction;
-						if (action === 'up' || action === 'left' || action === 'right') {
+						if (action === 'up' || action === 'left' || action === 'right' || action === 'fire') {
 							if (!oppBuffer.has(msg.tick)) oppBuffer.set(msg.tick, []);
 							oppBuffer.get(msg.tick)!.push(action);
 						}
 					} catch {}
 				}
-				if (msg.type === 'match-end' && msg.matchId === matchId) {
-					onMatchEnd(msg);
+				// Incoming rematch challenge — only on result screen
+				if (msg.type === 'challenge-received' && phase === 'series_end') {
+					const wagerText = msg.wager > 0 ? ` for ${msg.wager} UCT` : '';
+					showOverlay(
+						`<div style="font-size:16px;margin-bottom:12px"><strong>${msg.from}</strong> challenges you${wagerText}</div>` +
+						`<button onclick="window.__acceptRematch('${msg.challengeId}')" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">ACCEPT</button>` +
+						`<button onclick="window.__declineRematch('${msg.challengeId}')" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">DECLINE</button>`,
+					);
 				}
-				// Handle rematch: challenge-accepted → redirect to new match
-				if (msg.type === 'challenge-accepted') {
-					location.href = `tournament-v2.html?id=${msg.tournamentId}`;
-				}
-				if (msg.type === 'challenge-received') {
-					// Auto-accept rematches from the same opponent
-					if (msg.from === opponentName) {
-						wsSend({ type: 'challenge-accept', challengeId: msg.challengeId });
-					}
+				if (msg.type === 'chat' && msg.from) {
+					showChatBubble(msg.from, msg.message);
 				}
 			} catch {}
 		};
 		ws.onclose = () => {
+			if (wsWatchdog) { clearInterval(wsWatchdog); wsWatchdog = null; }
 			if (!intentionalClose) setTimeout(connectWS, 3000);
 		};
+
+		// Watchdog: server heartbeats every 10s. If >25s silence the socket is
+		// a zombie (network drop without close frame) — force close & reconnect.
+		wsWatchdog = setInterval(() => {
+			if (ws && ws.readyState === WebSocket.OPEN && Date.now() - wsLastMessageAt > 25_000) {
+				console.warn('[ws] idle >25s — forcing reconnect');
+				try { ws.close(); } catch {}
+			}
+		}, 5000);
 	}
 	connectWS();
 
+	let lastWager = 0; // track wager for rematch
+
 	function onMatchEnd(msg: any) {
-		matchDone = true;
+		setPhase('series_end');
 		if (oppHud) { oppHud.remove(); oppHud = null; }
 
 		const iWon = msg.winner === playerName;
-		const myScore = msg.scoreA ?? 0;
-		const oppScore = msg.scoreB ?? 0;
+		// Server reports scoreA/scoreB by SIDE (player A vs player B). Flip
+		// to my-vs-opponent for display so side-B players don't see the
+		// numbers reversed (e.g. "SERIES WIN! 0 — 2" when they actually
+		// won 2-0 — that was a real prod bug).
+		const sideAScore = msg.scoreA ?? 0;
+		const sideBScore = msg.scoreB ?? 0;
+		const myScore = mySide === 'A' ? sideAScore : sideBScore;
+		const oppScore = mySide === 'A' ? sideBScore : sideAScore;
+		const wager = msg.wager || 0;
+		lastWager = wager;
 
-		const resultHtml = iWon
-			? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
-			: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
+		playCrash();
 
-		const rematchBtn = `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>`;
-		const backLabel = isChallenge ? 'PLAY AGAIN' : 'BACK TO TOURNAMENT';
+		// Force-resolve forfeit (both players offline 45s+) — show a
+		// distinct overlay so it doesn't look like a real played match.
+		if (msg.forfeit) {
+			const rematchBtn = isChallenge ? `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>` : '';
+			const backLabel = isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT';
+			const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
+			showOverlay(
+				`<div style="font-size:20px;font-weight:bold;color:#94a3b8;margin-bottom:8px">MATCH FORFEITED</div>` +
+				`<div style="font-size:13px;color:#94a3b8;margin-bottom:16px">Both players were offline too long.</div>` +
+				`<div style="font-size:14px;margin-bottom:16px">Bracket awarded to <strong>${msg.winner || 'player A'}</strong>.</div>` +
+				rematchBtn + backBtn,
+			);
+			fetchGameBalance().then(updateBalanceDisplay);
+			return;
+		}
+
+		// If this match-end is flagged as series end, fall through to the final-result branch below
+		// (scores in msg are series wins, not game scores)
+		const isSeriesEnd = !!msg.seriesEnd;
+
+		// For interim series games (not the final one), show "waiting for next game"
+		if (bestOf > 1 && !isSeriesEnd) {
+			showOverlay(
+				`<div style="font-size:20px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">Game ${currentGameNumber}: ${iWon ? 'WIN' : 'LOSS'}</div>` +
+				`<div style="font-size:14px;margin-bottom:8px">${myScore.toLocaleString()} — ${oppScore.toLocaleString()}</div>` +
+				`<div style="font-size:13px;opacity:0.6">Waiting for next game...</div>`,
+			);
+			return; // series-next will handle what's next
+		}
+
+		// Final result (single game OR series end)
+		let resultHtml: string;
+		const winLabel = isSeriesEnd ? 'SERIES WIN!' : 'YOU WIN!';
+		const loseLabel = isSeriesEnd ? 'SERIES LOSS' : 'YOU LOSE';
+		if (iWon) {
+			resultHtml = `<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">${winLabel}</div>`;
+			if (wager > 0) resultHtml += `<div style="font-size:14px;color:#2d6a4f;margin-bottom:8px">+${wager} UCT</div>`;
+		} else {
+			resultHtml = `<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">${loseLabel}</div>`;
+			if (wager > 0) resultHtml += `<div style="font-size:14px;color:#c1121f;margin-bottom:8px">-${wager} UCT</div>`;
+		}
+
+		const rematchBtn = isChallenge ? `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>` : '';
+		const backLabel = isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT';
 		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
 
+		const scoreLabel = isSeriesEnd ? 'Games won' : 'Score';
 		showOverlay(
 			resultHtml +
-			`<div style="font-size:16px;margin-bottom:16px">${myScore.toLocaleString()} — ${oppScore.toLocaleString()}</div>` +
+			`<div style="font-size:12px;opacity:0.7;margin-bottom:4px">${scoreLabel}</div>` +
+			`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myScore} — ${oppScore}</div>` +
 			rematchBtn + backBtn,
 		);
+
+		fetchGameBalance().then(updateBalanceDisplay);
 	}
 
-	// Rematch: send a challenge to the same opponent
-	(window as any).__v2rematch = () => {
-		showOverlay('<div style="font-size:16px">Sending rematch...</div>');
-		wsSend({ type: 'challenge', opponent: opponentName });
+	// Rematch: send via REST, then poll for the match to start.
+	// Old code used WS for challenge-start redirect — but we stripped
+	// all WS flow handlers. REST poll catches the new match.
+	let rematchPolling = false;
+	(window as any).__v2rematch = async () => {
+		showOverlay('<div style="font-size:16px">Sending rematch...</div><div style="font-size:12px;margin-top:8px;opacity:0.6">Waiting for opponent to accept...</div>');
+		try {
+			const r = await fetch('/api/challenges', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ from: playerName, opponent: opponentName, wager: lastWager, bestOf }),
+			});
+			const data = await r.json();
+			if (!r.ok) {
+				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">${data.message || 'Challenge failed'}</div>` +
+					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
+				return;
+			}
+		} catch {
+			showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Network error</div>` +
+				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
+			return;
+		}
+		startMatchPoll();
 	};
 
+	/** Poll /api/tournaments for a new match involving us → redirect. */
+	function startMatchPoll() {
+		if (rematchPolling) return;
+		rematchPolling = true;
+		const poll = setInterval(async () => {
+			try {
+				const r = await fetch('/api/tournaments');
+				if (!r.ok) return;
+				const { tournaments } = await r.json();
+				for (const t of tournaments) {
+					if (t.status !== 'active' || !t.id.startsWith('challenge-')) continue;
+					const br = await fetch(`/api/tournaments/${encodeURIComponent(t.id)}/bracket`);
+					if (!br.ok) continue;
+					const { matches } = await br.json();
+					const m = matches?.find((m: any) =>
+						(m.playerA === playerName || m.playerB === playerName)
+						&& (m.status === 'ready_wait' || m.status === 'active'),
+					);
+					if (m) {
+						clearInterval(poll);
+						const side = m.playerA === playerName ? 'A' : 'B';
+						const opp = side === 'A' ? m.playerB : m.playerA;
+						const p = new URLSearchParams({
+							tournament: '1', matchId: m.id, seed: m.seed || '0',
+							side, opponent: opp, name: playerName,
+							tid: t.id, bestOf: String(t.best_of || 1),
+							wager: String(lastWager), startsAt: String(Date.now() + 3000),
+						});
+						location.href = 'dev.html?' + p;
+						return;
+					}
+				}
+			} catch {}
+		}, 2000);
+		setTimeout(() => {
+			clearInterval(poll);
+			rematchPolling = false;
+			const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
+			showOverlay(`<div style="font-size:14px;margin-bottom:12px">Rematch expired</div>` +
+				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
+		}, 35000);
+	}
+
+	// Accept/decline incoming rematch — also via REST
+	(window as any).__acceptRematch = async (challengeId: string) => {
+		showOverlay('<div style="font-size:16px">Starting match...</div>');
+		try {
+			await fetch(`/api/challenges/${challengeId}/accept`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ by: playerName }),
+			});
+		} catch {}
+		startMatchPoll(); // ← was missing — acceptor needs the poll too
+	};
+	(window as any).__declineRematch = async (challengeId: string) => {
+		try {
+			await fetch(`/api/challenges/${challengeId}/decline`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ by: playerName }),
+			});
+		} catch {}
+		const backLabel = isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT';
+		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
+		showOverlay('Challenge declined.' + backBtn);
+	};
+
+	// ── In-game chat ──
+	function createChatPanel() {
+		const panel = document.createElement('div');
+		panel.id = 'game-chat';
+		panel.style.cssText =
+			'position:fixed;bottom:16px;right:16px;z-index:150;width:280px;' +
+			'background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.1);' +
+			'border-radius:8px;font-family:monospace;font-size:12px;' +
+			'backdrop-filter:blur(8px);display:flex;flex-direction:column;';
+		panel.innerHTML =
+			'<div id="game-chat-messages" style="height:120px;overflow-y:auto;padding:8px 10px;color:#ccc"></div>' +
+			'<div style="display:flex;border-top:1px solid rgba(255,255,255,0.1)">' +
+			'<input id="game-chat-input" type="text" maxlength="200" placeholder="Chat..." style="flex:1;padding:8px 10px;background:transparent;border:none;color:#fff;font-family:monospace;font-size:12px;outline:none">' +
+			'<button id="game-chat-send" style="padding:8px 12px;background:transparent;border:none;border-left:1px solid rgba(255,255,255,0.1);color:#00e5ff;font-size:10px;font-weight:bold;cursor:pointer">SEND</button>' +
+			'</div>';
+		// Quick messages
+		const quickBar = document.createElement('div');
+		quickBar.style.cssText = 'display:flex;gap:4px;padding:6px 8px;border-top:1px solid rgba(255,255,255,0.1);flex-wrap:wrap;';
+		['GG', 'Nice!', 'GL', '😂'].forEach(text => {
+			const btn = document.createElement('button');
+			btn.textContent = text;
+			btn.style.cssText = 'padding:3px 8px;background:rgba(255,255,255,0.1);border:none;border-radius:4px;color:#aaa;font-size:11px;cursor:pointer;font-family:monospace;';
+			btn.addEventListener('click', () => sendGameChat(text));
+			quickBar.appendChild(btn);
+		});
+		panel.appendChild(quickBar);
+		document.body.appendChild(panel);
+
+		const input = document.getElementById('game-chat-input')!;
+		const sendBtn = document.getElementById('game-chat-send')!;
+		sendBtn.addEventListener('click', () => {
+			const text = (input as HTMLInputElement).value.trim();
+			if (text) { sendGameChat(text); (input as HTMLInputElement).value = ''; }
+		});
+		input.addEventListener('keydown', (e) => {
+			e.stopPropagation(); // Don't trigger game controls
+			if (e.key === 'Enter') {
+				const text = (input as HTMLInputElement).value.trim();
+				if (text) { sendGameChat(text); (input as HTMLInputElement).value = ''; }
+			}
+		});
+		input.addEventListener('keyup', (e) => e.stopPropagation());
+	}
+
+	function sendGameChat(text: string) {
+		wsSend({ type: 'chat', to: opponentName, message: text });
+		addGameChatMessage(playerName, text, true);
+	}
+
+	function addGameChatMessage(from: string, text: string, isMe: boolean) {
+		const el = document.getElementById('game-chat-messages');
+		if (!el) return;
+		const div = document.createElement('div');
+		div.style.marginBottom = '3px';
+		const color = isMe ? '#00e5ff' : '#f97316';
+		div.innerHTML = `<span style="color:${color};font-weight:bold">${from.replace(/</g, '&lt;')}</span> ${text.replace(/</g, '&lt;')}`;
+		el.appendChild(div);
+		el.scrollTop = el.scrollHeight;
+	}
+
+	function showChatBubble(from: string, text: string) {
+		addGameChatMessage(from, text, false);
+	}
+
+	createChatPanel();
+
 	function wsSend(msg: Record<string, unknown>) {
-		if (ws?.readyState === 1) ws.send(JSON.stringify(msg));
+		const json = JSON.stringify(msg);
+		if (ws?.readyState === 1) {
+			ws.send(json);
+		} else {
+			// WS down (CLOSED/CONNECTING). Queue and let onopen flush. This
+			// is critical for `input` and `match-done`: dropping them would
+			// desync server replay from the local sim → player thinks they
+			// won, server says they lost.
+			pendingSends.push(json);
+		}
 	}
 
 	// Keyboard + touch input
 	const keysAllowed: Record<number, boolean> = {};
 	document.addEventListener('keydown', (e) => {
-		if (!matchActive || matchDone) return;
+		// Don't intercept typing in chat or other inputs
+		if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+		if (!isPlaying()) return;
 		const key = e.keyCode;
 		if (keysAllowed[key] === false) return;
 		keysAllowed[key] = false;
@@ -262,12 +627,12 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 
 	installTouchControls({
 		onAction: (a) => {
-			if (!matchActive || matchDone) return;
+			if (!isPlaying()) return;
 			myState.character.queuedActions.push(a);
 			wsSend({ type: 'input', matchId, tick: myState.tick, payload: btoa(a) });
 		},
 		onStart: () => {},
-		isPlaying: () => matchActive && !matchDone,
+		isPlaying,
 	});
 
 	// Render initial state
@@ -275,28 +640,257 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 	syncOpponent(opponentState, render, config);
 	renderFrame(scene);
 
-	// Countdown then start
-	showOverlay(`<div style="font-size:18px">vs ${opponentName}</div>`);
+	function getSeriesInfo(): string {
+		return bestOf > 1 ? `<div style="font-size:11px;opacity:0.5;margin-top:4px">Best of ${bestOf} | Game ${currentGameNumber}</div>` : '';
+	}
 
-	function startCountdown() {
-		const ms = startsAt - Date.now();
-		if (ms > 1000) {
-			showOverlay(`<div style="font-size:64px;font-weight:bold">${Math.ceil(ms / 1000)}</div>`);
-			setTimeout(startCountdown, 200);
-		} else if (ms > 0) {
-			showOverlay('<div style="font-size:64px;font-weight:bold">1</div>');
-			setTimeout(startCountdown, ms);
+	function showReadyPrompt(message?: string) {
+		setPhase('ready_prompt');
+		const msg = message ? `<div style="font-size:14px;color:#c1121f;margin-bottom:8px">${message}</div>` : '';
+		showOverlay(
+			msg +
+			`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}` +
+			`<div style="margin-top:16px"><button onclick="window.__clickReady()" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em">READY</button></div>`,
+		);
+	}
+
+	/** Shown for game 1 (needs click to unlock audio) and on series-next (auto-ready). */
+	function beginGame(isInitial: boolean) {
+		if (isInitial) {
+			showReadyPrompt();
 		} else {
-			showOverlay('<div style="font-size:64px;font-weight:bold;color:#f97316">GO!</div>');
-			setTimeout(() => {
-				hideOverlay();
-				matchActive = true;
-				lastFrameTime = performance.now();
-				tickAccumulator = 0;
-			}, 500);
+			setPhase('ready_prompt');
+			showOverlay(
+				`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}` +
+				`<div style="font-size:13px;margin-top:10px;opacity:0.7">Getting ready…</div>`,
+			);
+			setTimeout(() => { resumeAudio(); sendReady(); }, 200);
 		}
 	}
-	startCountdown();
+
+	beginGame(true);
+
+	(window as any).__clickReady = () => {
+		resumeAudio();
+		sendReady();
+	};
+
+	let readyDeadline = 0;
+
+	function sendReady() {
+		if (phase !== 'ready_prompt') return; // only from ready_prompt
+		setPhase('waiting');
+		readyDeadline = Date.now() + 10_000;
+
+		showOverlay(`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}<div style="font-size:13px;margin-top:10px;opacity:0.7">Sending ready…</div>`);
+		const waitingTimer = setTimeout(() => {
+			if (phase === 'waiting') updateWaitingOverlay();
+		}, 400);
+
+		const parsed = matchId.match(/^(.+)\/R(\d+)M(\d+)$/);
+		if (!parsed) { console.warn('[ready] bad matchId', matchId); return; }
+		const [, tid, round, slot] = parsed;
+		fetch(`/api/tournaments/${encodeURIComponent(tid)}/matches/${round}/${slot}/ready`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ nametag: playerName }),
+		}).then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+		  .then(({ ok, data }) => {
+			if (!ok) { clearTimeout(waitingTimer); return; }
+			if ((data.phase === 'started' || data.phase === 'reconnected') && data.matchStart) {
+				clearTimeout(waitingTimer);
+				const startsAt = Math.max(data.matchStart.startsAt || Date.now() + 3000, Date.now() + 1500);
+				kickCountdown(startsAt);
+			}
+		  })
+		  .catch(() => { clearTimeout(waitingTimer); });
+	}
+
+	function updateWaitingOverlay() {
+		if (phase !== 'waiting') return;
+		const remaining = Math.max(0, Math.ceil((readyDeadline - Date.now()) / 1000));
+		if (remaining === 0) {
+			showReadyPrompt('Ready expired — opponent didn\'t ready in time');
+			return;
+		}
+		showOverlay(
+			`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}` +
+			`<div style="font-size:13px;margin-top:8px;opacity:0.6">Waiting for opponent to be ready...</div>` +
+			`<div style="font-size:32px;font-weight:bold;color:#f97316;margin-top:12px">${remaining}s</div>`,
+		);
+	}
+	setInterval(() => { if (phase === 'waiting') updateWaitingOverlay(); }, 500);
+
+	/** Transition to countdown. Single-entry — second call is always a no-op. */
+	let countdownLastShown = -1;
+	let countdownActive = false;
+	function kickCountdown(countdownStart: number) {
+		if (countdownActive) return;
+		if (phase !== 'waiting' && phase !== 'ready_prompt') return;
+		countdownActive = true;
+		setPhase('countdown');
+		countdownLastShown = -1;
+		function tick() {
+			if (phase !== 'countdown') return; // phase changed under us — bail
+			const ms = countdownStart - Date.now();
+			const currentSec = Math.ceil(ms / 1000);
+			if (ms > 1000) {
+				showOverlay(`<div style="font-size:12px;color:#f97316;margin-bottom:6px;letter-spacing:.2em">GET READY</div><div style="font-size:56px;font-weight:800;line-height:1">${currentSec}</div>`);
+				if (currentSec !== countdownLastShown) { countdownLastShown = currentSec; playBeep(1); }
+				setTimeout(tick, 100);
+			} else if (ms > 0) {
+				showOverlay('<div style="font-size:12px;color:#f97316;margin-bottom:6px;letter-spacing:.2em">GET READY</div><div style="font-size:56px;font-weight:800;line-height:1">1</div>');
+				if (countdownLastShown !== 1) { countdownLastShown = 1; playBeep(1); }
+				setTimeout(tick, ms);
+			} else {
+				showOverlay('<div style="font-size:56px;font-weight:800;color:#f97316;line-height:1">GO!</div>');
+				playGameStart();
+				setTimeout(() => {
+					if (phase !== 'countdown') return;
+					hideOverlay();
+					setPhase('playing');
+					countdownActive = false;
+					lastFrameTime = performance.now();
+					tickAccumulator = 0;
+				}, 500);
+			}
+		}
+		tick();
+	}
+
+	// ── REST poll — the ONLY flow driver ─────────────────────────────
+	// WS is used exclusively for input relay. ALL state transitions are
+	// driven by this poll. No missed WS push can cause a stuck screen.
+	const reconcileMatchRegex = matchId.match(/^(.+)\/R(\d+)M(\d+)$/);
+	const stateUrl = reconcileMatchRegex
+		? `/api/tournaments/${encodeURIComponent(reconcileMatchRegex[1])}/matches/${reconcileMatchRegex[2]}/${reconcileMatchRegex[3]}/state`
+		: null;
+	const doneUrl = reconcileMatchRegex
+		? `/api/tournaments/${encodeURIComponent(reconcileMatchRegex[1])}/matches/${reconcileMatchRegex[2]}/${reconcileMatchRegex[3]}/done`
+		: null;
+
+	function resetForNextGame(s: any) {
+		currentSeed = parseInt(s.series.currentSeed, 16) >>> 0;
+		currentGameNumber = s.series.currentGame;
+		currentWinsA = s.series.winsA || 0;
+		currentWinsB = s.series.winsB || 0;
+		myState = makeInitialState(currentSeed, config);
+		opponentState = makeInitialState(currentSeed, config);
+		oppBuffer.clear();
+		oppGhostDead = false;
+		countdownActive = false;
+		tickAccumulator = 0;
+		lastFrameTime = performance.now();
+		if (render.opponent) render.opponent.root.visible = true;
+		removeDeathBanner();
+		updateSeriesHud();
+		try {
+			const p = new URLSearchParams(location.search);
+			p.set('seed', s.series.currentSeed);
+			p.set('gameNum', String(currentGameNumber));
+			p.set('winsA', String(currentWinsA));
+			p.set('winsB', String(currentWinsB));
+			history.replaceState(null, '', location.pathname + '?' + p.toString());
+		} catch {}
+		syncRender(myState, render, scene, config);
+		syncOpponent(opponentState, render, config);
+		renderFrame(scene);
+		beginGame(false);
+	}
+
+	if (stateUrl) {
+		setInterval(async () => {
+			if (phase === 'series_end') return;
+			try {
+				const r = await fetch(stateUrl);
+				if (!r.ok) return;
+				const s = await r.json();
+
+				// 1. Match complete → show result.
+				if (s.phase === 'complete' && s.winner) {
+					console.log('[poll] → series_end');
+					onMatchEnd({
+						matchId: s.matchId, winner: s.winner,
+						scoreA: s.scoreA ?? 0, scoreB: s.scoreB ?? 0,
+						seriesEnd: (s.bestOf || 1) > 1, bestOf: s.bestOf || 1,
+						wager: lastWager,
+					});
+					return;
+				}
+
+				// 2. Series advanced → show game result, then reset.
+				if (s.series && s.series.currentGame > currentGameNumber) {
+					console.log(`[poll] game ${s.series.currentGame} > ${currentGameNumber}`);
+					// Determine who won the PREVIOUS game from series score delta
+					const prevWinsA = currentWinsA;
+					const prevWinsB = currentWinsB;
+					const newWinsA = s.series.winsA || 0;
+					const newWinsB = s.series.winsB || 0;
+					const iWonGame = (mySide === 'A')
+						? (newWinsA > prevWinsA)
+						: (newWinsB > prevWinsB);
+					const myWins = mySide === 'A' ? newWinsA : newWinsB;
+					const oppWins = mySide === 'A' ? newWinsB : newWinsA;
+					// Show result briefly before resetting
+					setPhase('game_result');
+					removeDeathBanner();
+					showOverlay(
+						`<div style="font-size:26px;font-weight:bold;color:${iWonGame ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">Game ${currentGameNumber}: ${iWonGame ? 'WIN' : 'LOSS'}</div>` +
+						`<div style="font-size:12px;color:#666;letter-spacing:.2em;margin-bottom:4px">SERIES (Best of ${bestOf})</div>` +
+						`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myWins} — ${oppWins}</div>` +
+						`<div style="font-size:13px;opacity:0.7">Next game starting…</div>`,
+					);
+					setTimeout(() => resetForNextGame(s), 3000);
+					return;
+				}
+
+				// 3. Both ready → countdown.
+				if (s.ready?.A && s.ready?.B
+						&& (phase === 'waiting' || phase === 'ready_prompt')) {
+					console.log('[poll] both ready → countdown');
+					kickCountdown(Date.now() + 3000);
+					return;
+				}
+
+				// 4. Ready expired — only if we've actually been waiting
+				//    long enough for the TTL to fire (readyDeadline passed).
+				//    Without this, the very first poll sees both=false (server
+				//    hasn't processed our ready yet) and falsely expires.
+				if (phase === 'waiting' && s.ready && !s.ready.A && !s.ready.B
+						&& Date.now() > readyDeadline) {
+					console.log('[poll] ready expired');
+					showReadyPrompt('Ready expired — opponent didn\'t ready in time');
+					return;
+				}
+
+				// 5. Opponent confirmed dead by server → stop game, show win.
+				const oppSide = mySide === 'A' ? 'B' : 'A';
+				if (phase === 'playing' && s.done?.[oppSide]) {
+					setPhase('done_sent');
+					sendMatchDone();
+					removeDeathBanner();
+					showOverlay(
+						`<div style="font-size:32px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>` +
+						`<div style="font-size:16px;margin-bottom:8px">Score: ${myState.score.toLocaleString()}</div>` +
+						`<div style="font-size:13px;opacity:0.6">Waiting for final result…</div>`,
+					);
+					return;
+				}
+			} catch {}
+		}, 2000);
+	}
+
+	/** Send match-done to server via WS + REST. Idempotent. */
+	function sendMatchDone() {
+		wsSend({ type: 'match-done', matchId });
+		if (doneUrl) {
+			fetch(doneUrl, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ nametag: playerName }),
+			}).catch(() => {});
+		}
+	}
 
 	// Game loop
 	function loop() {
@@ -305,10 +899,16 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 		lastFrameTime = now;
 		delta = Math.min(delta, 0.1);
 
-		if (matchActive && !matchDone) {
+		// Only tick the sim during playing or done_sent (dead but watching ghost)
+		if (isGameActive()) {
+			const preCoinCount = myState.coinCount;
+			const preCharges = myState.flamethrowerCharges;
+			const preJumping = myState.character.isJumping;
+			const preLane = myState.character.currentLane;
+
 			tickAccumulator += delta;
-			while (tickAccumulator >= TICK_SECONDS && !matchDone) {
-				// Apply opponent inputs
+			while (tickAccumulator >= TICK_SECONDS && isGameActive()) {
+				// Apply opponent inputs to ghost
 				for (const [t, actions] of oppBuffer) {
 					if (t <= opponentState.tick) {
 						for (const a of actions) opponentState.character.queuedActions.push(a);
@@ -319,38 +919,42 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 				tick(myState, config);
 				tick(opponentState, config);
 
-				// Opponent died — notify + hide ghost
-				if (opponentState.gameOver && !oppDeathNotified) {
-					oppDeathNotified = true;
+				// Opponent ghost died — visual only
+				if (opponentState.gameOver && !oppGhostDead) {
+					oppGhostDead = true;
 					if (render.opponent) render.opponent.root.visible = false;
-					showDeathBanner('OPPONENT DOWN',
-						`Their score: ${opponentState.score}. Keep running!`);
 				}
 
-				// I died — notify
-				if (myState.gameOver && !myDeathNotified) {
-					myDeathNotified = true;
-					if (!opponentState.gameOver) {
-						showDeathBanner('YOU DIED',
-							`Your score: ${myState.score}. Watching opponent...`);
+				// Self died → transition to done_sent
+				if (myState.gameOver && phase === 'playing') {
+					playCrash();
+					setPhase('done_sent');
+					sendMatchDone();
+					if (oppGhostDead) {
+						showDeathBanner('CALCULATING RESULT', 'Both finished — server is replaying…');
+					} else {
+						showDeathBanner('YOU DIED', `Score: ${myState.score.toLocaleString()} — waiting for opponent…`);
 					}
 				}
 
-				// Both dead → match done, send to server
-				if (myState.gameOver && opponentState.gameOver && !matchDone) {
-					matchDone = true;
-					removeDeathBanner();
-					wsSend({ type: 'match-done', matchId });
-					showOverlay('<div style="font-size:16px">Waiting for result...</div>');
-					break;
-				}
+				// No early-stop on opponent ghost death. The ghost is built
+				// from relayed inputs which can lag/drop — trusting it caused
+				// controls to lock up mid-game. Player keeps playing until
+				// THEY die. Server determines the winner.
 
 				tickAccumulator -= TICK_SECONDS;
 			}
+
+			// Sound effects
+			if (myState.coinCount > preCoinCount) playCoinCollect(myState.lastCollectedTier || 'gold');
+			if (myState.flamethrowerCharges > preCharges) playPowerupCollect();
+			if (myState.flameJustFired) playFlameActivate();
+			if (myState.character.isJumping && !preJumping) playJump();
+			if (myState.character.currentLane !== preLane && !preJumping) playLaneSwitch();
 		}
 
 		// Update opponent HUD
-		if (matchActive && !matchDone) updateOppHud();
+		if (phase === 'playing') updateOppHud();
 
 		syncRender(myState, render, scene, config);
 		if (!opponentState.gameOver) syncOpponent(opponentState, render, config);
@@ -364,25 +968,76 @@ function startV2Match(params: URLSearchParams, skin: CharacterSkin) {
 // Single-player (unchanged from before)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
+async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	const seedParam = params.get('seed');
 	const seed = seedParam
 		? parseInt(seedParam, 10) >>> 0
 		: (Math.random() * 0xffffffff) >>> 0;
 	console.log('Boxy Run seed:', seed, 'skin:', skin.name);
 
+	// Fetch and display game balance
+	const tag = getPlayerNametag();
+	const balance = await fetchGameBalance();
+	updateBalanceDisplay(balance);
+
+	const needsPayment = tag && balance !== null && balance >= ENTRY_FEE;
+	const canPlayFree = !tag; // dev mode, no identity
+
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
 	const render = createRenderState(scene, skin);
 	const state = makeInitialState(seed, config);
 	let paused = true;
+	let stopped = false;
+	let entryPaid = false;
 
 	syncRender(state, render, scene, config);
 	renderFrame(scene);
 
+	const menuBtn = `<div style="margin-top:16px"><button onclick="location.href='index.html'" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em">MENU</button></div>`;
+	const playBtn = `<button onclick="window.__boxyPay()" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em">PAY & PLAY</button>`;
+
+	// Show appropriate start message
+	if (canPlayFree) {
+		showOverlay('Press any key to start' + menuBtn);
+	} else if (needsPayment) {
+		showOverlay(`Pay ${ENTRY_FEE} UCT to play<br><br>${playBtn}${menuBtn}`);
+	} else if (tag && (balance === null || balance < ENTRY_FEE)) {
+		showOverlay(`Insufficient balance (${balance ?? 0} UCT)<br>Need ${ENTRY_FEE} UCT to play<br><br><a href="index.html" style="color:#00e5ff">Deposit on Home Page</a>${menuBtn}`);
+	}
+
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
 	const keysAllowed: Record<number, boolean> = {};
+
+	async function tryStart() {
+		if (canPlayFree || entryPaid) {
+			paused = false;
+			lastFrameTime = performance.now();
+			tickAccumulator = 0;
+			hideOverlay();
+			return;
+		}
+		if (!tag) return;
+		showOverlay('Paying...');
+		const ok = await deductEntryFee();
+		if (ok) {
+			entryPaid = true;
+			const newBal = await fetchGameBalance();
+			updateBalanceDisplay(newBal);
+			paused = false;
+			lastFrameTime = performance.now();
+			tickAccumulator = 0;
+			hideOverlay();
+		} else {
+			showOverlay('Payment failed. Try again.<br><br><button onclick="window.__boxyPay()" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em">RETRY</button>' + menuBtn);
+		}
+	}
+
+	(window as any).__boxyPay = tryStart;
+
+	// Use AbortController so listeners are cleaned up on restart
+	const ac = new AbortController();
 
 	document.addEventListener('keydown', (e) => {
 		if (state.gameOver) return;
@@ -391,12 +1046,13 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 		keysAllowed[key] = false;
 
 		if (paused && key > 18) {
-			if (!walletCanPlay()) return; // deposit required
-			paused = false;
-			lastFrameTime = performance.now();
-			tickAccumulator = 0;
-			hideOverlay();
-			getWallet()?.updateUI('playing');
+			if (canPlayFree || entryPaid) {
+				paused = false;
+				lastFrameTime = performance.now();
+				tickAccumulator = 0;
+				hideOverlay();
+				return;
+			}
 			return;
 		}
 		if (key === KEY_P) {
@@ -408,57 +1064,96 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 		if (paused) return;
 		const action = keyToAction(key);
 		if (action) state.character.queuedActions.push(action);
-	});
-	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; });
+	}, { signal: ac.signal });
+	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; }, { signal: ac.signal });
 
 	installTouchControls({
 		onAction: (a) => {
 			if (!paused && !state.gameOver) state.character.queuedActions.push(a);
 		},
 		onStart: () => {
-			if (paused && !state.gameOver && walletCanPlay()) {
+			if (paused && !state.gameOver && (canPlayFree || entryPaid)) {
 				paused = false;
 				lastFrameTime = performance.now();
 				tickAccumulator = 0;
 				hideOverlay();
-				getWallet()?.updateUI('playing');
 			}
 		},
 		isPlaying: () => !paused && !state.gameOver,
 	});
 
+	function restart() {
+		stopped = true;
+		ac.abort(); // remove old event listeners
+		const world = document.getElementById('world');
+		if (world) world.innerHTML = '';
+		const scoreEl = document.getElementById('score');
+		const coinsEl = document.getElementById('coins');
+		if (scoreEl) scoreEl.textContent = '0';
+		if (coinsEl) coinsEl.textContent = '0';
+		// Remove flame indicator if present
+		const flameEl = document.getElementById('flame-indicator');
+		if (flameEl) flameEl.remove();
+		startSinglePlayer(params, skin);
+	}
+
+	(window as any).__boxyRestart = restart;
+
+	// Audio state tracking
+	let prevCoinCount = 0;
+	let prevPowerupCount = state.powerups.length;
+	let prevHasFlame = false;
+	let prevFlameTicks = 0;
+	let prevIsJumping = false;
+	let prevLane = 0;
+	let gameStarted = false;
+
 	function loop() {
+		if (stopped) return;
 		const now = performance.now();
 		let delta = (now - lastFrameTime) / 1000;
 		lastFrameTime = now;
 		delta = Math.min(delta, 0.1);
 		if (!paused && !state.gameOver) {
+			if (!gameStarted) { gameStarted = true; playGameStart(); }
+			const preCoinCount = state.coinCount;
+			const preCharges = state.flamethrowerCharges;
+			const preJumping = state.character.isJumping;
+			const preLane = state.character.currentLane;
+
 			tickAccumulator += delta;
 			while (tickAccumulator >= TICK_SECONDS && !state.gameOver) {
 				tick(state, config);
 				tickAccumulator -= TICK_SECONDS;
 			}
+
+			// Detect events and play sounds
+			if (state.coinCount > preCoinCount) {
+				playCoinCollect(state.lastCollectedTier || 'gold');
+			}
+			if (state.flamethrowerCharges > preCharges) playPowerupCollect();
+			if (state.flameJustFired) playFlameActivate();
+			if (state.character.isJumping && !preJumping) playJump();
+			if (state.character.currentLane !== preLane && !preJumping) playLaneSwitch();
 		}
 		syncRender(state, render, scene, config);
 		renderFrame(scene);
 		if (state.gameOver && !paused) {
 			paused = true;
-			const w = getWallet();
-			if (w?.isConnected) {
-				w.requestPayout(state.coinCount);
-				w.resetDeposit();
-				w.updateUI('gameover');
-				showOverlay(
-					`Game over! You earned <strong>${state.coinCount} ${w.coinId}</strong>`,
-				);
-			} else {
-				showOverlay(
-					`Game over! Score: ${state.score}, Coins: ${state.coinCount}. Reload to try again.`,
-				);
-			}
-			// Submit score to leaderboard API
-			const nickname = walletNametag() || 'anonymous';
+			playCrash();
+			// Submit score + credit coins to ledger
+			const nickname = getPlayerNametag() || 'anonymous';
 			submitScore(nickname, state.score, state.coinCount);
+			// Refresh balance display
+			fetchGameBalance().then(updateBalanceDisplay);
+
+			showOverlay(
+				`<div style="margin-bottom:8px"><strong>GAME OVER</strong></div>` +
+				`<div style="font-size:0.85em;margin-bottom:4px">Score: ${state.score.toLocaleString()}</div>` +
+				`<div style="font-size:0.85em;margin-bottom:16px">Coins: ${state.coinCount}</div>` +
+				`<button onclick="window.__boxyRestart()" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em">PLAY AGAIN</button>` +
+				`<div style="margin-top:12px">${menuBtn}</div>`,
+			);
 		}
 		requestAnimationFrame(loop);
 	}
@@ -474,529 +1169,6 @@ function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Tournament mode
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function startTournamentMode(params: URLSearchParams, skin: CharacterSkin) {
-	const name = params.get('name') || '@player';
-	const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-	const serverUrl = params.get('server') || `${wsProto}//${location.host}`;
-	const tournamentId = params.get('tid') || 'boxyrun-alpha-1';
-	console.log(`Tournament mode: ${name} → ${serverUrl} (${tournamentId}) skin: ${skin.name}`);
-
-	const config = DEFAULT_CONFIG;
-	const scene = createScene();
-	const render = createRenderState(scene, skin, true);
-
-	// Start with a placeholder sim so the world renders while we wait
-	let myState: GameState = makeInitialState(0, config);
-	let opponentState: GameState | null = null;
-	let matchId: string | null = null;
-	let mySide: 'A' | 'B' = 'A';
-	let matchActive = false;
-	let matchOver = false;
-	let resultSubmitted = false;
-	let opponentDeathNotified = false;
-	let myDeathNotified = false;
-	let inTournament = false; // true while in any active tournament (may span multiple rounds)
-	/** Buffered opponent inputs keyed by tick number. */
-	const opponentInputBuffer: Map<number, CharacterAction[]> = new Map();
-
-	let lastFrameTime = performance.now();
-	let tickAccumulator = 0;
-	const keysAllowed: Record<number, boolean> = {};
-
-	showOverlay(`Connecting to ${serverUrl}...`);
-
-	const client = new TournamentClient({
-		url: serverUrl,
-		nametag: name,
-		pubkey: name.replace('@', '') + '00'.repeat(31),
-
-		onRegistered: (msg) => {
-			console.log('Registered. Online players:', msg.onlinePlayers);
-			showOverlay('Waiting for match...');
-			// If no match arrives within 3 seconds and we're not in a
-			// tournament waiting between rounds, show options.
-			setTimeout(() => {
-				if (!matchId && !matchActive && !inTournament) {
-					showOverlay(
-						'<div style="font-size:16px;margin-bottom:16px">No active match</div>' +
-						rematchButton() + backToArenaLink(),
-					);
-				}
-			}, 3000);
-		},
-
-		onChallengeReceived: (msg) => {
-			console.log(`Challenge from ${msg.from}, wager: ${msg.wager}`);
-			// Show accept/decline UI instead of auto-accepting.
-			// This prevents the case where one player clicks REMATCH
-			// while the other is navigating away.
-			showOverlay(
-				`<div style="font-size:18px;font-weight:bold;margin-bottom:12px">${msg.from} wants a rematch!</div>` +
-				`<button onclick="window.__acceptChallenge('${msg.challengeId}')" style="${BTN_STYLE}font-size:14px;background:#2d6a4f;border-color:#2d6a4f">ACCEPT</button>` +
-				`<button onclick="window.__declineChallenge('${msg.challengeId}')" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">DECLINE</button>`,
-			);
-		},
-
-		onTournamentAssigned: (msg) => {
-			console.log(`Assigned to tournament ${msg.tournamentId} (${msg.tournamentType})`);
-			lastTournamentType = msg.tournamentType;
-			inTournament = true;
-			showOverlay('Tournament found! Waiting for bracket...');
-		},
-
-		onQueueState: (msg) => {
-			const countdown = msg.startsAt
-				? `<br>Starting in ${Math.ceil((msg.startsAt - Date.now()) / 1000)}s`
-				: '';
-			showOverlay(
-				`In queue: position ${msg.position} of ${msg.total}${countdown}`,
-			);
-		},
-
-		onLobbyState: (msg) => {
-			showOverlay(
-				`Lobby: ${msg.players.length}/${msg.capacity} players<br>` +
-				msg.players.map((p) => p.nametag).join(', ') +
-				'<br><br>Waiting for more players...',
-			);
-		},
-
-		onBracket: (msg) => {
-			console.log('Bracket received:', msg.rounds);
-			// Show bracket info for multi-round tournaments
-			if (msg.rounds && msg.rounds.length > 1) {
-				const totalPlayers = msg.rounds[0].length * 2;
-				const totalRounds = msg.rounds.length;
-				console.log(`Tournament: ${totalPlayers} players, ${totalRounds} rounds`);
-			}
-		},
-
-		onRoundOpen: (msg) => {
-			matchId = msg.matchId;
-			lastOpponentName = msg.opponent;
-			showOverlay(
-				`Match ready! vs ${msg.opponent}<br><br>` +
-				readyButton(),
-			);
-		},
-
-		onOpponentReady: (msg) => {
-			if (msg.ready && matchId) {
-				showOverlay(
-					`Opponent is ready!<br><br>` +
-					readyButton(),
-				);
-			}
-		},
-
-		onMatchStart: (msg) => {
-			console.log('Match start!', msg);
-			matchId = msg.matchId;
-			mySide = msg.youAre;
-			const seed = parseInt(msg.seed, 16) >>> 0;
-
-			// Create fresh sims from the match seed
-			myState = makeInitialState(seed, config);
-			opponentState = makeInitialState(seed, config);
-			matchOver = false;
-			resultSubmitted = false;
-			opponentDeathNotified = false;
-			myDeathNotified = false;
-
-			// Clear opponent input buffer and add opponent to scene
-			opponentInputBuffer.clear();
-			removeOpponentMesh(render, scene);
-			addOpponentMesh(render, scene);
-
-			// Render the world once so both characters are visible during countdown
-			syncRender(myState, render, scene, config);
-			if (opponentState) syncOpponent(opponentState, render, config);
-			renderFrame(scene);
-
-			// Synchronized countdown using the server's startsAt timestamp.
-			// Both clients compute the same wall-clock start time, so they
-			// begin ticking within ~network-latency of each other.
-			matchActive = false;
-			const startTime = msg.startsAt;
-			const updateCountdown = () => {
-				const msLeft = startTime - Date.now();
-				if (msLeft > 1000) {
-					const secs = Math.ceil(msLeft / 1000);
-					showOverlay(`<div style="font-size:64px;font-weight:bold">${secs}</div>`);
-					setTimeout(updateCountdown, 200);
-				} else if (msLeft > 0) {
-					showOverlay(`<div style="font-size:64px;font-weight:bold">1</div>`);
-					setTimeout(updateCountdown, msLeft);
-				} else {
-					showOverlay(`<div style="font-size:64px;font-weight:bold;color:#f97316">GO!</div>`);
-					matchActive = true;
-					lastFrameTime = performance.now();
-					tickAccumulator = 0;
-					setTimeout(hideOverlay, 500);
-				}
-			};
-			updateCountdown();
-		},
-
-		onOpponentInput: (msg) => {
-			if (!opponentState) return;
-			try {
-				const action = atob(msg.payload) as CharacterAction;
-				if (action === 'up' || action === 'left' || action === 'right') {
-					// Buffer by tick so we apply at the right moment
-					const tick = msg.tick;
-					if (!opponentInputBuffer.has(tick)) {
-						opponentInputBuffer.set(tick, []);
-					}
-					opponentInputBuffer.get(tick)!.push(action);
-				}
-			} catch {
-				// ignore malformed payloads
-			}
-		},
-
-		onMatchEnd: (msg) => {
-			console.log('Match end:', msg);
-			removeOpponentHud();
-			const iWon = msg.winner === name;
-			const myScore = msg.scores?.[name] ?? myState.score;
-			const oppScore = msg.scores?.[lastOpponentName] ?? 0;
-			saveLastResult(msg.winner, myScore, oppScore);
-
-			// Reset match state so we can accept the next round
-			matchId = null;
-			matchActive = false;
-			matchOver = false;
-			resultSubmitted = false;
-			opponentDeathNotified = false;
-			myDeathNotified = false;
-			if (render.opponent) render.opponent.root.visible = false;
-
-			let statusHtml: string;
-			if (msg.reason === 'dq') {
-				statusHtml = iWon
-					? '<div style="font-size:24px;font-weight:bold;color:#FFD700;margin-bottom:8px">OPPONENT DISQUALIFIED</div>'
-					: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU HAVE BEEN DISQUALIFIED</div>';
-			} else {
-				statusHtml = iWon
-					? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>'
-					: '<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">YOU LOSE</div>';
-			}
-
-			const scoreHtml = `<div style="font-size:16px;margin-bottom:16px">Your score: ${myScore} vs Opponent: ${oppScore}</div>`;
-
-			if (iWon && inTournament) {
-				// Won this round — might have a next round coming
-				showOverlay(
-					statusHtml + scoreHtml +
-					'<div style="font-size:14px;color:#666">Waiting for next round...</div>',
-				);
-			} else {
-				// Lost or final match
-				inTournament = false;
-				showOverlay(
-					statusHtml + scoreHtml +
-					rematchButton() + backToArenaLink(),
-				);
-			}
-		},
-
-		onTournamentEnd: (msg) => {
-			console.log('Tournament end:', msg);
-			inTournament = false;
-
-			let resultText = '';
-			if (msg.standings && msg.standings.length > 0) {
-				const champion = msg.standings[0]?.nametag || '?';
-				const isMe = champion === name;
-				resultText = isMe
-					? '<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:12px">YOU WIN!</div>'
-					: `<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:12px">Winner: ${champion}</div>`;
-				resultText += msg.standings
-					.map((s) => `<div style="margin:4px 0">#${s.place} ${s.nametag}</div>`)
-					.join('');
-			} else {
-				resultText = '<div style="font-size:18px;margin-bottom:12px">Match complete</div>';
-			}
-			showOverlay(
-				resultText + '<br>' +
-				rematchButton() + backToArenaLink(),
-			);
-		},
-
-		onError: (msg) => {
-			console.error('Tournament error:', msg);
-			// Suppress non-critical errors during gameplay (match_not_active
-			// happens after match ends while inputs are still being sent)
-			if (matchActive && (msg.code === 'match_not_active' || msg.code === 'match_not_active')) {
-				return;
-			}
-			// Only show error in overlay if we're not in a match
-			if (!matchActive) {
-				showOverlay(
-					`Error: ${msg.message}<br><br>` +
-					rematchButton() + backToArenaLink(),
-				);
-			}
-		},
-	});
-
-	// Connect and register. The server will re-send tournament state
-	// if we're already assigned to one (e.g., redirected from the
-	// tournament page after accepting a challenge).
-	const mode = params.get('mode') || 'queue';
-	const opponent = params.get('opponent') || '';
-
-	client
-		.connect()
-		.then(() => {
-			console.log('Connected to tournament server');
-			client.register();
-
-			if (mode === 'challenge' && opponent) {
-				setTimeout(() => {
-					client.challenge(opponent);
-					showOverlay(`Challenge sent to ${opponent}...<br>Waiting for response`);
-				}, 200);
-			} else if (mode === 'queue') {
-				setTimeout(() => {
-					client.joinQueue();
-					showOverlay('Joined queue...<br>Waiting for players');
-				}, 200);
-			}
-			// For mode=legacy or any other mode: just register and wait.
-			// The server re-sends tournament-assigned + bracket + round-open
-			// if we're already in a tournament.
-		})
-		.catch((err) => {
-			showOverlay(`Failed to connect: ${err}`);
-		});
-
-	// Keyboard: ENTER to ready, gameplay keys during match
-	document.addEventListener('keydown', (e) => {
-		const key = e.keyCode;
-		if (keysAllowed[key] === false) return;
-		keysAllowed[key] = false;
-
-		if (key === KEY_ENTER && matchId && !matchActive) {
-			client.ready(matchId);
-			showOverlay('Waiting for opponent...');
-			return;
-		}
-
-		if (!matchActive || matchOver) return;
-
-		const action = keyToAction(key);
-		if (action) {
-			myState.character.queuedActions.push(action);
-			if (matchId && !resultSubmitted) {
-				client.sendInput(matchId, myState.tick, btoa(action));
-			}
-		}
-	});
-	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; });
-
-	installTouchControls({
-		onAction: (a) => {
-			if (matchActive && !matchOver) {
-				myState.character.queuedActions.push(a);
-				if (matchId && !resultSubmitted) client.sendInput(matchId, myState.tick, btoa(a));
-			}
-		},
-		onStart: () => {
-			if (typeof (window as any).__ready === 'function') {
-				(window as any).__ready();
-			}
-		},
-		isPlaying: () => matchActive && !matchOver,
-	});
-
-	// Main loop
-	function loop() {
-		const now = performance.now();
-		let delta = (now - lastFrameTime) / 1000;
-		lastFrameTime = now;
-		delta = Math.min(delta, 0.1);
-
-		if (matchActive && !matchOver) {
-			tickAccumulator += delta;
-			while (tickAccumulator >= TICK_SECONDS && !matchOver) {
-				// Apply any buffered opponent inputs for this tick
-				// BEFORE advancing the opponent's sim, so the inputs
-				// take effect at the same tick they were generated.
-				if (opponentState) {
-					const oppTick = opponentState.tick;
-					const buffered = opponentInputBuffer.get(oppTick);
-					if (buffered) {
-						for (const action of buffered) {
-							opponentState.character.queuedActions.push(action);
-						}
-						opponentInputBuffer.delete(oppTick);
-					}
-					// Also apply any inputs from earlier ticks that we
-					// might have missed (arrived late). Better late than
-					// never — apply them now so the sim doesn't diverge.
-					for (const [t, actions] of opponentInputBuffer) {
-						if (t <= oppTick) {
-							for (const action of actions) {
-								opponentState.character.queuedActions.push(action);
-							}
-							opponentInputBuffer.delete(t);
-						}
-					}
-				}
-
-				// Advance both sims. tick() no-ops on a dead sim, so
-				// only the surviving player's sim keeps progressing.
-				tick(myState, config);
-				if (opponentState) tick(opponentState, config);
-
-				// Notify when opponent dies (match continues — survivor keeps running)
-				if (opponentState?.gameOver && !opponentDeathNotified) {
-					opponentDeathNotified = true;
-					// Hide opponent character from the scene
-					if (render.opponent) render.opponent.root.visible = false;
-					showDeathBanner(
-						'OPPONENT DOWN',
-						`Their final score: ${opponentState.score}. Keep running to beat it!`,
-					);
-				}
-
-				// Notify when I die (match continues — I watch the opponent)
-				if (myState.gameOver && !myDeathNotified) {
-					myDeathNotified = true;
-					if (!opponentState?.gameOver) {
-						showDeathBanner(
-							'YOU DIED',
-							`Your score: ${myState.score}. Watching opponent...`,
-						);
-					}
-				}
-
-				// Match ends when BOTH are dead (or time cap)
-				const bothDead = myState.gameOver && (opponentState?.gameOver ?? true);
-				if (bothDead && !resultSubmitted && matchId) {
-					matchOver = true;
-					matchActive = false;
-					resultSubmitted = true;
-					removeDeathBanner();
-
-					const myScore = myState.score;
-
-					// Each player reports their OWN score. The server
-					// compares both submissions to determine the winner.
-					// We use a fixed resultHash so both sides always
-					// "agree" — the server adjudicates from the scores.
-					// (Proper hash agreement requires rollback netcode
-					// to keep both sims in perfect sync, which is a
-					// future improvement.)
-					const scores = {
-						A: mySide === 'A' ? myScore : 0,
-						B: mySide === 'B' ? myScore : 0,
-					};
-
-					const resultHash = 'server-adjudicated';
-
-					client.submitResult(
-						matchId,
-						myState.tick,
-						scores,
-						mySide, // report self as winner; server decides
-						'inputs-stub',
-						resultHash,
-					);
-
-					// Show "waiting for result" until match-end arrives
-					// with the server's winner determination
-					showOverlay(
-						`<div style="font-size:16px;margin-bottom:8px">Your score: ${myScore}</div>` +
-						`<div style="font-size:14px;color:#666">Waiting for final result...</div>`,
-					);
-					break;
-				}
-
-				tickAccumulator -= TICK_SECONDS;
-			}
-		}
-
-		// Update opponent HUD if in tournament
-		if (opponentState && matchActive) {
-			updateOpponentHud(opponentState);
-		}
-
-		// Render my sim (my character + world from my perspective)
-		syncRender(myState, render, scene, config);
-		// Render opponent character from their sim state
-		if (opponentState) syncOpponent(opponentState, render, config);
-		renderFrame(scene);
-
-		requestAnimationFrame(loop);
-	}
-
-	// Accept/decline rematch challenges
-	(window as any).__acceptChallenge = (challengeId: string) => {
-		client.acceptChallenge(challengeId);
-		showOverlay('Challenge accepted! Starting match...');
-	};
-	(window as any).__declineChallenge = (challengeId: string) => {
-		client.declineChallenge(challengeId);
-		showOverlay(
-			`Challenge declined.<br><br>` + backToArenaLink(),
-		);
-	};
-
-	// Ready up for a match
-	(window as any).__ready = () => {
-		console.log('[game] __ready called, matchId=', matchId, 'matchActive=', matchActive);
-		if (matchId && !matchActive) {
-			client.ready(matchId);
-			showOverlay('Waiting for opponent...');
-		}
-	};
-
-	// Rematch: send a new challenge to the same opponent
-	(window as any).__rematch = () => {
-		console.log('[game] __rematch called, opponent=', lastOpponentName, 'connected=', client.isConnected());
-		if (!lastOpponentName) {
-			showOverlay('No opponent to rematch.<br><br>' + backToArenaLink());
-			return;
-		}
-		if (!client.isConnected()) {
-			showOverlay('Disconnected from server.<br><br>' + backToArenaLink());
-			return;
-		}
-		showOverlay(`Sending rematch to ${lastOpponentName}...`);
-		// Reset match state so we can accept a new tournament
-		matchId = null;
-		matchActive = false;
-		matchOver = false;
-		resultSubmitted = false;
-		opponentDeathNotified = false;
-		myDeathNotified = false;
-		removeOpponentHud();
-		removeDeathBanner();
-		if (render.opponent) render.opponent.root.visible = false;
-		client.challenge(lastOpponentName);
-	};
-
-	// Expose debug state
-	(window as any).__boxyDebug = {
-		get myState() { return myState; },
-		get opponentState() { return opponentState; },
-		get matchId() { return matchId; },
-		get mySide() { return mySide; },
-		get matchActive() { return matchActive; },
-	};
-
-	syncRender(myState, render, scene, config);
-	renderFrame(scene);
-	requestAnimationFrame(loop);
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Shared utilities
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1004,191 +1176,12 @@ function keyToAction(key: number): CharacterAction | null {
 	if (key === KEY_UP || key === KEY_W) return 'up';
 	if (key === KEY_LEFT || key === KEY_A) return 'left';
 	if (key === KEY_RIGHT || key === KEY_D) return 'right';
+	if (key === KEY_DOWN || key === KEY_F) return 'fire';
 	return null;
 }
 
-function showOverlay(text: string): void {
-	const el = document.getElementById('variable-content');
-	if (el) {
-		el.style.visibility = 'visible';
-		el.innerHTML = text;
-	}
-}
-
-function hideOverlay(): void {
-	const el = document.getElementById('variable-content');
-	if (el) el.style.visibility = 'hidden';
-	const controls = document.getElementById('controls');
-	if (controls) controls.style.display = 'none';
-}
-
-/** Floating opponent HUD — created once, updated per frame. */
-let opponentHudEl: HTMLElement | null = null;
-
-function updateOpponentHud(oppState: GameState): void {
-	if (!opponentHudEl) {
-		opponentHudEl = document.createElement('div');
-		opponentHudEl.id = 'opponent-hud';
-		opponentHudEl.style.cssText =
-			'position:fixed;top:16px;right:16px;z-index:100;' +
-			'background:rgba(0,0,0,0.7);color:#e35d6a;' +
-			'padding:10px 16px;border-radius:6px;' +
-			'font-family:monospace;font-size:14px;' +
-			'border:1px solid rgba(227,93,106,0.3);' +
-			'pointer-events:none;';
-		document.body.appendChild(opponentHudEl);
-	}
-	const status = oppState.gameOver ? ' [DEAD]' : '';
-	opponentHudEl.innerHTML =
-		`<span style="font-size:11px;opacity:0.6">OPPONENT</span><br>` +
-		`Score: ${oppState.score}${status}`;
-}
-
-function removeOpponentHud(): void {
-	if (opponentHudEl) {
-		opponentHudEl.remove();
-		opponentHudEl = null;
-	}
-}
-
-/** Mid-match death banner — shown when one player dies but the match continues. */
-let deathBannerEl: HTMLElement | null = null;
-
-function showDeathBanner(title: string, subtitle: string): void {
-	removeDeathBanner();
-	deathBannerEl = document.createElement('div');
-	deathBannerEl.style.cssText =
-		'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:150;' +
-		'background:rgba(0,0,0,0.5);color:#fff;opacity:0.8;' +
-		'padding:12px 24px;border-radius:8px;text-align:center;' +
-		'font-family:monospace;pointer-events:none;' +
-		'border:1px solid rgba(255,255,255,0.1);' +
-		'animation:fadeInBanner 0.3s ease;backdrop-filter:blur(4px);';
-	deathBannerEl.innerHTML =
-		`<span style="font-size:14px;font-weight:bold;letter-spacing:0.1em">${title}</span>` +
-		`<span style="font-size:12px;color:#94a3b8;margin-left:12px">${subtitle}</span>`;
-
-	if (!document.getElementById('death-banner-style')) {
-		const style = document.createElement('style');
-		style.id = 'death-banner-style';
-		style.textContent = '@keyframes fadeInBanner{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:0.8;transform:translateX(-50%) translateY(0)}}';
-		document.head.appendChild(style);
-	}
-
-	document.body.appendChild(deathBannerEl);
-
-	// Fade further after 2 seconds
-	setTimeout(() => {
-		if (deathBannerEl) {
-			deathBannerEl.style.transition = 'opacity 0.5s';
-			deathBannerEl.style.opacity = '0.3';
-		}
-	}, 2000);
-}
-
-function removeDeathBanner(): void {
-	if (deathBannerEl) {
-		deathBannerEl.remove();
-		deathBannerEl = null;
-	}
-}
-
-// ── Touch controls ───────────────────────────────────────────────
-const SWIPE_THRESHOLD = 30;
-const TAP_THRESHOLD_MS = 200;
-
-/**
- * Install touch handlers for mobile. `onAction` is called with
- * the character action; `onStart` is called on tap when the game
- * hasn't started yet. Prevents scroll/zoom during gameplay.
- */
-function installTouchControls(opts: {
-	onAction: (a: CharacterAction) => void;
-	onStart: () => void;
-	isPlaying: () => boolean;
-}): void {
-	let startX = 0;
-	let startY = 0;
-	let startTime = 0;
-
-	document.addEventListener(
-		'touchmove',
-		(e) => { if (opts.isPlaying()) e.preventDefault(); },
-		{ passive: false },
-	);
-
-	document.addEventListener(
-		'touchstart',
-		(e) => {
-			if (!opts.isPlaying()) {
-				// Tap to start
-				opts.onStart();
-				return;
-			}
-			const touch = e.touches[0];
-			startX = touch.clientX;
-			startY = touch.clientY;
-			startTime = Date.now();
-		},
-		{ passive: true },
-	);
-
-	document.addEventListener(
-		'touchend',
-		(e) => {
-			if (!opts.isPlaying()) return;
-			const touch = e.changedTouches[0];
-			const dx = touch.clientX - startX;
-			const dy = touch.clientY - startY;
-			const elapsed = Date.now() - startTime;
-			const absDx = Math.abs(dx);
-			const absDy = Math.abs(dy);
-
-			if (absDx < SWIPE_THRESHOLD && absDy < SWIPE_THRESHOLD && elapsed < TAP_THRESHOLD_MS) {
-				opts.onAction('up'); // tap = jump
-			} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
-				opts.onAction('up'); // swipe up = jump
-			} else if (absDx > absDy) {
-				if (dx < -SWIPE_THRESHOLD) opts.onAction('left');
-				else if (dx > SWIPE_THRESHOLD) opts.onAction('right');
-			}
-		},
-		{ passive: true },
-	);
-}
 
 const BTN_STYLE = 'padding:12px 32px;background:#1a1a2e;color:#fff;border:2px solid #1a1a2e;border-radius:6px;font-family:monospace;font-weight:bold;cursor:pointer;letter-spacing:0.1em;text-decoration:none;display:inline-block;margin:6px;';
-
-function readyButton(): string {
-	return `<button onclick="window.__ready()" style="${BTN_STYLE}font-size:18px;background:#f97316;border-color:#f97316;color:#fff">READY</button>`;
-}
-
-function rematchButton(): string {
-	if (!lastOpponentName) return '';
-	// Only show rematch for 1v1 challenges, not quick match
-	if (lastTournamentType === 'rolling') return '';
-	return `<button onclick="window.__rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>`;
-}
-
-function backToArenaLink(): string {
-	const tab = lastTournamentType === 'rolling' ? '#quickmatch' : '';
-	return `<a href="tournament.html${tab}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK TO ARENA</a>`;
-}
-
-/** Store last match result for display on the arena page. */
-function saveLastResult(winner: string, myScore: number, oppScore: number): void {
-	try {
-		sessionStorage.setItem('lastMatchResult', JSON.stringify({
-			winner,
-			myName: lastOpponentName ? name : '',
-			oppName: lastOpponentName,
-			myScore,
-			oppScore,
-			type: lastTournamentType,
-			timestamp: Date.now(),
-		}));
-	} catch {}
-}
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */
 function submitScore(nickname: string, score: number, coins: number): void {
@@ -1201,111 +1194,3 @@ function submitScore(nickname: string, score: number, coins: number): void {
 		.catch((e) => console.log('Score submission failed (API may be offline):', e));
 }
 
-/**
- * Full-screen character selector overlay. Shows a grid of skin
- * options; clicking one invokes the callback and removes the overlay.
- */
-function showSkinSelector(onSelect: (skin: CharacterSkin) => void): void {
-	const overlay = document.createElement('div');
-	overlay.id = 'skin-selector';
-	overlay.style.cssText =
-		'position:fixed;inset:0;z-index:200;' +
-		'background:rgba(0,0,0,0.85);' +
-		'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-		'font-family:monospace;color:#e2e8f0;';
-
-	const title = document.createElement('div');
-	title.style.cssText =
-		'font-size:24px;font-weight:bold;margin-bottom:8px;letter-spacing:0.1em;';
-	title.textContent = 'CHOOSE YOUR RUNNER';
-	overlay.appendChild(title);
-
-	const sub = document.createElement('div');
-	sub.style.cssText = 'font-size:13px;color:#64748b;margin-bottom:32px;';
-	sub.textContent = 'Each coin collected adds 250 to your score';
-	overlay.appendChild(sub);
-
-	const grid = document.createElement('div');
-	grid.style.cssText =
-		'display:grid;grid-template-columns:repeat(4,1fr);gap:16px;' +
-		'max-width:560px;width:90%;';
-
-	for (const skin of SKINS) {
-		const card = document.createElement('button');
-		const hex = '#' + skin.preview.toString(16).padStart(6, '0');
-		card.style.cssText =
-			'background:rgba(255,255,255,0.05);border:2px solid rgba(255,255,255,0.1);' +
-			'border-radius:8px;padding:16px 8px;cursor:pointer;' +
-			'display:flex;flex-direction:column;align-items:center;gap:10px;' +
-			'transition:all 0.2s;color:#e2e8f0;font-family:monospace;';
-
-		// Character preview — a simple figure with colored shirt
-		const figure = document.createElement('div');
-		figure.style.cssText =
-			'width:40px;height:60px;position:relative;';
-
-		// Head
-		const head = document.createElement('div');
-		const skinHex = '#' + skin.colors.skin.toString(16).padStart(6, '0');
-		const hairHex = '#' + skin.colors.hair.toString(16).padStart(6, '0');
-		head.style.cssText =
-			`width:20px;height:20px;background:${skinHex};` +
-			`border-radius:4px;margin:0 auto;position:relative;` +
-			`border-top:4px solid ${hairHex};`;
-		figure.appendChild(head);
-
-		// Torso (shirt)
-		const torso = document.createElement('div');
-		torso.style.cssText =
-			`width:28px;height:22px;background:${hex};` +
-			'border-radius:3px;margin:2px auto 0;';
-		figure.appendChild(torso);
-
-		// Shorts
-		const shortsHex = '#' + skin.colors.shorts.toString(16).padStart(6, '0');
-		const shorts = document.createElement('div');
-		shorts.style.cssText =
-			`width:28px;height:10px;background:${shortsHex};` +
-			'border-radius:0 0 3px 3px;margin:1px auto 0;';
-		figure.appendChild(shorts);
-
-		// Legs
-		const legs = document.createElement('div');
-		legs.style.cssText =
-			`width:20px;height:12px;margin:1px auto 0;` +
-			`display:flex;gap:4px;justify-content:center;`;
-		const legL = document.createElement('div');
-		legL.style.cssText = `width:6px;height:12px;background:${skinHex};border-radius:2px;`;
-		const legR = legL.cloneNode(true) as HTMLElement;
-		legs.appendChild(legL);
-		legs.appendChild(legR);
-		figure.appendChild(legs);
-
-		card.appendChild(figure);
-
-		const label = document.createElement('div');
-		label.style.cssText = 'font-size:11px;font-weight:600;letter-spacing:0.1em;';
-		label.textContent = skin.name.toUpperCase();
-		card.appendChild(label);
-
-		card.addEventListener('mouseenter', () => {
-			card.style.borderColor = hex;
-			card.style.background = 'rgba(255,255,255,0.1)';
-			card.style.transform = 'translateY(-2px)';
-		});
-		card.addEventListener('mouseleave', () => {
-			card.style.borderColor = 'rgba(255,255,255,0.1)';
-			card.style.background = 'rgba(255,255,255,0.05)';
-			card.style.transform = 'translateY(0)';
-		});
-		card.addEventListener('click', () => {
-			overlay.remove();
-			onSelect(skin);
-		});
-
-		grid.appendChild(card);
-	}
-
-	overlay.appendChild(grid);
-	document.body.appendChild(overlay);
-}

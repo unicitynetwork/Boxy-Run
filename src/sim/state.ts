@@ -20,7 +20,7 @@ export const TICK_SECONDS = 1 / TICK_HZ;
  * character is already at the edge; jumps are rejected if the character
  * is already jumping or switching lanes.
  */
-export type CharacterAction = 'up' | 'left' | 'right';
+export type CharacterAction = 'up' | 'left' | 'right' | 'fire';
 
 /** A tick-tagged input event from a player, as relayed over the wire. */
 export interface InputEvent {
@@ -62,8 +62,27 @@ export interface TreeState {
 	scale: number;
 }
 
+/** Coin tier: determines color, rarity, and score value. */
+export type CoinTier = 'gold' | 'blue' | 'red';
+
+/** Score bonus per coin tier. */
+export const COIN_TIER_VALUES: Record<CoinTier, number> = {
+	gold: 250,
+	blue: 1000,
+	red: 5000,
+};
+
 /** Sim state for a coin pickup. */
 export interface CoinState {
+	x: number;
+	y: number;
+	z: number;
+	tier: CoinTier;
+	collected: boolean;
+}
+
+/** Flamethrower powerup pickup. */
+export interface PowerupState {
 	x: number;
 	y: number;
 	z: number;
@@ -113,6 +132,21 @@ export interface GameState {
 
 	/** Active coins. Same semantics as trees. */
 	coins: CoinState[];
+
+	/** Active flamethrower powerups on the field. */
+	powerups: PowerupState[];
+
+	/** Number of flamethrower charges available. */
+	flamethrowerCharges: number;
+
+	/** Remaining ticks of active flamethrower burn (0 = inactive). */
+	flameTicks: number;
+
+	/** Set to true on the tick the flamethrower fires (for audio). Cleared next tick. */
+	flameJustFired: boolean;
+
+	/** Tier of last collected coin (for audio). Reset each tick. */
+	lastCollectedTier: CoinTier | null;
 
 	/** Player character state. */
 	character: CharacterState;

@@ -106,7 +106,7 @@ Server → Client:
 
 ## Tournament Page
 
-Single page at /tournament.html?id={tournamentId}
+Single page at /tournament-v2.html?id={tournamentId}
 
 Sections:
 1. **Header**: tournament name, status, round info, countdown

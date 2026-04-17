@@ -1,110 +1,95 @@
 /**
- * Wire-level message types for the tournament protocol.
- * Authoritative spec: tournament/PROTOCOL.md
+ * Wire protocol for Boxy Run tournaments + challenges.
  *
- * Every message has a `type` field used as a discriminator and a `v`
- * field with the protocol version. Unknown types MUST be ignored by
- * receivers; unknown fields MUST NOT cause rejection (forward
- * compatibility).
+ * This file is the SINGLE source of truth for every message exchanged
+ * between server and client. It is imported by:
  *
- * This file is pure types plus one const. It is imported by both the
- * server (Node) and the client (browser) and must therefore not
- * reference any platform-specific API.
+ *   - The server (match-manager, tournament-ws, challenge, server)
+ *   - The browser client (src/game/main.ts)
+ *   - The bot script (scripts/bot-players.ts)
+ *   - The test harness (tournament/tests/harness.ts)
+ *
+ * If you add a field to a message here, the TypeScript compiler will
+ * flag every sender + handler that needs updating. Every wire change
+ * MUST flow through this file. Do not add inline `type: 'foo'` sends
+ * elsewhere — use the helpers in `server/protocol-send.ts` instead.
+ *
+ * Every message carries `v: PROTOCOL_VERSION`. Bump this number when
+ * making incompatible changes so clients can refuse to run against an
+ * unknown server (see `protocol-version` field in `registered`).
  */
 
 export const PROTOCOL_VERSION = 0;
 
-/** Base shape every message carries. */
+/** Base shape every message carries. `v` pins the protocol version. */
 export interface MessageBase<T extends string> {
 	type: T;
 	v: typeof PROTOCOL_VERSION;
 }
 
-// ─── Shared value types ────────────────────────────────────────────────────
-
-/** Public identity of a player, as learned from their Sphere wallet. */
-export interface PublicIdentity {
-	/** Unicity nametag, including the leading '@'. */
-	nametag: string;
-	/** Hex-encoded public key used to verify signatures. */
-	pubkey: string;
-}
-
-/** On-chain entry fee payment supplied with `join`. */
-export interface EntryPayment {
-	/** Hash of the tx that paid the entry fee to the operator wallet. */
-	txHash: string;
-	/** Decimal amount as a string, for precision and sanity-check. */
-	amount: string;
-	/** Hex-encoded coin id. */
-	coinId: string;
-}
+/**
+ * Distributive Omit — required when omitting fields from a discriminated
+ * union (the built-in Omit collapses to the common keys, losing per-
+ * variant payloads). Used by `wsSend` helpers that auto-inject `v`.
+ */
+export type DistributiveOmit<T, K extends keyof any> = T extends unknown
+	? Omit<T, K>
+	: never;
 
 /** Which side of a 1v1 match a player is on. */
 export type MatchSide = 'A' | 'B';
 
-/** One slot in a bracket round. Either filled with a nametag or a TBD/bye (null). */
+/** One slot in a bracket round. Either filled with a nametag or null (TBD/bye). */
 export interface BracketSlot {
 	matchId: string;
 	playerA: string | null;
 	playerB: string | null;
 }
 
-/** Reasons a match can end. */
-export type MatchEndReason =
-	| 'death'
-	| 'timecap'
-	| 'forfeit'
-	| 'dual-forfeit'
-	| 'dq'
-	| 'flagged';
+// ═══════════════════════════════════════════════════════════════════
+// Client → Server
+// ═══════════════════════════════════════════════════════════════════
 
-// ─── Client → Server ───────────────────────────────────────────────────────
+/** Associate the caller's WS with a nametag. First message on every connection. */
+export interface RegisterMessage extends MessageBase<'register'> {
+	identity: { nametag: string };
+}
 
-/**
- * Join a tournament. Sent once after the WebSocket connection is
- * established. Server verifies the entry tx against the Unicity chain
- * before admitting the player.
- */
-export interface JoinMessage extends MessageBase<'join'> {
-	tournamentId: string;
-	identity: PublicIdentity;
-	entry: EntryPayment;
-	/** Signature over `${tournamentId}|${entry.txHash}` using the identity's pubkey. */
-	signature: string;
+/** Send a 1v1 challenge to an online player. */
+export interface ChallengeMessage extends MessageBase<'challenge'> {
+	opponent: string;
+	wager: number;
+	bestOf: number;
+}
+
+/** Accept a received challenge. */
+export interface ChallengeAcceptMessage extends MessageBase<'challenge-accept'> {
+	challengeId: string;
+}
+
+/** Decline a received challenge. */
+export interface ChallengeDeclineMessage extends MessageBase<'challenge-decline'> {
+	challengeId: string;
+}
+
+/** Chat — to a specific player if `to` is set, otherwise lobby broadcast. */
+export interface ChatClientMessage extends MessageBase<'chat'> {
+	message: string;
+	to?: string;
 }
 
 /**
- * Resume an existing session after a dropped connection. Server
- * responds with whatever state the player needs to catch up (lobby,
- * bracket, or mid-match).
- */
-export interface ResumeMessage extends MessageBase<'resume'> {
-	tournamentId: string;
-	identity: PublicIdentity;
-	signature: string;
-}
-
-/**
- * Set the ready flag for a match. Rate-limited to one transition per
- * 3 seconds per (player, matchId). When both players of a match hold
- * the flag simultaneously, the server emits `match-start` to both.
+ * Signal readiness for a game. Sent once per game: on match entry for
+ * game 1, and after every `series-next` for games 2..N of a Bo3/Bo5.
+ * Server transitions the match to 'playing' when both sides are ready.
  */
 export interface MatchReadyMessage extends MessageBase<'match-ready'> {
 	matchId: string;
 }
 
-/** Clear the ready flag. Only valid while the match is in WAITING_READY. */
-export interface MatchUnreadyMessage extends MessageBase<'match-unready'> {
-	matchId: string;
-}
-
 /**
- * Stream one player input. Payload is opaque to the server — it is
- * relayed to the opponent and stored in the match's input trace, but
- * never decoded. `tick` is the sender's local tick at the moment of
- * the input and is used by the receiver to apply the input at the
- * tagged tick (with light rollback / buffering as needed).
+ * Stream one player action. Relayed to the opponent; stored for replay.
+ * The `payload` is base64-encoded — an opaque one-byte action tag.
  */
 export interface InputMessage extends MessageBase<'input'> {
 	matchId: string;
@@ -112,223 +97,201 @@ export interface InputMessage extends MessageBase<'input'> {
 	payload: string;
 }
 
-/** Liveness signal during an active match. Absence triggers forfeit after grace period. */
-export interface HeartbeatMessage extends MessageBase<'heartbeat'> {
+/** Report that this side's sim has ended. Server replays on both done. */
+export interface MatchDoneMessage extends MessageBase<'match-done'> {
 	matchId: string;
-	tick: number;
 }
-
-/**
- * Report match result after running the sim to completion. Each player
- * sends their own view; the server compares the two `resultHash`
- * values and resolves or flags the match.
- */
-export interface ResultMessage extends MessageBase<'result'> {
-	matchId: string;
-	finalTick: number;
-	score: Record<MatchSide, number>;
-	winner: MatchSide;
-	/** Hash of concatenated input payloads in tick order. */
-	inputsHash: string;
-	/** Hash of (seed || inputsHash || finalTick || scores || winner). */
-	resultHash: string;
-}
-
-/** Graceful disconnect. */
-export interface LeaveMessage extends MessageBase<'leave'> {
-	reason?: string;
-}
-
-// ─── Lobby system messages (multi-tournament) ──────────────────────────────
-
-/** Register with the server. Required before any lobby action. */
-export interface RegisterMessage extends MessageBase<'register'> {
-	identity: PublicIdentity;
-}
-
-/** Send a 1v1 challenge to a specific player. */
-export interface ChallengeMessage extends MessageBase<'challenge'> {
-	opponent: string;
-	/** UCT wager. 0 = friendly match. */
-	wager: number;
-}
-
-/** Accept an incoming challenge. */
-export interface ChallengeAcceptMessage extends MessageBase<'challenge-accept'> {
-	challengeId: string;
-}
-
-/** Decline an incoming challenge. */
-export interface ChallengeDeclineMessage extends MessageBase<'challenge-decline'> {
-	challengeId: string;
-}
-
-/** Join the rolling quick-match queue. */
-export interface QueueJoinMessage extends MessageBase<'queue-join'> {}
-
-/** Leave the rolling queue. */
-export interface QueueLeaveMessage extends MessageBase<'queue-leave'> {}
 
 export type ClientMessage =
-	| JoinMessage
-	| ResumeMessage
 	| RegisterMessage
 	| ChallengeMessage
 	| ChallengeAcceptMessage
 	| ChallengeDeclineMessage
-	| QueueJoinMessage
-	| QueueLeaveMessage
+	| ChatClientMessage
 	| MatchReadyMessage
-	| MatchUnreadyMessage
 	| InputMessage
-	| HeartbeatMessage
-	| ResultMessage
-	| LeaveMessage;
+	| MatchDoneMessage;
 
-// ─── Server → Client ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// Server → Client
+// ═══════════════════════════════════════════════════════════════════
 
-/** Sent after a successful join and whenever the lobby roster changes. */
-export interface LobbyStateMessage extends MessageBase<'lobby-state'> {
-	tournamentId: string;
-	players: { nametag: string; joinedAt: number }[];
-	capacity: number;
-	/** Epoch ms when the tournament will begin, or null if still waiting for fill. */
-	startsAt: number | null;
+/** Ack of `register`. Includes the current online roster. */
+export interface RegisteredMessage extends MessageBase<'registered'> {
+	nametag: string;
+	onlinePlayers: string[];
+	/** Server's protocol version. Clients should refuse to run if mismatched. */
+	protocolVersion: typeof PROTOCOL_VERSION;
 }
 
-/** Sent once when the bracket is generated, and whenever it advances. */
-export interface BracketMessage extends MessageBase<'bracket'> {
-	tournamentId: string;
-	rounds: BracketSlot[][];
+/** Broadcast when a player's online status flips. */
+export interface PlayerOnlineMessage extends MessageBase<'player-online'> {
+	nametag: string;
+	online: boolean;
 }
 
-/** Sent to both players when their next match's ready window opens. */
-export interface RoundOpenMessage extends MessageBase<'round-open'> {
-	matchId: string;
-	roundIndex: number;
+/** Direct or lobby chat from another player. */
+export interface ChatServerMessage extends MessageBase<'chat'> {
+	from: string;
+	message: string;
+}
+
+/** Invitee received a challenge. */
+export interface ChallengeReceivedMessage extends MessageBase<'challenge-received'> {
+	challengeId: string;
+	from: string;
+	wager: number;
+	bestOf: number;
+}
+
+/** Challenger is notified their challenge was posted. */
+export interface ChallengeSentMessage extends MessageBase<'challenge-sent'> {
+	challengeId: string;
 	opponent: string;
-	openedAt: number;
-	deadline: number;
-}
-
-/** UX hint: the opponent's ready flag changed. Does not affect match-start logic. */
-export interface OpponentReadyMessage extends MessageBase<'opponent-ready'> {
-	matchId: string;
-	ready: boolean;
+	wager: number;
+	bestOf: number;
 }
 
 /**
- * Sent to both players the instant both ready flags are set. Contains
- * the shared start timestamp for synchronized countdown.
+ * Challenge resolved without play. `by` is the declining player's nametag,
+ * or the empty string when the server expired the challenge after 30s.
+ */
+export interface ChallengeDeclinedMessage extends MessageBase<'challenge-declined'> {
+	challengeId: string;
+	by: string;
+}
+
+/** Challenge accepted → immediate redirect to the match. */
+export interface ChallengeStartMessage extends MessageBase<'challenge-start'> {
+	challengeId: string;
+	tournamentId: string;
+	matchId: string;
+	seed: string;
+	startsAt: number;
+	wager: number;
+	bestOf: number;
+	opponent: string;
+	youAre: MatchSide;
+}
+
+/** Per-game ready status. Emitted whenever either ready flag flips. */
+export interface MatchStatusMessage extends MessageBase<'match-status'> {
+	matchId: string;
+	readyA: boolean;
+	readyB: boolean;
+}
+
+/**
+ * Both players readied → start this game of the series. `gameNumber`
+ * distinguishes game 1 from games 2..N so clients can dedup correctly.
  */
 export interface MatchStartMessage extends MessageBase<'match-start'> {
 	matchId: string;
-	/** 32-byte hex seed. */
 	seed: string;
 	opponent: string;
 	youAre: MatchSide;
+	gameNumber: number;
 	startsAt: number;
 	timeCapTicks: number;
-	protocol: {
-		heartbeatIntervalMs: number;
-		inputAckMode: 'none' | 'per-tick';
-	};
+	bestOf: number;
+	tournamentId: string;
 }
 
-/** Relayed opponent input, so each client can run both sides of the sim locally. */
+/** Opponent's relayed input for the local ghost sim. */
 export interface OpponentInputMessage extends MessageBase<'opponent-input'> {
 	matchId: string;
 	tick: number;
 	payload: string;
 }
 
-/** Match result after consensus or resolution. */
+/**
+ * Interim game result for a Bo3/Bo5 series. Server also schedules the
+ * next game's `series-next` push after a short display delay.
+ */
+export interface GameResultMessage extends MessageBase<'game-result'> {
+	matchId: string;
+	gameNumber: number;
+	winner: string;
+	scoreA: number;
+	scoreB: number;
+	winsA: number;
+	winsB: number;
+	bestOf: number;
+}
+
+/** Start of the next game in a series. Client must re-`match-ready`. */
+export interface SeriesNextMessage extends MessageBase<'series-next'> {
+	matchId: string;
+	seriesId: string;
+	seed: string;
+	opponent: string;
+	youAre: MatchSide;
+	startsAt: number;
+	winsA: number;
+	winsB: number;
+	gameNumber: number;
+	bestOf: number;
+	wager: number;
+	tournamentId: string;
+}
+
+/**
+ * Final match result. For Bo3+, `seriesEnd: true` marks the last game;
+ * `scoreA`/`scoreB` become *series wins* rather than per-game scores.
+ * For Bo1, `seriesEnd: false` and scoreA/scoreB are the game scores.
+ *
+ * `forfeit: true` indicates a force-resolve (both players offline 45s+).
+ * In that case scoreA/scoreB are typically 0-0 and clients should NOT
+ * present the result as a real played game.
+ */
 export interface MatchEndMessage extends MessageBase<'match-end'> {
 	matchId: string;
-	/** Winning nametag, or empty string on dual-forfeit. */
 	winner: string;
-	reason: MatchEndReason;
-	scores: Record<string, number>;
+	scoreA: number;
+	scoreB: number;
+	seriesEnd: boolean;
+	bestOf: number;
+	wager: number;
+	forfeit?: boolean;
+	/** Populated only if the match resolution itself errored (replay crash). */
+	error?: string;
 }
 
-/** Tournament completed, with standings and payout transaction hashes. */
-export interface TournamentEndMessage extends MessageBase<'tournament-end'> {
-	tournamentId: string;
-	standings: { place: number; nametag: string; payout: string }[];
-	payoutTxs: { nametag: string; txHash: string }[];
+/** Ready TTL expired (30s no-show) — both ready flags cleared. */
+export interface ReadyExpiredMessage extends MessageBase<'ready-expired'> {
+	matchId: string;
 }
 
-/** Generic error frame. */
+/** Bracket state changed (match resolved / advanced) — refetch to see. */
+export interface BracketUpdateMessage extends MessageBase<'bracket-update'> {
+	matchId: string;
+}
+
+/** Server-side error. `code` is a stable identifier for client branching. */
 export interface ErrorMessage extends MessageBase<'error'> {
 	code: string;
 	message: string;
 	matchId?: string;
 }
 
-// ─── Lobby system messages (multi-tournament) ──────────────────────────────
-
-export type TournamentType = 'challenge' | 'rolling' | 'grand-final';
-
-/** Sent after successful registration. */
-export interface RegisteredMessage extends MessageBase<'registered'> {
-	nametag: string;
-	/** List of other online players available for challenges. */
-	onlinePlayers: string[];
-}
-
-/** Broadcast when a player comes online or goes offline. */
-export interface PlayerOnlineMessage extends MessageBase<'player-online'> {
-	nametag: string;
-	online: boolean;
-}
-
-/** Sent to the challenged player. */
-export interface ChallengeReceivedMessage extends MessageBase<'challenge-received'> {
-	challengeId: string;
-	from: string;
-	wager: number;
-}
-
-/** Sent to the challenger when the challenge was delivered. */
-export interface ChallengeSentMessage extends MessageBase<'challenge-sent'> {
-	challengeId: string;
-	opponent: string;
-}
-
-/** Sent when the opponent declined. */
-export interface ChallengeDeclinedMessage extends MessageBase<'challenge-declined'> {
-	challengeId: string;
-	by: string;
-}
-
-/** Sent when a player is assigned to a tournament (from challenge or queue). */
-export interface TournamentAssignedMessage extends MessageBase<'tournament-assigned'> {
-	tournamentId: string;
-	tournamentType: TournamentType;
-}
-
-/** Rolling queue state update. */
-export interface QueueStateMessage extends MessageBase<'queue-state'> {
-	position: number;
-	total: number;
-	/** Epoch ms when the queue countdown expires and tournament starts. Null if not enough players. */
-	startsAt: number | null;
-}
+/** Periodic keepalive. Clients ignore the body; absence for >25s = disconnect. */
+export interface HeartbeatMessage extends MessageBase<'heartbeat'> {}
 
 export type ServerMessage =
-	| LobbyStateMessage
-	| BracketMessage
-	| RoundOpenMessage
-	| OpponentReadyMessage
-	| MatchStartMessage
-	| OpponentInputMessage
-	| MatchEndMessage
-	| TournamentEndMessage
-	| ErrorMessage
 	| RegisteredMessage
 	| PlayerOnlineMessage
+	| ChatServerMessage
 	| ChallengeReceivedMessage
 	| ChallengeSentMessage
 	| ChallengeDeclinedMessage
-	| TournamentAssignedMessage
-	| QueueStateMessage;
+	| ChallengeStartMessage
+	| MatchStatusMessage
+	| MatchStartMessage
+	| OpponentInputMessage
+	| GameResultMessage
+	| SeriesNextMessage
+	| MatchEndMessage
+	| ReadyExpiredMessage
+	| BracketUpdateMessage
+	| ErrorMessage
+	| HeartbeatMessage;

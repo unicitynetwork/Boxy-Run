@@ -23,6 +23,20 @@ export function updateCharacter(state: GameState, config: GameConfig): void {
 	const currentTick = state.tick;
 	const currentTime = currentTick / TICK_HZ;
 
+	// Clear the just-fired flag (only true for one tick)
+	state.flameJustFired = false;
+
+	// Fire can be used any time (even mid-air). Process it first.
+	const fireIdx = char.queuedActions.indexOf('fire');
+	if (fireIdx !== -1) {
+		char.queuedActions.splice(fireIdx, 1);
+		if (state.flamethrowerCharges > 0) {
+			state.flamethrowerCharges--;
+			state.flameTicks = 1;
+			state.flameJustFired = true;
+		}
+	}
+
 	// Consume one queued action if the character is idle. A character
 	// mid-jump or mid-lane-switch ignores queued actions until the
 	// current motion completes.
