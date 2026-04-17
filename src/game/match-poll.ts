@@ -14,12 +14,25 @@ export interface PollCallbacks {
 	onSeriesAdvance: (s: any) => void;
 	onBothReady: () => void;
 	onReadyExpired: () => void;
-	onOpponentDone: () => void;
+	onGameDecided: (opponentScore: number) => void;
+	getMyScore: () => number;
+	onIncomingChallenge?: (challenge: any) => void;
 }
 
 export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<typeof setInterval> {
 	return setInterval(async () => {
-		if (cb.getPhase() === 'series_end') return;
+		// In series_end, poll for incoming rematch challenges instead
+		if (cb.getPhase() === 'series_end') {
+			try {
+				const r = await fetch(`/api/challenges/pending?nametag=${encodeURIComponent(cb.getPlayerName())}`);
+				if (!r.ok) return;
+				const { challenges } = await r.json();
+				if (challenges?.length > 0) {
+					cb.onIncomingChallenge?.(challenges[0]);
+				}
+			} catch {}
+			return;
+		}
 		try {
 			const r = await fetch(stateUrl);
 			if (!r.ok) return;
@@ -37,9 +50,10 @@ export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<
 				return;
 			}
 
-			// 3. Both ready → countdown.
+			// 3. Both ready → countdown (not during game_result overlay).
 			const phase = cb.getPhase();
-			if (s.ready?.A && s.ready?.B && (phase === 'waiting' || phase === 'ready_prompt')) {
+			if (s.ready?.A && s.ready?.B
+					&& (phase === 'waiting' || phase === 'ready_prompt')) {
 				cb.onBothReady();
 				return;
 			}
@@ -51,12 +65,17 @@ export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<
 				return;
 			}
 
-			// 5. Opponent confirmed dead → stop game, show win.
-			const oppSide = cb.getMySide() === 'A' ? 'B' : 'A';
-			if (phase === 'playing' && s.done?.[oppSide]) {
-				cb.onOpponentDone();
-				return;
+			// 5. Opponent dead + my score beats their replay score → decided.
+			//    deadScore is computed by the server from the dead player's
+			//    stored inputs. This is authoritative — no client guessing.
+			if (phase === 'playing' && s.deadScore) {
+				const oppSide = cb.getMySide() === 'A' ? 'B' : 'A';
+				if (s.deadScore.side === oppSide && cb.getMyScore() > s.deadScore.score) {
+					cb.onGameDecided(s.deadScore.score);
+					return;
+				}
 			}
+
 		} catch {}
 	}, 1000);
 }

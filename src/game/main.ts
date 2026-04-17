@@ -40,7 +40,7 @@ import { getSkin, type CharacterSkin } from '../render/skins';
 import { showSkinSelector } from './skin-selector';
 import { connectMatchWS } from './match-ws';
 import { createChatPanel } from './match-chat';
-import { startStatePoll, startMatchRedirectPoll } from './match-poll';
+import { startStatePoll } from './match-poll';
 import {
 	showOverlay,
 	hideOverlay,
@@ -291,20 +291,12 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			if (!oppBuffer.has(tick)) oppBuffer.set(tick, []);
 			oppBuffer.get(tick)!.push(action);
 		},
-		onChallengeReceived(msg) {
-			if (phase !== 'series_end') return;
-			const wagerText = msg.wager > 0 ? ` for ${msg.wager} UCT` : '';
-			showOverlay(
-				`<div style="font-size:16px;margin-bottom:12px"><strong>${msg.from}</strong> challenges you${wagerText}</div>` +
-				`<button onclick="window.__acceptRematch('${msg.challengeId}')" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">ACCEPT</button>` +
-				`<button onclick="window.__declineRematch('${msg.challengeId}')" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">DECLINE</button>`,
-			);
-		},
 		onChat(from, message) { chat.addMessage(from, message, false); },
 	});
 	function wsSend(msg: Record<string, unknown>) { matchWs.send(msg); }
 
-	let lastWager = 0; // track wager for rematch
+	let lastWager = 0;
+	let shownChallengeId = ''; // prevent re-showing same incoming challenge
 
 	function onMatchEnd(msg: any) {
 		setPhase('series_end');
@@ -381,57 +373,99 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		fetchGameBalance().then(updateBalanceDisplay);
 	}
 
-	// ── Rematch (REST + redirect poll) ───────────────────────────────
-	let activePoll: { stop: () => void } | null = null;
-
-	function doMatchPoll() {
-		if (activePoll) return;
-		activePoll = startMatchRedirectPoll({
-			playerName,
-			backUrl,
-			lastWager,
-			onBeforeRedirect() { matchWs.close(); },
-			onExpired() {
-				activePoll = null;
-				const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
-				showOverlay(`<div style="font-size:14px;margin-bottom:12px">Rematch expired</div>` +
-					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
-			},
-		});
-	}
-
+	// ── Rematch ──────────────────────────────────────────────────────
 	(window as any).__v2rematch = async () => {
 		showOverlay('<div style="font-size:16px">Sending rematch...</div><div style="font-size:12px;margin-top:8px;opacity:0.6">Waiting for opponent to accept...</div>');
+		let challengeId: string;
 		try {
 			const r = await fetch('/api/challenges', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ from: playerName, opponent: opponentName, wager: lastWager, bestOf }),
 			});
+			const data = await r.json();
 			if (!r.ok) {
-				const data = await r.json();
 				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">${data.message || 'Challenge failed'}</div>` +
 					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
 				return;
 			}
+			challengeId = data.challengeId;
 		} catch {
 			showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Network error</div>` +
 				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
 			return;
 		}
-		doMatchPoll();
+		// Poll THIS specific challenge until accepted or expired
+		const poll = setInterval(async () => {
+			try {
+				const r = await fetch(`/api/challenges/${challengeId}/status`);
+				if (!r.ok) return;
+				const s = await r.json();
+				if (s.status === 'accepted') {
+					clearInterval(poll);
+					// Redirect to the match
+					const tid = s.tournamentId;
+					const br = await fetch(`/api/tournaments/${encodeURIComponent(tid)}/bracket`);
+					const { matches } = await br.json();
+					const m = matches?.find((m: any) => m.id === s.matchId);
+					if (m) {
+						matchWs.close();
+						const side = m.playerA === playerName ? 'A' : 'B';
+						const opp = side === 'A' ? m.playerB : m.playerA;
+						const p = new URLSearchParams({
+							tournament: '1', matchId: m.id, seed: m.seed || '0',
+							side, opponent: opp, name: playerName,
+							tid, bestOf: String(bestOf),
+							wager: String(lastWager), startsAt: String(Date.now() + 3000),
+						});
+						location.href = 'dev.html?' + p;
+					}
+				} else if (s.status === 'expired') {
+					clearInterval(poll);
+					const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
+					showOverlay(`<div style="font-size:14px;margin-bottom:12px">Rematch expired</div>` +
+						`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
+				}
+			} catch {}
+		}, 1000);
+		// Safety timeout
+		setTimeout(() => clearInterval(poll), 35000);
 	};
 
 	(window as any).__acceptRematch = async (challengeId: string) => {
 		showOverlay('<div style="font-size:16px">Starting match...</div>');
 		try {
-			await fetch(`/api/challenges/${challengeId}/accept`, {
+			const r = await fetch(`/api/challenges/${challengeId}/accept`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ by: playerName }),
 			});
-		} catch {}
-		doMatchPoll();
+			const data = await r.json();
+			if (!r.ok) {
+				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">${data.message || 'Accept failed'}</div>`);
+				return;
+			}
+			const tid = data.tournamentId || '';
+			const br = await fetch(`/api/tournaments/${encodeURIComponent(tid)}/bracket`);
+			const { matches } = await br.json();
+			const m = matches?.find((m: any) => m.id === data.matchId);
+			if (!m) {
+				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Match not found</div>`);
+				return;
+			}
+			matchWs.close();
+			const side = m.playerA === playerName ? 'A' : 'B';
+			const opp = side === 'A' ? m.playerB : m.playerA;
+			const p = new URLSearchParams({
+				tournament: '1', matchId: m.id, seed: m.seed || '0',
+				side, opponent: opp, name: playerName,
+				tid, bestOf: String(bestOf),
+				wager: String(lastWager), startsAt: String(Date.now() + 3000),
+			});
+			location.href = 'dev.html?' + p;
+		} catch (err) {
+			showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Network error</div>`);
+		}
 	};
 
 	(window as any).__declineRematch = async (challengeId: string) => {
@@ -691,15 +725,29 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				console.log('[poll] ready expired');
 				showReadyPrompt('Ready expired — opponent didn\'t ready in time');
 			},
-			onOpponentDone() {
-				console.log('[poll] opponent done → YOU WIN');
+			getMyScore: () => myState.score,
+			onIncomingChallenge(ch) {
+				if (shownChallengeId === ch.id) return;
+				shownChallengeId = ch.id;
+				const wagerText = ch.wager > 0 ? ` for ${ch.wager} UCT` : '';
+				showOverlay(
+					`<div style="font-size:16px;margin-bottom:12px"><strong>${ch.from}</strong> challenges you${wagerText}</div>` +
+					`<button onclick="window.__acceptRematch('${ch.id}')" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">ACCEPT</button>` +
+					`<button onclick="window.__declineRematch('${ch.id}')" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">DECLINE</button>`,
+				);
+			},
+			onGameDecided(opponentScore) {
+				// Server confirmed: opponent is dead with score X, and
+				// our local score already exceeds it. Game is decided.
+				console.log(`[poll] decided: my ${myState.score} > opp ${opponentScore}`);
 				setPhase('done_sent');
 				sendMatchDone();
 				removeDeathBanner();
 				showOverlay(
-					`<div style="font-size:32px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">YOU WIN!</div>` +
-					`<div style="font-size:16px;margin-bottom:8px">Score: ${myState.score.toLocaleString()}</div>` +
-					`<div style="font-size:13px;opacity:0.6">Waiting for final result…</div>`,
+					`<div style="font-size:20px;font-weight:bold;margin-bottom:8px">OPPONENT FINISHED</div>` +
+					`<div style="font-size:14px;margin-bottom:4px">Their score: ${opponentScore.toLocaleString()}</div>` +
+					`<div style="font-size:16px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">Your score: ${myState.score.toLocaleString()}</div>` +
+					`<div style="font-size:13px;opacity:0.6">Calculating final result…</div>`,
 				);
 			},
 		});

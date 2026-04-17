@@ -72,6 +72,23 @@ export async function handleTournamentApi(
 		return true;
 	}
 
+	// GET /api/challenges/:id/status — poll challenge state (pending/accepted/expired)
+	const challengeStatusMatch = path.match(/^\/api\/challenges\/([^/]+)\/status$/);
+	if (challengeStatusMatch && req.method === 'GET') {
+		const { getChallengeStatus } = await import('./challenge');
+		json(res, 200, getChallengeStatus(challengeStatusMatch[1]));
+		return true;
+	}
+
+	// GET /api/challenges/pending?nametag=X — incoming challenges for a player
+	if (path === '/api/challenges/pending' && req.method === 'GET') {
+		const nametag = url.searchParams.get('nametag');
+		if (!nametag) { json(res, 400, { error: 'nametag required' }); return true; }
+		const { getPendingChallengesFor } = await import('./challenge');
+		json(res, 200, { challenges: getPendingChallengesFor(nametag) });
+		return true;
+	}
+
 	// GET /api/admin/balance-sheet — system-wide token balance (admin only)
 	// Conservation invariant: sum(all balances) + sum(unpaid prize pools)
 	// should equal sum(deposits) + sum(wager_win) - sum(wager_loss),
@@ -327,7 +344,7 @@ export async function handleTournamentApi(
 			const fallback = match.player_a && match.player_b
 				? { A: match.player_a as string, B: match.player_b as string }
 				: null;
-			const live = getMatchLiveState(matchId, fallback);
+			const live = await getMatchLiveState(matchId, fallback);
 			const tournament = await getTournament(tid);
 			json(res, 200, {
 				matchId,
@@ -350,6 +367,7 @@ export async function handleTournamentApi(
 				online: live.online,
 				series: live.series,
 				machinePhase: live.machinePhase,
+				deadScore: live.deadScore,
 				lastGameResult: live.lastGameResult,
 				now: Date.now(),
 			});

@@ -44,6 +44,26 @@ export function getPendingChallenge(id: string): PendingChallenge | undefined {
 	return pending.get(id);
 }
 
+// When a challenge is accepted, store the result so the challenger can poll it.
+const acceptedChallenges = new Map<string, { matchId: string; tournamentId: string }>();
+
+/** Get the status of a challenge: pending, accepted (with matchId), or expired. */
+export function getChallengeStatus(id: string): { status: 'pending' } | { status: 'accepted'; matchId: string; tournamentId: string } | { status: 'expired' } {
+	if (pending.has(id)) return { status: 'pending' };
+	const accepted = acceptedChallenges.get(id);
+	if (accepted) return { status: 'accepted', ...accepted };
+	return { status: 'expired' };
+}
+
+/** Get all pending challenges TO a player (incoming invites). */
+export function getPendingChallengesFor(nametag: string): PendingChallenge[] {
+	const result: PendingChallenge[] = [];
+	for (const ch of pending.values()) {
+		if (ch.to === nametag) result.push(ch);
+	}
+	return result;
+}
+
 // ── Balance helper ───────────────────────────────────────────────────
 
 async function getBalance(nametag: string): Promise<number> {
@@ -202,6 +222,11 @@ export async function applyChallengeAccept(
 			opponent: ch.from,
 			youAre: ch.to === result.playerA ? 'A' : 'B',
 		});
+
+		// Store so the challenger can poll the status
+		acceptedChallenges.set(challengeId, { matchId, tournamentId: tId });
+		// Clean up after 60s (challenger should have redirected by then)
+		setTimeout(() => acceptedChallenges.delete(challengeId), 60_000);
 
 		return { ok: true, data: { matchId, seed: result.seed, tournamentId: tId } };
 	} catch (err: any) {

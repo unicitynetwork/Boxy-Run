@@ -1,6 +1,6 @@
 /**
  * WebSocket connection for multiplayer matches.
- * Used ONLY for: input relay (opponent-input), chat, and challenge-received.
+ * Used ONLY for: input relay (opponent-input) and chat.
  * All flow transitions are REST-polled — WS is never relied on for state changes.
  */
 
@@ -15,7 +15,6 @@ export function connectMatchWS(opts: {
 	playerName: string;
 	matchId: string;
 	onOpponentInput: (tick: number, action: CharacterAction) => void;
-	onChallengeReceived: (msg: any) => void;
 	onChat: (from: string, message: string) => void;
 }): MatchWS {
 	const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -49,9 +48,6 @@ export function connectMatchWS(opts: {
 							opts.onOpponentInput(msg.tick, action);
 						}
 					} catch {}
-				}
-				if (msg.type === 'challenge-received') {
-					opts.onChallengeReceived(msg);
 				}
 				if (msg.type === 'chat' && msg.from) {
 					opts.onChat(msg.from, msg.message);

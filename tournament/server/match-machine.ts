@@ -66,8 +66,11 @@ export interface MatchState {
 }
 
 /** Timing constants — shared by reconciler and tests. */
-export const READY_TTL_MS = 10_000;
-export const READY_OFFLINE_GRACE_MS = 5_000;
+export const READY_TTL_MS = 30_000;
+// Disabled: auto-readying offline players during page navigation
+// caused games to start before players picked a skin. The 45s
+// force-resolve handles genuinely absent players instead.
+export const READY_OFFLINE_GRACE_MS = Infinity;
 export const DONE_OFFLINE_GRACE_MS = 30_000;
 export const STUCK_BOTH_OFFLINE_MS = 45_000;
 export const GAME_COUNTDOWN_MS = 3_000;

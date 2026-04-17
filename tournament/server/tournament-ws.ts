@@ -41,10 +41,10 @@ const managerIO: manager.ManagerIO = {
  * `fallbackSides` lets the endpoint still show online-flags for ready_wait
  * matches that haven't seeded the machine yet.
  */
-export function getMatchLiveState(
+export async function getMatchLiveState(
 	matchId: string,
 	fallbackSides?: { A: string; B: string } | null,
-): {
+): Promise<{
 	ready: { A: boolean; B: boolean } | null;
 	done: { A: boolean; B: boolean } | null;
 	online: { A: boolean; B: boolean } | null;
@@ -57,7 +57,8 @@ export function getMatchLiveState(
 	} | null;
 	machinePhase: string | null;
 	lastGameResult: { scoreA: number; scoreB: number; winner: string } | null;
-} {
+	deadScore: { side: 'A' | 'B'; score: number } | null;
+}> {
 	// Machine state is the ONLY source of truth. If the match isn't in the
 	// machine, we have no live state to project — callers should fall back
 	// to DB status for the phase.
@@ -89,10 +90,30 @@ export function getMatchLiveState(
 		}
 		: null;
 
+	// If exactly one player is done (dead), replay their inputs to get
+	// their real score. Cached per match+side+game so the replay doesn't
+	// run on every poll request.
+	let deadScore: { side: 'A' | 'B'; score: number } | null = null;
+	if (machineState && machineState.phase === 'playing'
+			&& (machineState.done.A !== machineState.done.B)) {
+		const deadSide: 'A' | 'B' = machineState.done.A ? 'A' : 'B';
+		try {
+			const { getInputs } = await import('./tournament-db');
+			const { replayGame } = await import('./tournament-logic');
+			const gameNum = machineState.currentGame;
+			const tagged = gameNum > 1 ? `${deadSide}:g${gameNum}` : deadSide;
+			const inputs = await getInputs(machineState.matchId, tagged);
+			const seedNum = parseInt(machineState.seed, 16) >>> 0;
+			const score = replayGame(seedNum, inputs as any[]);
+			deadScore = { side: deadSide, score };
+		} catch {}
+	}
+
 	return {
 		ready, done, online, series: seriesOut,
 		machinePhase: machineState?.phase ?? null,
 		lastGameResult: machineState?.lastGameResult ?? null,
+		deadScore,
 	};
 }
 
