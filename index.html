@@ -328,28 +328,21 @@ if(myNametag){
 //      (new tab, extension locked, popup blocked). Show disconnected so
 //      the user can hit Connect — otherwise they'd see "connected" but
 //      every wallet op would silently fail with "Wallet not connected".
-let walletProbeUntil=Date.now()+4000; // grace window for the SDK to come up
+// Keep probing forever — the SDK can load at any time (slow network,
+// extension init, popup auth). Never permanently give up.
 setInterval(()=>{
   const w=window.SphereWallet;
   const walletConnected=!!(w&&w.isConnected&&w.identity?.nametag);
   if(walletConnected){
-    walletProbeUntil=0;
     const liveTag=w.identity.nametag;
     if(!myNametag){
       setIdentity(liveTag);
     }else if(myNametag!==liveTag){
-      // Wallet identity changed under us. Adopt the new one so wagers
-      // and prizes route correctly.
       diag('wallet.identity_changed',{cached:myNametag,live:liveTag});
       setIdentity(liveTag);
     }
-  }else if(myNametag&&Date.now()>walletProbeUntil){
-    // Cached nametag but wallet is not actually connected after grace.
-    diag('wallet.cache_stale',{cached:myNametag,sdkLoaded:!!w});
-    myNametag=null;
-    showDisconnected();
   }
-},500);
+},1000);
 // Fetch game balance every 5s
 if(myNametag)fetchGameBalance().then(updateBalance);
 setInterval(()=>{if(myNametag)fetchGameBalance().then(updateBalance)},5000);

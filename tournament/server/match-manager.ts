@@ -165,9 +165,9 @@ async function runEffect(
 				break;
 
 			case 'replay_game': {
-				// Look up inputs per side and replay. Emit `game_resolved` back
-				// into the machine.
+				// Look up inputs per side and replay.
 				const seedNum = parseInt(effect.seed, 16) >>> 0;
+				console.log(`[replay] seed=0x${effect.seed} (${seedNum}) game=${effect.gameNumber}`);
 				const { getInputs } = await import('./tournament-db');
 				const side = (tag: 'A' | 'B') =>
 					effect.gameNumber > 1 ? `${tag}:g${effect.gameNumber}` : tag;

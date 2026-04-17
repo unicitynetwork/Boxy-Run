@@ -17,6 +17,7 @@ export interface PollCallbacks {
 	onGameDecided: (opponentScore: number) => void;
 	getMyScore: () => number;
 	onIncomingChallenge?: (challenge: any) => void;
+	onPollResult?: (info: string) => void;
 }
 
 export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<typeof setInterval> {
@@ -35,8 +36,10 @@ export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<
 		}
 		try {
 			const r = await fetch(stateUrl);
-			if (!r.ok) return;
+			if (!r.ok) { cb.onPollResult?.('err ' + r.status); return; }
 			const s = await r.json();
+			const ds = s.deadScore ? `dead${s.deadScore.side}=${s.deadScore.score}` : '';
+			cb.onPollResult?.(`${s.phase} rdy:${s.ready?.A?'A':''}${s.ready?.B?'B':''} done:${s.done?.A?'A':''}${s.done?.B?'B':''} g${s.series?.currentGame ?? '-'} ${ds}`);
 
 			// 1. Match complete → show result.
 			if (s.phase === 'complete' && s.winner) {

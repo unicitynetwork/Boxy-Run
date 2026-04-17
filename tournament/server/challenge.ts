@@ -228,7 +228,12 @@ export async function applyChallengeAccept(
 		// Clean up after 60s (challenger should have redirected by then)
 		setTimeout(() => acceptedChallenges.delete(challengeId), 60_000);
 
-		return { ok: true, data: { matchId, seed: result.seed, tournamentId: tId } };
+		const acceptorSide = acceptor === result.playerA ? 'A' : 'B';
+		const opponent = acceptorSide === 'A' ? result.playerB : result.playerA;
+		return { ok: true, data: {
+			matchId, seed: result.seed, tournamentId: tId,
+			youAre: acceptorSide, opponent, bestOf: ch.bestOf,
+		} };
 	} catch (err: any) {
 		console.error('[challenge-accept] error:', err);
 		// Best-effort notify both sides

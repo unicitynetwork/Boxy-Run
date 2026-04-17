@@ -69,6 +69,7 @@ export function connectMatchWS(opts: {
 	connect();
 
 	return {
+		get wsState() { return ws?.readyState ?? 3; },
 		send(msg: Record<string, unknown>) {
 			const json = JSON.stringify(msg);
 			if (ws?.readyState === 1) {

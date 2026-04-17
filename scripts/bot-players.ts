@@ -130,9 +130,21 @@ function pickAction(state: GameState, skill: SkillTier): CharacterAction | null 
 	return 'up';
 }
 
+// ── Crypto-style names ───────────────────────────────────────────
+const CRYPTO_NAMES = [
+	'satoshi_og', 'vitalik_fan', 'degen_ape', 'gm_wagmi',
+	'ser_pumps', 'rug_survivor', 'diamond_hands', 'moon_boy',
+	'anon_whale', 'chad_minter', 'ser_dumpoor', 'ngmi_larry',
+	'wen_lambo', 'touch_grass', 'fren_zone', 'copium_max',
+	'ser_yield', 'bag_holder', 'alpha_leak', 'floor_sweeper',
+	'gwei_lord', 'rekt_andy', 'ape_strong', 'fomo_king',
+	'hodl_queen', 'nft_flipper', 'defi_chad', 'gas_war_vet',
+	'mint_sniper', 'airdrop_hunter', 'bridge_maxi', 'zk_believer',
+];
+
 // ── Bot logic ────────────────────────────────────────────────────
 async function runBot(idx: number): Promise<void> {
-	const nametag = `bot${String(idx).padStart(3, '0')}`;
+	const nametag = CRYPTO_NAMES[idx] || `anon_${idx}`;
 	const skill = skillForIdx(idx);
 	const log = (msg: string) => console.log(`[${nametag} ${skill.label}] ${msg}`);
 

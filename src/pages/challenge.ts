@@ -95,6 +95,7 @@ function connectWS(): void {
 		wsLastMessageAt = Date.now();
 		wsSend({ type: 'register', identity: { nametag: myNametag! } });
 		$('ws-dot').classList.add('on');
+		updateNetStatus();
 	};
 	ws.onmessage = (e) => {
 		wsLastMessageAt = Date.now();
@@ -109,6 +110,7 @@ function connectWS(): void {
 	ws.onclose = () => {
 		if (wsWatchdog) { clearInterval(wsWatchdog); wsWatchdog = null; }
 		$('ws-dot').classList.remove('on');
+		updateNetStatus();
 		setTimeout(connectWS, 3000);
 	};
 	ws.onerror = () => {};
@@ -242,10 +244,19 @@ function showStatus(text: string, bg: string, color: string): void {
 	setTimeout(() => { el.style.display = 'none'; }, 5000);
 }
 
+const shownChallenges = new Set<string>();
 function showIncoming(msg: ChallengeReceivedMessage): void {
+	// Remove any existing challenge from the same sender (dedup)
 	const box = $('incoming-challenges');
+	box.querySelectorAll('.challenge-incoming').forEach(el => {
+		if (el.getAttribute('data-from') === msg.from) el.remove();
+	});
+	// Don't show the same challengeId twice
+	if (shownChallenges.has(msg.challengeId)) return;
+	shownChallenges.add(msg.challengeId);
 	const div = document.createElement('div');
 	div.className = 'challenge-incoming';
+	div.setAttribute('data-from', msg.from);
 	const wagerText = msg.wager > 0 ? ` for <strong style="color:var(--orange)">${msg.wager} UCT</strong>` : '';
 	const boText = msg.bestOf > 1 ? ` (best of ${msg.bestOf})` : '';
 	div.innerHTML = `
@@ -259,6 +270,7 @@ function showIncoming(msg: ChallengeReceivedMessage): void {
 
 async function accept(id: string, btn: HTMLElement): Promise<void> {
 	btn.closest('.challenge-incoming')?.remove();
+	showStatus('Starting match...', 'var(--cyan-dim)', 'var(--cyan)');
 	try {
 		const r = await fetch(`/api/challenges/${encodeURIComponent(id)}/accept`, {
 			method: 'POST',
@@ -268,8 +280,17 @@ async function accept(id: string, btn: HTMLElement): Promise<void> {
 		const data = await r.json();
 		if (!r.ok) {
 			showStatus(data.message || data.error || 'Accept failed', 'rgba(218,54,51,0.1)', 'var(--red)');
+			return;
 		}
-		// On success, the server pushes `challenge-start` via WS which triggers redirect
+		// Single fetch → direct redirect. No extra bracket/tournament
+		// fetches that can race with the page's redirect poll.
+		const p = new URLSearchParams({
+			tournament: '1', matchId: data.matchId, seed: data.seed || '0',
+			side: data.youAre, opponent: data.opponent, name: myNametag!,
+			tid: data.tournamentId, bestOf: String(data.bestOf || 1),
+			startsAt: String(Date.now() + 3000),
+		});
+		location.href = 'dev.html?' + p;
 	} catch (err) {
 		showStatus('Network error', 'rgba(218,54,51,0.1)', 'var(--red)');
 	}
@@ -319,6 +340,40 @@ document.getElementById('chat-send')?.addEventListener('click', sendChat);
 document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
 	if ((e as KeyboardEvent).key === 'Enter') sendChat();
 });
+
+// ── Network status bar ───────────────────────────────────────────
+let lastRestOk = false;
+function updateNetStatus() {
+	const dot = document.getElementById('net-dot');
+	const text = document.getElementById('net-text');
+	if (!dot || !text) return;
+	const wsOk = ws?.readyState === 1;
+	if (wsOk && lastRestOk) {
+		dot.style.background = '#2ea043';
+		dot.style.boxShadow = '0 0 6px rgba(46,160,67,0.5)';
+		text.style.color = '#2ea043';
+		text.textContent = `Connected as ${myNametag || '?'} | ${onlinePlayers.length} online`;
+	} else if (wsOk || lastRestOk) {
+		dot.style.background = '#f97316';
+		dot.style.boxShadow = '0 0 6px rgba(249,115,22,0.5)';
+		text.style.color = '#f97316';
+		text.textContent = wsOk ? 'WS OK, REST issues' : 'REST OK, WS reconnecting…';
+	} else {
+		dot.style.background = '#c1121f';
+		dot.style.boxShadow = '0 0 6px rgba(193,18,31,0.5)';
+		text.style.color = '#c1121f';
+		text.textContent = 'Disconnected — reconnecting…';
+	}
+}
+// Check REST health on every online poll
+const origPoll = setInterval(async () => {
+	try {
+		const r = await fetch('/api/online');
+		lastRestOk = r.ok;
+	} catch { lastRestOk = false; }
+	updateNetStatus();
+}, 3000);
+updateNetStatus();
 
 // Expose handlers used by inline `onclick=` attributes in the rendered HTML.
 window.challenge = challenge;

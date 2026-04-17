@@ -247,11 +247,47 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
 
+	/** Log to console AND server — both players' events visible in fly logs. */
+	function gameLog(event: string, data?: Record<string, unknown>) {
+		const entry = { event, matchId, player: playerName, phase, ...data };
+		console.log(`[game] ${event}`, data || '');
+		fetch('/api/log', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ nametag: playerName, event: `game.${event}`, data: entry }),
+		}).catch(() => {});
+	}
+
+	// ── Debug HUD ──────────────────────────────────────────────────
+	const debugHud = document.createElement('div');
+	debugHud.id = 'debug-hud';
+	debugHud.style.cssText =
+		'position:fixed;top:4px;left:4px;z-index:999;' +
+		'background:rgba(0,0,0,0.7);color:#0f0;' +
+		'padding:6px 10px;border-radius:4px;' +
+		'font-family:monospace;font-size:10px;line-height:1.5;' +
+		'pointer-events:none;max-width:280px;';
+	document.body.appendChild(debugHud);
+	let lastPollInfo = '';
+
+	function updateDebugHud() {
+		const wsState = ['CONNECTING','OPEN','CLOSING','CLOSED'][matchWs.wsState] || '?';
+		debugHud.innerHTML =
+			`<b>${playerName}</b> | side ${mySide}<br>` +
+			`phase: <b>${phase}</b><br>` +
+			`game: ${currentGameNumber}/${bestOf} | wins: ${mySide === 'A' ? currentWinsA : currentWinsB}-${mySide === 'A' ? currentWinsB : currentWinsA}<br>` +
+			`inputs: ${inputsSent} | score: ${myState.score}<br>` +
+			`opp ghost: ${opponentState.score}${oppGhostDead ? ' [DEAD]' : ''}<br>` +
+			`ws: ${wsState}<br>` +
+			`poll: ${lastPollInfo}`;
+	}
+	setInterval(updateDebugHud, 500);
+
 	function setPhase(next: ClientPhase) {
 		if (phase === next) return;
-		console.log(`[phase] ${phase} → ${next}`);
+		gameLog('phase', { from: phase, to: next });
 		phase = next;
-		(window as any).__currentPhase = next; // exposed for Playwright tests
+		(window as any).__currentPhase = next;
 	}
 	// Derived helpers used by input handlers + game loop guard
 	function isPlaying() { return phase === 'playing'; }
@@ -445,21 +481,11 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">${data.message || 'Accept failed'}</div>`);
 				return;
 			}
-			const tid = data.tournamentId || '';
-			const br = await fetch(`/api/tournaments/${encodeURIComponent(tid)}/bracket`);
-			const { matches } = await br.json();
-			const m = matches?.find((m: any) => m.id === data.matchId);
-			if (!m) {
-				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Match not found</div>`);
-				return;
-			}
 			matchWs.close();
-			const side = m.playerA === playerName ? 'A' : 'B';
-			const opp = side === 'A' ? m.playerB : m.playerA;
 			const p = new URLSearchParams({
-				tournament: '1', matchId: m.id, seed: m.seed || '0',
-				side, opponent: opp, name: playerName,
-				tid, bestOf: String(bestOf),
+				tournament: '1', matchId: data.matchId, seed: data.seed || '0',
+				side: data.youAre, opponent: data.opponent, name: playerName,
+				tid: data.tournamentId, bestOf: String(data.bestOf || bestOf),
 				wager: String(lastWager), startsAt: String(Date.now() + 3000),
 			});
 			location.href = 'dev.html?' + p;
@@ -490,6 +516,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	});
 
 	// Keyboard + touch input
+	let inputsSent = 0; // track for debugging input loss
 	const keysAllowed: Record<number, boolean> = {};
 	document.addEventListener('keydown', (e) => {
 		// Don't intercept typing in chat or other inputs
@@ -502,6 +529,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		if (action) {
 			myState.character.queuedActions.push(action);
 			wsSend({ type: 'input', matchId, tick: myState.tick, payload: btoa(action) });
+			inputsSent++;
 		}
 	});
 	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; });
@@ -559,7 +587,8 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	let readyDeadline = 0;
 
 	function sendReady() {
-		if (phase !== 'ready_prompt') return; // only from ready_prompt
+		if (phase !== 'ready_prompt') return;
+		gameLog('sendReady');
 		setPhase('waiting');
 		readyDeadline = Date.now() + 10_000;
 
@@ -658,6 +687,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		oppBuffer.clear();
 		oppGhostDead = false;
 		countdownActive = false;
+		inputsSent = 0;
 		tickAccumulator = 0;
 		lastFrameTime = performance.now();
 		if (render.opponent) render.opponent.root.visible = true;
@@ -686,7 +716,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			getCurrentWins: () => ({ a: currentWinsA, b: currentWinsB }),
 			getReadyDeadline: () => readyDeadline,
 			onMatchComplete(s) {
-				console.log('[poll] → series_end');
+				gameLog('matchComplete', { winner: s.winner, scoreA: s.scoreA, scoreB: s.scoreB });
 				onMatchEnd({
 					matchId: s.matchId, winner: s.winner,
 					scoreA: s.scoreA ?? 0, scoreB: s.scoreB ?? 0,
@@ -695,7 +725,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				});
 			},
 			onSeriesAdvance(s) {
-				console.log(`[poll] game ${s.series.currentGame} > ${currentGameNumber}`);
+				gameLog('seriesAdvance', { serverGame: s.series.currentGame, localGame: currentGameNumber, winsA: s.series.winsA, winsB: s.series.winsB });
 				const prevWinsA = currentWinsA;
 				const prevWinsB = currentWinsB;
 				const newWinsA = s.series.winsA || 0;
@@ -718,14 +748,15 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				setTimeout(() => resetForNextGame(s), 3000);
 			},
 			onBothReady() {
-				console.log('[poll] both ready → countdown');
+				gameLog('bothReady');
 				kickCountdown(Date.now() + 3000);
 			},
 			onReadyExpired() {
-				console.log('[poll] ready expired');
+				gameLog('readyExpired');
 				showReadyPrompt('Ready expired — opponent didn\'t ready in time');
 			},
 			getMyScore: () => myState.score,
+			onPollResult(info) { lastPollInfo = info; },
 			onIncomingChallenge(ch) {
 				if (shownChallengeId === ch.id) return;
 				shownChallengeId = ch.id;
@@ -739,7 +770,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			onGameDecided(opponentScore) {
 				// Server confirmed: opponent is dead with score X, and
 				// our local score already exceeds it. Game is decided.
-				console.log(`[poll] decided: my ${myState.score} > opp ${opponentScore}`);
+				gameLog('gameDecided', { myScore: myState.score, oppScore: opponentScore, seed: currentSeed, inputsSent, tick: myState.tick });
 				setPhase('done_sent');
 				sendMatchDone();
 				removeDeathBanner();
@@ -801,6 +832,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				// Self died → transition to done_sent
 				if (myState.gameOver && phase === 'playing') {
 					playCrash();
+					gameLog('died', { score: myState.score, inputsSent, tick: myState.tick, seed: currentSeed });
 					setPhase('done_sent');
 					sendMatchDone();
 					// Safety: if the poll never detects the result (server
@@ -818,7 +850,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 					if (oppGhostDead) {
 						showDeathBanner('CALCULATING RESULT', 'Both finished — server is replaying…');
 					} else {
-						showDeathBanner('YOU DIED', `Score: ${myState.score.toLocaleString()} — waiting for opponent…`);
+						showDeathBanner('YOU DIED', `Score: ${myState.score.toLocaleString()} (${inputsSent} inputs) — waiting for opponent…`);
 					}
 				}
 
