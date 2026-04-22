@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run — Admin</title>
+<link rel="icon" type="image/png" href="logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a12;--surface:rgba(20,32,56,0.85);
+  --cyan:#5feaff;--cyan-dim:rgba(95,234,255,0.2);--cyan-glow:rgba(95,234,255,0.5);
+  --orange:#ff9534;--green:#4ade80;--red:#ff5e5e;
+  --text:#f8fafc;--text2:#cbd5e1;--text3:#94a3b8;
+  --border:rgba(95,234,255,0.25);--border-hi:rgba(95,234,255,0.4);
+  --r:6px;
+  --display:'Orbitron',monospace;--body:'IBM Plex Mono','SF Mono',monospace;
+}
+body{font-family:var(--body);background:var(--bg);color:var(--text);min-height:100vh;padding:40px 20px}
+.page{max-width:800px;margin:0 auto}
+h1{font-family:var(--display);font-size:24px;font-weight:800;margin-bottom:8px}
+h1 span{color:var(--cyan)}
+.subtitle{color:var(--text2);font-size:13px;margin-bottom:32px}
+
+/* Auth */
+.auth-bar{display:flex;gap:10px;align-items:center;margin-bottom:32px}
+.auth-bar input{flex:1;max-width:300px;padding:10px 14px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--body);font-size:13px;outline:none}
+.auth-bar input:focus{border-color:var(--cyan)}
+.auth-status{font-size:12px;color:var(--text3)}
+.auth-status.ok{color:var(--green)}
+
+/* Cards */
+.card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--r);margin-bottom:20px;overflow:hidden}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-head h2{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--text2)}
+.card-body{padding:20px}
+
+/* Form */
+.form-row{display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+.form-row label{font-family:var(--display);font-size:10px;letter-spacing:.1em;color:var(--text2);min-width:100px;text-transform:uppercase}
+.form-row input,.form-row select{padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--body);font-size:13px;outline:none;flex:1;max-width:300px}
+.form-row input:focus{border-color:var(--cyan)}
+
+/* Buttons */
+.btn{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:10px 20px;border-radius:var(--r);border:none;cursor:pointer;transition:.2s}
+.btn-primary{background:var(--cyan);color:var(--bg)}
+.btn-primary:hover{opacity:.85}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+.btn-danger{background:var(--red);color:#fff}
+.btn-danger:hover{opacity:.85}
+.btn-sm{padding:6px 12px;font-size:10px}
+.btn-start{background:var(--green);color:#fff}
+.btn-start:hover{opacity:.85}
+
+/* Tournament list */
+.t-row{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.t-row:last-child{border-bottom:none}
+.t-name{font-family:var(--display);font-size:13px;font-weight:700;color:var(--text);min-width:160px}
+.t-meta{font-size:12px;color:var(--text3);flex:1}
+.t-prize{font-family:var(--display);font-size:13px;font-weight:600;color:var(--orange)}
+.t-status{font-size:10px;font-family:var(--display);font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:3px 8px;border-radius:99px}
+.t-status.reg{background:rgba(249,115,22,0.15);color:var(--orange);border:1px solid rgba(249,115,22,0.2)}
+.t-status.active{background:rgba(46,160,67,0.1);color:var(--green);border:1px solid rgba(46,160,67,0.2)}
+.t-status.complete{background:rgba(12,20,38,0.5);color:var(--text3);border:1px solid var(--border)}
+.t-actions{display:flex;gap:6px}
+
+.msg{padding:10px 14px;border-radius:var(--r);font-size:12px;margin-top:12px}
+.msg-ok{background:rgba(46,160,67,0.1);color:var(--green);border:1px solid rgba(46,160,67,0.2)}
+.msg-err{background:rgba(218,54,51,0.1);color:var(--red);border:1px solid rgba(218,54,51,0.2)}
+.empty{color:var(--text3);font-size:13px;padding:20px 0;text-align:center}
+
+.nav{margin-bottom:24px}
+.nav a{font-family:var(--display);font-size:11px;color:var(--text3);text-decoration:none;letter-spacing:.1em}
+.nav a:hover{color:var(--cyan)}
+
+.bs-stat{padding:14px 16px;background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:var(--r)}
+.bs-label{font-size:10px;color:var(--text3);font-family:var(--display);letter-spacing:.15em;text-transform:uppercase;margin-bottom:6px}
+.bs-value{font-family:var(--display);font-size:22px;font-weight:700;color:var(--cyan)}
+.bs-sub{font-size:11px;color:var(--text3);margin-top:2px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="nav"><a href="index.html">&larr; Home</a></div>
+  <h1>Admin <span>Panel</span></h1>
+  <p class="subtitle">Manage tournaments, set prize pools</p>
+
+  <!-- Auth -->
+  <div class="auth-bar">
+    <input type="password" id="admin-key" placeholder="Admin key">
+    <button class="btn btn-primary btn-sm" id="btn-auth">Authenticate</button>
+    <span class="auth-status" id="auth-status"></span>
+  </div>
+
+  <!-- Balance Sheet -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Token Balance Sheet</h2>
+      <button class="btn btn-sm btn-primary" id="btn-refresh-bs">Refresh</button>
+    </div>
+    <div class="card-body" id="bs-body">
+      <div class="empty">Authenticate to view</div>
+    </div>
+  </div>
+
+  <!-- Create Tournament -->
+  <div class="card">
+    <div class="card-head"><h2>Create Tournament</h2></div>
+    <div class="card-body">
+      <div class="form-row">
+        <label>Name</label>
+        <input type="text" id="t-name" placeholder="Weekly Championship" value="Weekly Championship">
+      </div>
+      <div class="form-row">
+        <label>Max Players</label>
+        <input type="number" id="t-max" value="0" min="0" max="256">
+        <label style="min-width:auto;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="t-unlimited" checked onchange="document.getElementById('t-max').disabled=this.checked;if(this.checked)document.getElementById('t-max').value='0'"> Unlimited</label>
+      </div>
+      <div class="form-row">
+        <label>Prize Pool</label>
+        <input type="number" id="t-prize" value="100" min="0" step="10" placeholder="UCT">
+      </div>
+      <div class="form-row">
+        <label>Entry Fee</label>
+        <input type="number" id="t-entry" value="0" min="0" step="10" placeholder="UCT per player">
+      </div>
+      <div class="form-row">
+        <label>Best Of</label>
+        <select id="t-bestof" style="padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--body);font-size:13px">
+          <option value="1">1 (single game)</option>
+          <option value="3" selected>3</option>
+          <option value="5">5</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Round Hours</label>
+        <input type="number" id="t-hours" value="24" min="1" max="168">
+      </div>
+      <div class="form-row">
+        <label>Starts At</label>
+        <input type="datetime-local" id="t-starts">
+      </div>
+      <div style="margin-top:16px">
+        <button class="btn btn-primary" id="btn-create">Create Tournament</button>
+      </div>
+      <div id="create-msg"></div>
+    </div>
+  </div>
+
+  <!-- Tournament List -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Tournaments</h2>
+      <button class="btn btn-sm btn-primary" id="btn-refresh">Refresh</button>
+    </div>
+    <div class="card-body" id="t-list">
+      <div class="empty">Authenticate to view tournaments</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API='/api';
+let adminKey='';
+
+// Default start time: 1 hour from now
+const d=new Date(Date.now()+3600000);
+document.getElementById('t-starts').value=d.toISOString().slice(0,16);
+document.getElementById('t-max').disabled=true;
+
+document.getElementById('btn-auth').addEventListener('click',async()=>{
+  adminKey=document.getElementById('admin-key').value.trim();
+  const s=document.getElementById('auth-status');
+  if(!adminKey){s.textContent='Enter a key';return}
+  s.textContent='Checking...';
+  // Check against an admin-only endpoint. If it returns 200, key is valid.
+  try{
+    const r=await fetch(`${API}/admin/balance-sheet`,{headers:headers()});
+    if(r.ok){
+      s.textContent='Authenticated';s.className='auth-status ok';
+      await loadList();
+      await loadBalanceSheet();
+    }else{
+      s.textContent='Invalid key';s.className='auth-status';
+    }
+  }catch(e){
+    s.textContent='Error: '+e.message;s.className='auth-status';
+  }
+});
+
+document.getElementById('btn-refresh-bs').addEventListener('click',()=>loadBalanceSheet());
+
+async function loadBalanceSheet(){
+  if(!adminKey){document.getElementById('bs-body').innerHTML='<div class="empty">Authenticate first</div>';return}
+  try{
+    const r=await fetch(`${API}/admin/balance-sheet`,{headers:headers()});
+    const d=await r.json();
+    if(!r.ok){
+      document.getElementById('bs-body').innerHTML=`<div class="msg msg-err">${d.error||'Failed'}</div>`;
+      return;
+    }
+    const byType=d.byType||{};
+    const typeRows=Object.entries(byType)
+      .sort((a,b)=>Math.abs(b[1].total)-Math.abs(a[1].total))
+      .map(([type,v])=>`<tr><td style="padding:4px 12px 4px 0;color:var(--text2)">${esc(type)}</td><td style="padding:4px 12px;text-align:right;font-family:var(--display);color:${v.total>=0?'var(--cyan)':'var(--red)'}">${v.total>=0?'+':''}${v.total} UCT</td><td style="padding:4px 0;text-align:right;color:var(--text3);font-size:11px">${v.count} txs</td></tr>`).join('');
+    document.getElementById('bs-body').innerHTML=`
+      <div style="margin-bottom:16px;padding:10px 14px;background:rgba(0,229,255,0.05);border:1px solid rgba(0,229,255,0.15);border-radius:var(--r);font-size:12px;color:var(--text2)">
+        <strong style="color:var(--cyan);font-family:var(--display)">Arena Wallet: ${esc(d.arenaWallet)}</strong><br>
+        <span style="color:var(--text3)">On-chain UCT balance of this wallet MUST equal <strong>${d.expectedArenaBalance} UCT</strong>. Any drift means the internal ledger and the chain disagree.</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:20px">
+        <div class="bs-stat"><div class="bs-label">Expected Arena Balance</div><div class="bs-value">${d.expectedArenaBalance} UCT</div></div>
+        <div class="bs-stat"><div class="bs-label">Player Balances</div><div class="bs-value">${d.totalBalance} UCT</div><div class="bs-sub">${d.playerCount} players</div></div>
+        <div class="bs-stat"><div class="bs-label">Unpaid Prize Pools</div><div class="bs-value">${d.unpaidPrizePools} UCT</div><div class="bs-sub">${d.unpaidTournaments} tournaments</div></div>
+        <div class="bs-stat"><div class="bs-label">Paid Out (Historical)</div><div class="bs-value">${d.paidPrizePools} UCT</div></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="border-bottom:1px solid var(--border);text-align:left"><th style="padding:6px 0;color:var(--text3);font-weight:500;font-size:11px;letter-spacing:.15em;text-transform:uppercase">Type</th><th style="padding:6px 0;text-align:right;color:var(--text3);font-weight:500;font-size:11px;letter-spacing:.15em;text-transform:uppercase">Total</th><th style="padding:6px 0;text-align:right;color:var(--text3);font-weight:500;font-size:11px;letter-spacing:.15em;text-transform:uppercase">Count</th></tr></thead>
+        <tbody>${typeRows||'<tr><td colspan="3" style="padding:12px 0;color:var(--text3)">No transactions yet</td></tr>'}</tbody>
+      </table>`;
+  }catch(e){
+    document.getElementById('bs-body').innerHTML=`<div class="msg msg-err">${e.message}</div>`;
+  }
+}
+document.getElementById('admin-key').addEventListener('keydown',e=>{
+  if(e.key==='Enter')document.getElementById('btn-auth').click();
+});
+
+function headers(){return{'Content-Type':'application/json','X-Admin-Key':adminKey}}
+
+// Create
+document.getElementById('btn-create').addEventListener('click',async()=>{
+  if(!adminKey){document.getElementById('create-msg').innerHTML='<div class="msg msg-err">Authenticate first</div>';return}
+  const name=document.getElementById('t-name').value.trim();
+  const maxPlayers=parseInt(document.getElementById('t-max').value,10);
+  const prizePool=parseInt(document.getElementById('t-prize').value,10);
+  const entryFee=parseInt(document.getElementById('t-entry').value,10)||0;
+  const bestOf=parseInt(document.getElementById('t-bestof').value,10);
+  const roundHours=parseInt(document.getElementById('t-hours').value,10);
+  const startsAt=new Date(document.getElementById('t-starts').value).toISOString();
+  if(!name){document.getElementById('create-msg').innerHTML='<div class="msg msg-err">Name required</div>';return}
+  try{
+    const r=await fetch(`${API}/tournaments`,{method:'POST',headers:headers(),body:JSON.stringify({name,maxPlayers,prizePool,entryFee,bestOf,roundHours,startsAt})});
+    const d=await r.json();
+    if(r.ok){
+      document.getElementById('create-msg').innerHTML=`<div class="msg msg-ok">Created: ${d.id}</div>`;
+      loadList();
+    }else{
+      document.getElementById('create-msg').innerHTML=`<div class="msg msg-err">${d.error}</div>`;
+    }
+  }catch(e){
+    document.getElementById('create-msg').innerHTML=`<div class="msg msg-err">${e.message}</div>`;
+  }
+});
+
+// List
+document.getElementById('btn-refresh').addEventListener('click',()=>loadList());
+
+async function loadList(){
+  const el=document.getElementById('t-list');
+  try{
+    const r=await fetch(`${API}/tournaments`);
+    const d=await r.json();
+    const all=d.tournaments||[];
+    if(!all.length){el.innerHTML='<div class="empty">No tournaments</div>';return true}
+    el.innerHTML=all.map(t=>{
+      const sc=t.status==='registration'?'reg':t.status==='active'?'active':'complete';
+      const time=new Date(t.starts_at).toLocaleString();
+      const prize=t.prize_pool?`<span class="t-prize">${t.prize_pool} UCT</span>`:'';
+      let actions=`<button class="btn btn-danger btn-sm" onclick="deleteTournament('${esc(t.id)}')">Delete</button>`;
+      if(t.status==='registration')actions=`<button class="btn btn-start btn-sm" onclick="startTournament('${esc(t.id)}')">Start</button> `+actions;
+      if(t.status==='complete'&&t.prize_pool>0&&!t.prize_paid)actions=`<button class="btn btn-primary btn-sm" onclick="payPrize('${esc(t.id)}')">Pay ${t.prize_pool} UCT</button> `+actions;
+      if(t.status==='complete'&&t.prize_paid)actions=`<span style="font-size:11px;color:var(--green);font-family:var(--display);letter-spacing:.1em">PAID</span> `+actions;
+      return`<div class="t-row">
+        <div class="t-name">${esc(t.name)}</div>
+        <div class="t-meta">${time} | ${t.max_players>0?t.max_players+' max':'Unlimited'} players | Bo${t.best_of||1}</div>
+        ${prize}
+        <span class="t-status ${sc}">${t.status}</span>
+        <div class="t-actions">${actions}</div>
+      </div>`;
+    }).join('');
+    return true;
+  }catch{
+    el.innerHTML='<div class="empty">Failed to load</div>';
+    return false;
+  }
+}
+
+async function startTournament(id){
+  if(!confirm('Start tournament '+id+'?'))return;
+  const r=await fetch(`${API}/tournaments/${id}/start`,{method:'POST',headers:headers()});
+  const d=await r.json();
+  if(r.ok)loadList();
+  else alert(d.error||'Failed');
+}
+
+async function payPrize(id){
+  if(!confirm('Pay prize for tournament '+id+'?'))return;
+  const r=await fetch(`${API}/tournaments/${id}/pay-prize`,{method:'POST',headers:headers()});
+  const d=await r.json();
+  if(r.ok){alert(`Paid ${d.amount} UCT to ${d.winner}`);loadList()}
+  else alert(d.error||'Failed');
+}
+
+async function deleteTournament(id){
+  if(!confirm('Delete tournament '+id+'? This cannot be undone.'))return;
+  const r=await fetch(`${API}/tournaments/${id}`,{method:'DELETE',headers:headers()});
+  const d=await r.json();
+  if(r.ok)loadList();
+  else alert(d.error||'Failed');
+}
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+</script>
+</body>
+</html>

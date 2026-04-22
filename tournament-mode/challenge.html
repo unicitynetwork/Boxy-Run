@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run — Challenge</title>
+<link rel="icon" type="image/png" href="logo.png">
+<script type="text/javascript" src="js/sphere-connect.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a12;--surface:rgba(20,32,56,0.85);
+  --cyan:#5feaff;--cyan-dim:rgba(95,234,255,0.2);--cyan-glow:rgba(95,234,255,0.5);
+  --green:#4ade80;--red:#ff5e5e;--orange:#ff9534;
+  --text:#f8fafc;--text2:#cbd5e1;--text3:#94a3b8;
+  --border:rgba(95,234,255,0.25);--border-hi:rgba(95,234,255,0.4);
+  --r:6px;
+  --display:'Orbitron',monospace;--body:'IBM Plex Mono','SF Mono',monospace;
+}
+body{font-family:var(--body);background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
+
+.page{max-width:600px;width:100%}
+
+/* Nav */
+.nav{display:flex;align-items:center;gap:16px;margin-bottom:40px;flex-wrap:wrap}
+.nav a{font-family:var(--display);font-size:12px;color:var(--text3);text-decoration:none;letter-spacing:.1em;transition:.2s}
+.nav a:hover{color:var(--cyan)}
+.nav a.active{color:var(--cyan)}
+.nav-sep{color:rgba(255,255,255,0.1)}
+
+/* Title */
+h1{font-family:var(--display);font-size:28px;font-weight:800;margin-bottom:8px}
+h1 span{color:var(--cyan)}
+.subtitle{color:var(--text2);font-size:14px;margin-bottom:32px}
+
+/* Cards */
+.card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--r);margin-bottom:20px;overflow:hidden}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-head h2{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--text2)}
+.card-body{padding:20px}
+
+/* Identity */
+.id-section{margin-bottom:32px}
+.id-label{font-family:var(--display);font-size:12px;letter-spacing:.1em;color:var(--text2);margin-bottom:10px}
+.id-row{display:flex;gap:10px;align-items:center}
+.id-status{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.id-status.on{background:var(--green);box-shadow:0 0 6px rgba(46,160,67,0.5)}
+.id-input{flex:1;padding:12px 16px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;outline:none;letter-spacing:.05em}
+.id-input:focus{border-color:var(--cyan)}
+.id-input:disabled{opacity:.6}
+.id-connected{font-family:var(--display);font-size:16px;font-weight:600;color:var(--cyan)}
+.btn{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;padding:12px 20px;border-radius:var(--r);border:none;cursor:pointer;transition:.2s}
+.btn-primary{background:var(--cyan);color:var(--bg)}
+.btn-primary:hover{opacity:.85}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border-hi)}
+.btn-ghost:hover{color:var(--cyan);border-color:var(--cyan)}
+.btn-wallet{background:var(--orange);color:#fff;padding:12px 24px;font-size:12px}
+.btn-wallet:hover{opacity:.85}
+
+/* Online players */
+.player-btn{font-family:var(--body);font-size:13px;padding:8px 16px;background:rgba(0,229,255,0.06);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--cyan);cursor:pointer;transition:.2s;margin:4px}
+.player-btn:hover{background:rgba(0,229,255,0.15);border-color:var(--cyan)}
+.empty{color:var(--text3);font-size:14px;padding:12px 0}
+
+/* Incoming challenge */
+.challenge-incoming{padding:14px;background:rgba(0,229,255,0.08);border:1px solid var(--border-hi);border-radius:var(--r);margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.challenge-incoming strong{color:var(--cyan)}
+
+/* Status */
+.status-msg{margin-top:12px;padding:10px 14px;border-radius:var(--r);font-size:13px;display:none}
+
+/* Footer */
+.footer{margin-top:auto;padding-top:40px;font-size:12px;color:var(--text3);text-align:center}
+.footer a{color:var(--text2);text-decoration:none;margin:0 8px}
+.footer a:hover{color:var(--cyan)}
+</style>
+</head>
+<body>
+
+<div class="page">
+  <nav class="nav">
+    <a href="index.html">Home</a>
+    <span class="nav-sep">|</span>
+    <a href="challenge.html" class="active">Challenge</a>
+    <span class="nav-sep">|</span>
+    <a href="tournament-v2.html">Tournament</a>
+  </nav>
+
+  <div id="net-status" style="padding:6px 12px;border-radius:6px;font-family:monospace;font-size:11px;margin-bottom:12px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.3)">
+    <span id="net-dot" style="width:8px;height:8px;border-radius:50%;background:#666"></span>
+    <span id="net-text" style="color:#999">Connecting…</span>
+  </div>
+
+  <h1>Challenge a <span>Player</span></h1>
+  <p class="subtitle">Play a 1v1 match against anyone online. Same world, same seed. Highest score wins.</p>
+
+  <!-- Identity (read from localStorage, set on index.html) -->
+  <div class="id-section">
+    <div class="id-label">Your Identity</div>
+    <div id="id-connected" style="display:none" class="id-row">
+      <span class="id-status on" id="ws-dot"></span>
+      <span class="id-connected" id="my-name"></span>
+    </div>
+    <div id="id-disconnected" class="id-row">
+      <span class="id-status" id="ws-dot-off"></span>
+      <span style="color:var(--text3);font-size:13px">Not connected.</span>
+      <a href="index.html" class="btn btn-ghost" style="padding:8px 16px;font-size:10px">Connect on Home</a>
+    </div>
+  </div>
+
+  <!-- Online Players -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Online Players</h2>
+      <span style="font-size:12px;color:var(--text3)" id="online-count">0 online</span>
+    </div>
+    <div class="card-body">
+      <div id="online-list">
+        <div class="empty">Connect to see who's online</div>
+      </div>
+      <div class="status-msg" id="challenge-status"></div>
+      <div id="incoming-challenges"></div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Chat</h2>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div id="chat-messages" style="height:200px;overflow-y:auto;padding:12px 16px;font-size:13px;line-height:1.6"></div>
+      <div style="display:flex;border-top:1px solid var(--border)">
+        <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200" style="flex:1;padding:10px 16px;background:transparent;border:none;color:var(--text);font-family:var(--body);font-size:13px;outline:none" disabled>
+        <button id="chat-send" style="padding:10px 16px;background:transparent;border:none;border-left:1px solid var(--border);color:var(--cyan);font-family:var(--display);font-size:10px;font-weight:700;letter-spacing:.1em;cursor:pointer" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="index.html">Home</a>
+  <a href="tournament-v2.html">Tournaments</a>
+  <a href="https://discord.gg/PGzNZT5uVp" target="_blank">Discord</a>
+  <div></div>
+</div>
+
+<script type="text/javascript" src="js/challenge-page.js"></script>
+</body>
+</html>

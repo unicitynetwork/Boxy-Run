@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+		<title>Boxy Run</title>
+		<link rel="icon" type="image/png" href="logo.png">
+		<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+		<script type="text/javascript" src="js/game.js"></script>
+		<link href="style.css" rel="stylesheet">
+		<script>if(location.search.includes('tournament=1'))document.documentElement.classList.add('mp')</script>
+		<style>
+			@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+			.mp .sp-only{display:none}
+
+			body { background: #000 !important; }
+
+			/* ── Desktop panel ─────────────────────────────── */
+			.panel {
+				background: #000 !important;
+				color: #c8d0dc !important;
+				border-right: 1px solid rgba(95,234,255,0.12) !important;
+				font-family: 'IBM Plex Mono', monospace !important;
+				min-height: 100vh !important;
+			}
+			.panel .game-title .title {
+				color: #5feaff !important;
+				font-family: 'Orbitron', monospace !important;
+				font-size: 1.2em !important;
+				letter-spacing: 0.15em !important;
+			}
+			.panel .game-title .byline,
+			.panel .game-title .byline a { color: #5a6a7e !important; }
+			.panel .stat label {
+				color: #6a7a90 !important;
+				font-family: 'Orbitron', monospace !important;
+				font-size: 0.6em !important;
+				letter-spacing: 0.2em !important;
+			}
+			.panel .stat p {
+				color: #e8ecf2 !important;
+				font-family: 'Orbitron', monospace !important;
+			}
+			.panel a, .panel button {
+				color: #8aa0b8 !important;
+				border-color: rgba(95,234,255,0.25) !important;
+				font-family: 'IBM Plex Mono', monospace !important;
+			}
+			.panel a:hover, .panel button:hover {
+				color: #5feaff !important;
+				border-color: #5feaff !important;
+			}
+			#coin-values { color: #8a95a5 !important; }
+
+			/* ── Dark overlay ──────────────────────────────── */
+			#variable-content {
+				background: rgba(8,12,22,0.92) !important;
+				color: #e8ecf2 !important;
+				border: 1px solid rgba(95,234,255,0.2) !important;
+				box-shadow: 0 10px 60px rgba(0,0,0,0.6), 0 0 30px rgba(95,234,255,0.06) !important;
+				font-family: 'IBM Plex Mono', monospace !important;
+			}
+			#variable-content button,
+			#variable-content a {
+				color: #e8ecf2 !important;
+				border-color: rgba(95,234,255,0.4) !important;
+				font-family: 'Orbitron', monospace !important;
+			}
+			#variable-content button:hover,
+			#variable-content a:hover {
+				color: #5feaff !important;
+				border-color: #5feaff !important;
+			}
+
+			/* ── Mobile HUD ────────────────────────────────── */
+			#mobile-hud {
+				display: none;
+				position: fixed; top: 0; left: 0; right: 0;
+				z-index: 100;
+				padding: 8px 16px;
+				background: linear-gradient(180deg, rgba(0,0,0,0.6) 0%, transparent 100%);
+				font-family: 'Orbitron', monospace;
+				pointer-events: none;
+			}
+			#mobile-hud .mh-row {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+			}
+			#mobile-hud .mh-score {
+				font-size: 18px;
+				font-weight: 700;
+				color: #fff;
+				text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+			}
+			#mobile-hud .mh-coins {
+				font-size: 13px;
+				color: #ffd700;
+				text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+			}
+			#mobile-hud .mh-menu {
+				pointer-events: auto;
+				background: rgba(0,0,0,0.5);
+				border: 1px solid rgba(95,234,255,0.3);
+				color: #8aa0b8;
+				font-family: 'Orbitron', monospace;
+				font-size: 9px;
+				letter-spacing: 0.1em;
+				padding: 4px 10px;
+				border-radius: 4px;
+				cursor: pointer;
+				text-decoration: none;
+			}
+
+			/* ── Mobile controls hint ──────────────────────── */
+			#mobile-controls-hint {
+				display: none;
+				position: fixed; bottom: 16px; left: 0; right: 0;
+				text-align: center;
+				font-family: 'IBM Plex Mono', monospace;
+				font-size: 10px;
+				color: rgba(255,255,255,0.4);
+				pointer-events: none;
+				z-index: 100;
+			}
+
+			/* ── Responsive ────────────────────────────────── */
+			@media (max-width: 768px) {
+				.panel { display: none !important; }
+				#mobile-hud { display: block !important; }
+				#mobile-controls-hint { display: block !important; }
+				#world {
+					position: fixed !important;
+					top: 0 !important; left: 0 !important;
+					width: 100vw !important; height: 100vh !important;
+				}
+				#variable-content {
+					top: 45% !important;
+					max-width: 90vw !important;
+					font-size: 0.85em !important;
+					padding: 16px 20px !important;
+				}
+				#level-obj-hud {
+					top: 50px !important;
+					right: 8px !important;
+					font-size: 10px !important;
+					min-width: 120px !important;
+					padding: 6px 10px !important;
+				}
+				#flame-indicator {
+					bottom: 50px !important;
+					font-size: 13px !important;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<!-- Desktop side panel -->
+		<div class="panel">
+			<div class="game-title">
+				<div class="title">boxy run</div>
+				<div class="byline">by <a target="_blank" href="https://wanfungchui.github.io/">wan fung chui</a></div>
+			</div>
+			<div style="margin-top:1em;display:flex;gap:6px;flex-wrap:wrap">
+				<a href="index.html" style="padding:8px 16px;font-size:0.65em;font-weight:500;letter-spacing:0.15em;text-transform:uppercase;text-decoration:none;border-radius:4px">&#8592; Menu</a>
+				<button onclick="localStorage.removeItem('boxyrun-skin');location.reload()" style="padding:8px 16px;font-size:0.65em;font-weight:500;letter-spacing:0.15em;text-transform:uppercase;background:transparent;border-radius:4px;cursor:pointer">Change Skin</button>
+			</div>
+			<div class="stat">
+				<label>Balance</label>
+				<p id="balance">--</p>
+			</div>
+			<div class="stat">
+				<label>Score</label>
+				<p id="score">0</p>
+			</div>
+			<div class="stat">
+				<label>Coins</label>
+				<p id="coins">0</p>
+			</div>
+			<div class="animate-flicker" id="variable-content">Loading...</div>
+			<div id="coin-values" style="margin-top:1.5em;font-size:0.65em;text-transform:uppercase;letter-spacing:0.1em">
+				<div style="color:#ffd700;margin-bottom:4px">&#9679; Gold - 250 pts</div>
+				<div style="color:#00bfff;margin-bottom:4px">&#9679; Blue - 1,000 pts</div>
+				<div style="color:#ff2050;margin-bottom:4px">&#9679; Red - 5,000 pts</div>
+				<div style="color:#ff6600">&#9679; Flame - clears trees</div>
+			</div>
+			<div style="margin-top:2em;padding:1.2em;border:1px solid rgba(95,234,255,0.15);border-radius:6px;background:rgba(95,234,255,0.03)">
+				<div style="font-family:'Orbitron',monospace;font-size:0.65em;font-weight:600;letter-spacing:0.2em;color:#5feaff;margin-bottom:10px">CONTROLS</div>
+				<div style="font-size:0.75em;color:#c8d0dc;line-height:2">
+					<div><span style="display:inline-block;width:50px;color:#5feaff;font-weight:600">&#8593; W</span> Jump</div>
+					<div><span style="display:inline-block;width:50px;color:#5feaff;font-weight:600">&#8592; A</span> Left</div>
+					<div><span style="display:inline-block;width:50px;color:#5feaff;font-weight:600">&#8594; D</span> Right</div>
+					<div><span style="display:inline-block;width:50px;color:#5feaff;font-weight:600">&#8595; F</span> Flamethrower</div>
+					<div><span style="display:inline-block;width:50px;color:#5feaff;font-weight:600">P</span> Pause</div>
+				</div>
+			</div>
+			<div style="margin-top:1.5em;font-size:0.5em;color:#3a4a5e">Music by PPEAK (CC-BY 4.0)</div>
+		</div>
+
+		<!-- Mobile HUD (hidden on desktop) -->
+		<div id="mobile-hud">
+			<div class="mh-row">
+				<div>
+					<div class="mh-score" id="mobile-score">0</div>
+					<div class="mh-coins" id="mobile-coins">0 coins</div>
+				</div>
+				<a href="index.html" class="mh-menu">MENU</a>
+			</div>
+		</div>
+
+		<!-- Mobile controls hint -->
+		<div id="mobile-controls-hint">
+			swipe: &#8592; &#8594; move &nbsp; &#8593; jump &nbsp; &#8595; flame &nbsp; tap: jump
+		</div>
+
+		<div id="world"></div>
+	</body>
+</html>

@@ -858,7 +858,7 @@ var SphereConnect = (() => {
 
   // src/sphere-connect.ts
   var WALLET_URL = "https://sphere.unicity.network";
-  var GAME_WALLET_ADDRESS = "@boxyrun";
+  var GAME_WALLET_ADDRESS = "@boxyrunarena";
   var ENTRY_FEE = 10;
   var COIN_ID = "UCT";
   var UCT_COIN_ID_HEX = "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
@@ -923,6 +923,14 @@ var SphereConnect = (() => {
     PERMISSION_SCOPES.TRANSFER_REQUEST
   ];
   async function connect() {
+    if (state.isConnected && client) {
+      updateUI("connected");
+      try {
+        await refreshBalance();
+      } catch {
+      }
+      return;
+    }
     updateUI("connecting");
     try {
       let resumeSessionId;
@@ -931,6 +939,7 @@ var SphereConnect = (() => {
       } else if (hasExtension()) {
         transport = ExtensionTransport.forClient();
       } else {
+        const popupWasAlreadyOpen = popupWindow && !popupWindow.closed;
         if (!popupWindow || popupWindow.closed) {
           popupWindow = window.open(
             WALLET_URL + "/connect?origin=" + encodeURIComponent(location.origin),
@@ -946,7 +955,12 @@ var SphereConnect = (() => {
           target: popupWindow,
           targetOrigin: WALLET_URL
         });
-        await waitForHostReady();
+        if (!popupWasAlreadyOpen) {
+          try {
+            await waitForHostReady();
+          } catch {
+          }
+        }
         resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? void 0;
       }
       client = new ConnectClient({
@@ -1021,7 +1035,8 @@ var SphereConnect = (() => {
       state.balance = null;
     }
   }
-  async function deposit() {
+  async function deposit(amount) {
+    const sendAmount = amount ?? ENTRY_FEE;
     if (!client || !state.isConnected) {
       state.error = "Not connected";
       return false;
@@ -1031,8 +1046,8 @@ var SphereConnect = (() => {
       updateUI("connected");
       return false;
     }
-    if (state.balance !== null && state.balance < ENTRY_FEE) {
-      state.error = `Insufficient balance. You need at least ${ENTRY_FEE} ${COIN_ID}.`;
+    if (state.balance !== null && state.balance < sendAmount) {
+      state.error = `Insufficient balance. You need at least ${sendAmount} ${COIN_ID}.`;
       updateUI("connected");
       return false;
     }
@@ -1044,7 +1059,7 @@ var SphereConnect = (() => {
       }
       await client.intent(INTENT_ACTIONS.SEND, {
         to: GAME_WALLET_ADDRESS,
-        amount: ENTRY_FEE,
+        amount: sendAmount,
         coinId: uctCoinId,
         memo: "Boxy Run entry fee"
       });
