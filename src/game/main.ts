@@ -19,15 +19,13 @@ import {
 	createScene,
 	renderFrame,
 	type SceneHandle,
-} from '../render/scene';
-import {
 	addOpponentMesh,
 	createRenderState,
 	removeOpponentMesh,
 	syncOpponent,
 	syncRender,
 	type RenderState,
-} from '../render/sync';
+} from './renderer';
 import { makeInitialState } from '../sim/init';
 import {
 	DEFAULT_CONFIG,
@@ -41,6 +39,7 @@ import { showSkinSelector } from './skin-selector';
 import { connectMatchWS } from './match-ws';
 import { createChatPanel } from './match-chat';
 import { startStatePoll } from './match-poll';
+import { LEVELS, checkObjectives, completeLevel, saveLevelBest, type LevelDef } from './levels';
 import {
 	showOverlay,
 	hideOverlay,
@@ -169,6 +168,17 @@ window.addEventListener('load', () => {
 		return;
 	}
 
+	// Level mode: ?level=N
+	const levelParam = params.get('level');
+	if (levelParam) {
+		const levelId = parseInt(levelParam, 10);
+		const levelDef = LEVELS.find(l => l.id === levelId);
+		if (levelDef) {
+			pickSkin((skin) => startLevel(levelDef, skin));
+			return;
+		}
+	}
+
 	// Single-player
 	pickSkin((skin) => startSinglePlayer(params, skin));
 });
@@ -186,7 +196,9 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	const bestOf = parseInt(params.get('bestOf') || '1', 10);
 
 	// Per-game state — mutated on series-next instead of navigating (preserves AudioContext)
-	let currentSeed = parseInt(params.get('seed') || '0', 16) >>> 0;
+	const seedHex = params.get('seed') || '0';
+	let currentSeed = parseInt(seedHex, 16) >>> 0;
+	console.log(`[seed] URL hex=${seedHex} parsed=${currentSeed}`);
 	let currentGameNumber = parseInt(params.get('gameNum') || '1', 10);
 	let currentWinsA = parseInt(params.get('winsA') || '0', 10);
 	let currentWinsB = parseInt(params.get('winsB') || '0', 10);
@@ -206,25 +218,48 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			seriesHud.id = 'series-hud';
 			seriesHud.style.cssText =
 				'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:100;' +
-				'background:rgba(0,0,0,0.7);color:#fff;padding:6px 16px;border-radius:6px;' +
-				'font-family:monospace;font-size:13px;text-align:center;pointer-events:none;';
+				'background:rgba(0,0,0,0.8);color:#fff;padding:12px 28px;border-radius:10px;' +
+				'font-family:monospace;text-align:center;pointer-events:none;' +
+				'border:1px solid rgba(255,255,255,0.1);';
 			document.body.appendChild(seriesHud);
 		}
 		const myWins = mySide === 'A' ? currentWinsA : currentWinsB;
 		const oppWins = mySide === 'A' ? currentWinsB : currentWinsA;
-		seriesHud.innerHTML = `<span style="font-size:10px;opacity:0.6">BEST OF ${bestOf} | GAME ${currentGameNumber}</span><br><span style="color:#00e5ff">${myWins}</span> - <span style="color:#f97316">${oppWins}</span>`;
+		seriesHud.innerHTML =
+			`<div style="font-size:14px;opacity:0.6;letter-spacing:0.15em;margin-bottom:8px">BEST OF ${bestOf} | GAME ${currentGameNumber}</div>` +
+			`<div style="display:flex;align-items:center;gap:16px;justify-content:center">` +
+			`<div style="text-align:center"><div style="font-size:10px;opacity:0.5;margin-bottom:2px">YOU</div><div style="font-size:36px;font-weight:bold;color:#00e5ff">${myWins}</div></div>` +
+			`<div style="font-size:24px;opacity:0.3">—</div>` +
+			`<div style="text-align:center"><div style="font-size:10px;opacity:0.5;margin-bottom:2px">OPP</div><div style="font-size:36px;font-weight:bold;color:#f97316">${oppWins}</div></div>` +
+			`</div>`;
 	}
 	updateSeriesHud();
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
 	const render = createRenderState(scene, skin, true);
-	addOpponentMesh(render, scene);
+	// No ghost — opponent status shown via server-confirmed data only.
+	let oppStatusEl: HTMLElement | null = null;
+	function showOppStatus(text: string, color: string) {
+		if (!oppStatusEl) {
+			oppStatusEl = document.createElement('div');
+			oppStatusEl.style.cssText =
+				'position:fixed;top:60px;right:16px;z-index:100;' +
+				'background:rgba(0,0,0,0.85);' +
+				'padding:12px 20px;border-radius:10px;' +
+				'font-family:monospace;pointer-events:none;' +
+				'border:1px solid rgba(255,255,255,0.15);';
+			document.body.appendChild(oppStatusEl);
+		}
+		oppStatusEl.innerHTML = text;
+		oppStatusEl.style.borderColor = color;
+	}
+	function hideOppStatus() {
+		if (oppStatusEl) { oppStatusEl.remove(); oppStatusEl = null; }
+	}
 
 	// Mutable per-game sim state — reassigned on series-next
 	let myState = makeInitialState(currentSeed, config);
-	let opponentState = makeInitialState(currentSeed, config);
-	let oppBuffer = new Map<number, CharacterAction[]>();
 
 	// ── Client-side state machine ────────────────────────────────────
 	// ONE source of truth. Every handler checks `phase` — never a combo
@@ -243,7 +278,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		| 'series_end';   // final result shown (terminal until navigate/rematch)
 
 	let phase: ClientPhase = 'ready_prompt';
-	let oppGhostDead = false; // visual-only: hide ghost mesh when opp sim dies
 	let lastFrameTime = performance.now();
 	let tickAccumulator = 0;
 
@@ -258,28 +292,34 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		}).catch(() => {});
 	}
 
-	// ── Debug HUD ──────────────────────────────────────────────────
+	// ── Debug HUD — toggle with ?debug=1 in URL ────────────────────
+	const showDebug = new URLSearchParams(location.search).has('debug');
 	const debugHud = document.createElement('div');
 	debugHud.id = 'debug-hud';
 	debugHud.style.cssText =
-		'position:fixed;top:4px;left:4px;z-index:999;' +
-		'background:rgba(0,0,0,0.7);color:#0f0;' +
-		'padding:6px 10px;border-radius:4px;' +
-		'font-family:monospace;font-size:10px;line-height:1.5;' +
-		'pointer-events:none;max-width:280px;';
+		'position:fixed;top:50%;left:16px;transform:translateY(-50%);z-index:999;' +
+		'background:rgba(0,0,0,0.85);color:#0f0;' +
+		'padding:16px 20px;border-radius:8px;' +
+		'font-family:monospace;font-size:16px;line-height:1.8;' +
+		'pointer-events:none;max-width:400px;' +
+		'border:1px solid rgba(0,255,0,0.2);' +
+		(showDebug ? '' : 'display:none;');
 	document.body.appendChild(debugHud);
 	let lastPollInfo = '';
 
 	function updateDebugHud() {
+		if (!showDebug) return;
 		const wsState = ['CONNECTING','OPEN','CLOSING','CLOSED'][matchWs.wsState] || '?';
+		const wsColor = wsState === 'OPEN' ? '#0f0' : '#f00';
 		debugHud.innerHTML =
-			`<b>${playerName}</b> | side ${mySide}<br>` +
-			`phase: <b>${phase}</b><br>` +
-			`game: ${currentGameNumber}/${bestOf} | wins: ${mySide === 'A' ? currentWinsA : currentWinsB}-${mySide === 'A' ? currentWinsB : currentWinsA}<br>` +
-			`inputs: ${inputsSent} | score: ${myState.score}<br>` +
-			`opp ghost: ${opponentState.score}${oppGhostDead ? ' [DEAD]' : ''}<br>` +
-			`ws: ${wsState}<br>` +
-			`poll: ${lastPollInfo}`;
+			`<div style="font-size:12px;color:#666;margin-bottom:4px">DEBUG HUD</div>` +
+			`<b style="color:#0ff">${playerName}</b> <span style="color:#666">side ${mySide}</span><br>` +
+			`phase: <b style="color:#ff0">${phase}</b><br>` +
+			`game: ${currentGameNumber}/${bestOf} | wins: <b>${mySide === 'A' ? currentWinsA : currentWinsB}</b>-${mySide === 'A' ? currentWinsB : currentWinsA}<br>` +
+			`inputs: <b>${inputsSent}</b> | score: <b>${myState.score.toLocaleString()}</b><br>` +
+			`<br>` +
+			`ws: <b style="color:${wsColor}">${wsState}</b><br>` +
+			`<span style="font-size:12px;color:#666">poll: ${lastPollInfo}</span>`;
 	}
 	setInterval(updateDebugHud, 500);
 
@@ -300,43 +340,51 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		? 'challenge.html'
 		: `tournament-v2.html?id=${tournamentId}`;
 
-	// Opponent score HUD
-	let oppHud: HTMLElement | null = null;
-	function updateOppHud() {
-		if (!oppHud) {
-			oppHud = document.createElement('div');
-			oppHud.style.cssText =
-				'position:fixed;top:16px;right:16px;z-index:100;' +
-				'background:rgba(0,0,0,0.7);color:#e35d6a;' +
-				'padding:10px 16px;border-radius:6px;' +
-				'font-family:monospace;font-size:14px;' +
-				'border:1px solid rgba(227,93,106,0.3);pointer-events:none;';
-			document.body.appendChild(oppHud);
-		}
-		const dead = opponentState.gameOver ? ' [DEAD]' : '';
-		oppHud.innerHTML =
-			`<span style="font-size:11px;opacity:0.6">OPPONENT</span><br>` +
-			`Score: ${opponentState.score}${dead}`;
-	}
 
 	// ── WebSocket (input relay + chat only) ──────────────────────────
 	const matchWs = connectMatchWS({
 		playerName,
 		matchId,
-		onOpponentInput(tick, action) {
-			if (!oppBuffer.has(tick)) oppBuffer.set(tick, []);
-			oppBuffer.get(tick)!.push(action);
-		},
+		onOpponentInput() {}, // ghost removed — inputs stored server-side for replay
 		onChat(from, message) { chat.addMessage(from, message, false); },
+		onChallengeStart(msg) {
+			const p = new URLSearchParams({
+				tournament: '1', matchId: msg.matchId, seed: msg.seed,
+				side: msg.youAre, opponent: msg.opponent, name: playerName,
+				tid: msg.tournamentId, bestOf: String(msg.bestOf || bestOf),
+				wager: String(msg.wager || 0), startsAt: String(msg.startsAt),
+			});
+			location.href = 'dev.html?' + p;
+		},
+		onSeriesNext(msg) {
+			// Rematch accepted — reload with new seed, same matchId
+			const p = new URLSearchParams({
+				tournament: '1', matchId: matchId, seed: msg.seed,
+				side: mySide, opponent: opponentName, name: playerName,
+				tid: tournamentId, bestOf: String(bestOf),
+				wager: String(msg.wager || lastWager || 0),
+				startsAt: String(msg.startsAt || Date.now() + 3000),
+			});
+			location.href = 'dev.html?' + p;
+		},
 	});
 	function wsSend(msg: Record<string, unknown>) { matchWs.send(msg); }
 
 	let lastWager = 0;
-	let shownChallengeId = ''; // prevent re-showing same incoming challenge
+	let shownChallengeId = '';
 
 	function onMatchEnd(msg: any) {
 		setPhase('series_end');
-		if (oppHud) { oppHud.remove(); oppHud = null; }
+		hideOppStatus();
+		// Update series HUD to final score, then hide it
+		if (msg.seriesEnd && seriesHud) {
+			const myWins = mySide === 'A' ? (msg.scoreA ?? 0) : (msg.scoreB ?? 0);
+			const oppWins = mySide === 'A' ? (msg.scoreB ?? 0) : (msg.scoreA ?? 0);
+			currentWinsA = msg.scoreA ?? 0;
+			currentWinsB = msg.scoreB ?? 0;
+			updateSeriesHud();
+		}
+		if (seriesHud) seriesHud.style.display = 'none';
 
 		const iWon = msg.winner === playerName;
 		// Server reports scoreA/scoreB by SIDE (player A vs player B). Flip
@@ -357,11 +405,14 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		if (msg.forfeit) {
 			const rematchBtn = isChallenge ? `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>` : '';
 			const backLabel = isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT';
-			const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
+			const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">${backLabel}</a>`;
+			const iWon = msg.winner === playerName;
+			const forfeitMsg = iWon
+				? 'Opponent didn\'t show up. You win!'
+				: 'Match forfeited — no players readied.';
 			showOverlay(
-				`<div style="font-size:20px;font-weight:bold;color:#94a3b8;margin-bottom:8px">MATCH FORFEITED</div>` +
-				`<div style="font-size:13px;color:#94a3b8;margin-bottom:16px">Both players were offline too long.</div>` +
-				`<div style="font-size:14px;margin-bottom:16px">Bracket awarded to <strong>${msg.winner || 'player A'}</strong>.</div>` +
+				`<div style="font-size:24px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#94a3b8'};margin-bottom:8px">${iWon ? 'WIN BY FORFEIT' : 'MATCH FORFEITED'}</div>` +
+				`<div style="font-size:14px;color:#94a3b8;margin-bottom:16px">${forfeitMsg}</div>` +
 				rematchBtn + backBtn,
 			);
 			fetchGameBalance().then(updateBalanceDisplay);
@@ -383,33 +434,55 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		}
 
 		// Final result (single game OR series end)
-		let resultHtml: string;
 		const winLabel = isSeriesEnd ? 'SERIES WIN!' : 'YOU WIN!';
 		const loseLabel = isSeriesEnd ? 'SERIES LOSS' : 'YOU LOSE';
+		let resultHtml = '';
 		if (iWon) {
-			resultHtml = `<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">${winLabel}</div>`;
-			if (wager > 0) resultHtml += `<div style="font-size:14px;color:#2d6a4f;margin-bottom:8px">+${wager} UCT</div>`;
+			resultHtml += `<div style="font-size:28px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">${winLabel}</div>`;
+			if (wager > 0) resultHtml += `<div style="font-size:16px;color:#2d6a4f;margin-bottom:8px">+${wager} UCT</div>`;
 		} else {
-			resultHtml = `<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">${loseLabel}</div>`;
-			if (wager > 0) resultHtml += `<div style="font-size:14px;color:#c1121f;margin-bottom:8px">-${wager} UCT</div>`;
+			resultHtml += `<div style="font-size:28px;font-weight:bold;color:#c1121f;margin-bottom:8px">${loseLabel}</div>`;
+			if (wager > 0) resultHtml += `<div style="font-size:16px;color:#c1121f;margin-bottom:8px">-${wager} UCT</div>`;
+		}
+
+		if (isSeriesEnd) {
+			// Show last game score + series total
+			const lgr = msg.lastGameResult;
+			if (lgr) {
+				const lgMy = mySide === 'A' ? lgr.scoreA : lgr.scoreB;
+				const lgOpp = mySide === 'A' ? lgr.scoreB : lgr.scoreA;
+				const lgWon = lgr.winner === playerName;
+				resultHtml += `<div style="font-size:12px;opacity:0.5;letter-spacing:0.1em;margin-bottom:4px">LAST GAME</div>`;
+				resultHtml += `<div style="font-size:14px;margin-bottom:12px;color:${lgWon ? '#2d6a4f' : '#c1121f'}">${lgMy.toLocaleString()} — ${lgOpp.toLocaleString()}</div>`;
+			}
+			resultHtml += `<div style="font-size:12px;opacity:0.5;letter-spacing:0.1em;margin-bottom:6px">SERIES</div>`;
+			resultHtml += `<div style="display:flex;gap:20px;justify-content:center;align-items:center;margin-bottom:16px">`;
+			resultHtml += `<div style="text-align:center"><div style="font-size:11px;opacity:0.5;margin-bottom:2px">${playerName}</div><div style="font-size:28px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#c1121f'}">${myScore}</div></div>`;
+			resultHtml += `<div style="font-size:20px;opacity:0.3">—</div>`;
+			resultHtml += `<div style="text-align:center"><div style="font-size:11px;opacity:0.5;margin-bottom:2px">${opponentName}</div><div style="font-size:28px;font-weight:bold;color:${iWon ? '#c1121f' : '#2d6a4f'}">${oppScore}</div></div>`;
+			resultHtml += `</div>`;
+		} else {
+			// Single game — show actual scores
+			resultHtml += `<div style="font-size:12px;opacity:0.5;letter-spacing:0.1em;margin-bottom:6px">Score</div>`;
+			resultHtml += `<div style="display:flex;gap:20px;justify-content:center;align-items:center;margin-bottom:16px">`;
+			resultHtml += `<div style="text-align:center"><div style="font-size:11px;opacity:0.5;margin-bottom:2px">${playerName}</div><div style="font-size:28px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#c1121f'}">${myScore.toLocaleString()}</div></div>`;
+			resultHtml += `<div style="font-size:20px;opacity:0.3">—</div>`;
+			resultHtml += `<div style="text-align:center"><div style="font-size:11px;opacity:0.5;margin-bottom:2px">${opponentName}</div><div style="font-size:28px;font-weight:bold;color:${iWon ? '#c1121f' : '#2d6a4f'}">${oppScore.toLocaleString()}</div></div>`;
+			resultHtml += `</div>`;
 		}
 
 		const rematchBtn = isChallenge ? `<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">REMATCH</button>` : '';
 		const backLabel = isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT';
-		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${backLabel}</a>`;
+		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">${backLabel}</a>`;
 
-		const scoreLabel = isSeriesEnd ? 'Games won' : 'Score';
-		showOverlay(
-			resultHtml +
-			`<div style="font-size:12px;opacity:0.7;margin-bottom:4px">${scoreLabel}</div>` +
-			`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myScore} — ${oppScore}</div>` +
-			rematchBtn + backBtn,
-		);
+		showOverlay(resultHtml + rematchBtn + backBtn);
 
 		fetchGameBalance().then(updateBalanceDisplay);
 	}
 
 	// ── Rematch ──────────────────────────────────────────────────────
+	// Creates a new challenge via REST, polls for acceptance, redirects
+	// on accept. Simple, battle-tested, works with bots.
 	(window as any).__v2rematch = async () => {
 		showOverlay('<div style="font-size:16px">Sending rematch...</div><div style="font-size:12px;margin-top:8px;opacity:0.6">Waiting for opponent to accept...</div>');
 		let challengeId: string;
@@ -421,50 +494,44 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			});
 			const data = await r.json();
 			if (!r.ok) {
+				const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">BACK</a>`;
 				showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">${data.message || 'Challenge failed'}</div>` +
-					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
+					`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
 				return;
 			}
 			challengeId = data.challengeId;
 		} catch {
+			const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">BACK</a>`;
 			showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Network error</div>` +
-				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>`);
+				`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
 			return;
 		}
-		// Poll THIS specific challenge until accepted or expired
+		// Poll for acceptance — also listen for WS challenge-start as backup
 		const poll = setInterval(async () => {
 			try {
 				const r = await fetch(`/api/challenges/${challengeId}/status`);
 				if (!r.ok) return;
 				const s = await r.json();
-				if (s.status === 'accepted') {
+				if (s.status === 'accepted' && s.seed) {
 					clearInterval(poll);
-					// Redirect to the match
-					const tid = s.tournamentId;
-					const br = await fetch(`/api/tournaments/${encodeURIComponent(tid)}/bracket`);
-					const { matches } = await br.json();
-					const m = matches?.find((m: any) => m.id === s.matchId);
-					if (m) {
-						matchWs.close();
-						const side = m.playerA === playerName ? 'A' : 'B';
-						const opp = side === 'A' ? m.playerB : m.playerA;
-						const p = new URLSearchParams({
-							tournament: '1', matchId: m.id, seed: m.seed || '0',
-							side, opponent: opp, name: playerName,
-							tid, bestOf: String(bestOf),
-							wager: String(lastWager), startsAt: String(Date.now() + 3000),
-						});
-						location.href = 'dev.html?' + p;
-					}
-				} else if (s.status === 'expired') {
+					matchWs.close();
+					const side = s.playerA === playerName ? 'A' : 'B';
+					const opp = side === 'A' ? s.playerB : s.playerA;
+					const p = new URLSearchParams({
+						tournament: '1', matchId: s.matchId, seed: s.seed,
+						side, opponent: opp, name: playerName,
+						tid: s.tournamentId, bestOf: String(s.bestOf || bestOf),
+						wager: String(lastWager), startsAt: String(Date.now() + 3000),
+					});
+					location.href = 'dev.html?' + p;
+				} else if (s.status === 'expired' || s.status === 'declined') {
 					clearInterval(poll);
-					const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
-					showOverlay(`<div style="font-size:14px;margin-bottom:12px">Rematch expired</div>` +
+					const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">BACK</a>`;
+					showOverlay(`<div style="font-size:14px;margin-bottom:12px">${s.status === 'declined' ? 'Opponent declined' : 'Rematch expired'}</div>` +
 						`<button onclick="window.__v2rematch()" style="${BTN_STYLE}font-size:14px">TRY AGAIN</button>` + backBtn);
 				}
 			} catch {}
 		}, 1000);
-		// Safety timeout
 		setTimeout(() => clearInterval(poll), 35000);
 	};
 
@@ -489,7 +556,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				wager: String(lastWager), startsAt: String(Date.now() + 3000),
 			});
 			location.href = 'dev.html?' + p;
-		} catch (err) {
+		} catch {
 			showOverlay(`<div style="font-size:14px;color:#c1121f;margin-bottom:12px">Network error</div>`);
 		}
 	};
@@ -502,7 +569,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				body: JSON.stringify({ by: playerName }),
 			});
 		} catch {}
-		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">${isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT'}</a>`;
+		const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">${isChallenge ? 'BACK TO CHALLENGES' : 'BACK TO TOURNAMENT'}</a>`;
 		showOverlay('Challenge declined.' + backBtn);
 	};
 
@@ -516,7 +583,8 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	});
 
 	// Keyboard + touch input
-	let inputsSent = 0; // track for debugging input loss
+	let inputsSent = 0;
+	const inputLog: Array<{ t: number; a: string }> = [];
 	const keysAllowed: Record<number, boolean> = {};
 	document.addEventListener('keydown', (e) => {
 		// Don't intercept typing in chat or other inputs
@@ -530,6 +598,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			myState.character.queuedActions.push(action);
 			wsSend({ type: 'input', matchId, tick: myState.tick, payload: btoa(action) });
 			inputsSent++;
+			inputLog.push({ t: myState.tick, a: action });
 		}
 	});
 	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; });
@@ -546,7 +615,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 
 	// Render initial state
 	syncRender(myState, render, scene, config);
-	syncOpponent(opponentState, render, config);
 	renderFrame(scene);
 
 	function getSeriesInfo(): string {
@@ -655,14 +723,37 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			} else {
 				showOverlay('<div style="font-size:56px;font-weight:800;color:#f97316;line-height:1">GO!</div>');
 				playGameStart();
-				setTimeout(() => {
+				// Both setTimeout AND rAF are throttled in background tabs.
+				// Use both + a visibilitychange listener as triple fallback.
+				function startPlaying() {
 					if (phase !== 'countdown') return;
 					hideOverlay();
 					setPhase('playing');
 					countdownActive = false;
 					lastFrameTime = performance.now();
 					tickAccumulator = 0;
-				}, 500);
+					inputLog.length = 0;
+					gameLog('gameStart', {
+						seed: currentSeed, game: currentGameNumber,
+						tick: myState.tick, rng: myState.rngState,
+						trees: myState.trees.length, score: myState.score,
+					});
+					showOppStatus(
+						`<div style="display:flex;align-items:center;gap:8px">` +
+						`<span style="width:8px;height:8px;border-radius:50%;background:#2ea043;box-shadow:0 0 6px rgba(46,160,67,0.6);animation:pulse 1.5s infinite"></span>` +
+						`<span style="font-size:14px;color:#aaa">OPPONENT ALIVE</span>` +
+						`</div>`,
+						'rgba(46,160,67,0.3)',
+					);
+				}
+				setTimeout(startPlaying, 500);
+				requestAnimationFrame(() => requestAnimationFrame(startPlaying));
+				// If tab was in background, catch it when it becomes visible
+				const onVisible = () => {
+					if (phase === 'countdown') startPlaying();
+					document.removeEventListener('visibilitychange', onVisible);
+				};
+				document.addEventListener('visibilitychange', onVisible);
 			}
 		}
 		tick();
@@ -679,18 +770,17 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 
 	function resetForNextGame(s: any) {
 		currentSeed = parseInt(s.series.currentSeed, 16) >>> 0;
+		console.log(`[seed] series advance hex=${s.series.currentSeed} parsed=${currentSeed}`);
 		currentGameNumber = s.series.currentGame;
 		currentWinsA = s.series.winsA || 0;
 		currentWinsB = s.series.winsB || 0;
 		myState = makeInitialState(currentSeed, config);
-		opponentState = makeInitialState(currentSeed, config);
-		oppBuffer.clear();
-		oppGhostDead = false;
 		countdownActive = false;
 		inputsSent = 0;
 		tickAccumulator = 0;
 		lastFrameTime = performance.now();
-		if (render.opponent) render.opponent.root.visible = true;
+		render.character.root.visible = true;
+		if (seriesHud) seriesHud.style.display = '';
 		removeDeathBanner();
 		updateSeriesHud();
 		try {
@@ -702,7 +792,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			history.replaceState(null, '', location.pathname + '?' + p.toString());
 		} catch {}
 		syncRender(myState, render, scene, config);
-		syncOpponent(opponentState, render, config);
 		renderFrame(scene);
 		beginGame(false);
 	}
@@ -713,15 +802,17 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			getMySide: () => mySide,
 			getPlayerName: () => playerName,
 			getCurrentGameNumber: () => currentGameNumber,
-			getCurrentWins: () => ({ a: currentWinsA, b: currentWinsB }),
 			getReadyDeadline: () => readyDeadline,
 			onMatchComplete(s) {
-				gameLog('matchComplete', { winner: s.winner, scoreA: s.scoreA, scoreB: s.scoreB });
+				gameLog('matchComplete', { winner: s.winner, scoreA: s.scoreA, scoreB: s.scoreB, lastGameResult: s.lastGameResult });
+				// Detect forfeit: match complete but no games were played (both scores 0, no game result)
+				const isForfeit = (s.scoreA ?? 0) === 0 && (s.scoreB ?? 0) === 0 && !s.lastGameResult;
 				onMatchEnd({
 					matchId: s.matchId, winner: s.winner,
 					scoreA: s.scoreA ?? 0, scoreB: s.scoreB ?? 0,
 					seriesEnd: (s.bestOf || 1) > 1, bestOf: s.bestOf || 1,
-					wager: lastWager,
+					wager: lastWager, lastGameResult: s.lastGameResult,
+					forfeit: isForfeit,
 				});
 			},
 			onSeriesAdvance(s) {
@@ -739,13 +830,38 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				currentWinsB = newWinsB;
 				setPhase('game_result');
 				removeDeathBanner();
+				const gameMyScore = s.lastGameResult ? (mySide === 'A' ? s.lastGameResult.scoreA : s.lastGameResult.scoreB) : 0;
+				const gameOppScore = s.lastGameResult ? (mySide === 'A' ? s.lastGameResult.scoreB : s.lastGameResult.scoreA) : 0;
+				const scoreLine = (gameMyScore || gameOppScore)
+					? `<div style="font-size:14px;margin-bottom:12px;color:#888">${gameMyScore.toLocaleString()} — ${gameOppScore.toLocaleString()}</div>`
+					: '';
 				showOverlay(
 					`<div style="font-size:26px;font-weight:bold;color:${iWonGame ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">Game ${gameJustPlayed}: ${iWonGame ? 'WIN' : 'LOSS'}</div>` +
+					scoreLine +
 					`<div style="font-size:12px;color:#666;letter-spacing:.2em;margin-bottom:4px">SERIES (Best of ${bestOf})</div>` +
 					`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myWins} — ${oppWins}</div>` +
 					`<div style="font-size:13px;opacity:0.7">Next game starting…</div>`,
 				);
 				setTimeout(() => resetForNextGame(s), 3000);
+			},
+			onForceStart() {
+				// Server is already in playing phase but we're stuck
+				// (tab was in background, countdown timer never fired).
+				// Skip countdown entirely and go straight to playing.
+				gameLog('forceStart', { wasPhase: phase });
+				hideOverlay();
+				setPhase('playing');
+				countdownActive = false;
+				lastFrameTime = performance.now();
+				tickAccumulator = 0;
+				inputLog.length = 0;
+				showOppStatus(
+					`<div style="display:flex;align-items:center;gap:8px">` +
+					`<span style="width:8px;height:8px;border-radius:50%;background:#2ea043;box-shadow:0 0 6px rgba(46,160,67,0.6);animation:pulse 1.5s infinite"></span>` +
+					`<span style="font-size:14px;color:#aaa">OPPONENT ALIVE</span>` +
+					`</div>`,
+					'rgba(46,160,67,0.3)',
+				);
 			},
 			onBothReady() {
 				gameLog('bothReady');
@@ -755,7 +871,55 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				gameLog('readyExpired');
 				showReadyPrompt('Ready expired — opponent didn\'t ready in time');
 			},
+			onGameResult(result) {
+				// Server resolved this game — both scores are final.
+				const myScore = mySide === 'A' ? result.scoreA : result.scoreB;
+				const oppScore = mySide === 'A' ? result.scoreB : result.scoreA;
+				const iWon = result.winner === playerName;
+				gameLog('gameResult', { result, iWon });
+
+				// Stop the game if still playing (early-decide case)
+				if (phase === 'playing') {
+					sendMatchDone();
+				}
+				setPhase('done_sent');
+				render.character.root.visible = false;
+				hideOppStatus();
+				if (seriesHud) seriesHud.style.display = 'none';
+				showOverlay(
+					`<div style="font-size:24px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">${iWon ? 'YOU WIN!' : 'YOU LOSE'}</div>` +
+					`<div style="font-size:18px;margin-bottom:4px">You: ${myScore.toLocaleString()}</div>` +
+					`<div style="font-size:18px;margin-bottom:16px;color:#888">Opponent: ${oppScore.toLocaleString()}</div>` +
+					`<div style="font-size:13px;opacity:0.6">Waiting for result…</div>`,
+				);
+			},
 			getMyScore: () => myState.score,
+			onOpponentDead(oppScore) {
+				if (phase !== 'playing') return;
+				if (myState.score > oppScore) {
+					// I'm ahead — game decided, stop and send done
+					gameLog('earlyDecide', { myScore: myState.score, oppScore });
+					setPhase('done_sent');
+					sendMatchDone();
+					render.character.root.visible = false;
+					hideOppStatus();
+					if (seriesHud) seriesHud.style.display = 'none';
+					showOverlay(
+						`<div style="font-size:24px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">GAME OVER</div>` +
+						`<div style="font-size:18px;margin-bottom:4px">You: ${myState.score.toLocaleString()}</div>` +
+						`<div style="font-size:18px;margin-bottom:16px;color:#888">Opponent: ${oppScore.toLocaleString()}</div>` +
+						`<div style="font-size:13px;opacity:0.6">Calculating result…</div>`,
+					);
+				} else {
+					// Opponent dead but I'm behind — show their score as target
+					showOppStatus(
+						`<div style="font-size:12px;color:#f66;letter-spacing:0.1em;margin-bottom:4px">OPPONENT DEAD</div>` +
+						`<div style="font-size:24px;font-weight:bold;color:#f97316">${oppScore.toLocaleString()}</div>` +
+						`<div style="font-size:11px;opacity:0.5;margin-top:2px">Beat this to win!</div>`,
+						'rgba(249,115,22,0.4)',
+					);
+				}
+			},
 			onPollResult(info) { lastPollInfo = info; },
 			onIncomingChallenge(ch) {
 				if (shownChallengeId === ch.id) return;
@@ -765,20 +929,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 					`<div style="font-size:16px;margin-bottom:12px"><strong>${ch.from}</strong> challenges you${wagerText}</div>` +
 					`<button onclick="window.__acceptRematch('${ch.id}')" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">ACCEPT</button>` +
 					`<button onclick="window.__declineRematch('${ch.id}')" style="font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em;margin:4px">DECLINE</button>`,
-				);
-			},
-			onGameDecided(opponentScore) {
-				// Server confirmed: opponent is dead with score X, and
-				// our local score already exceeds it. Game is decided.
-				gameLog('gameDecided', { myScore: myState.score, oppScore: opponentScore, seed: currentSeed, inputsSent, tick: myState.tick });
-				setPhase('done_sent');
-				sendMatchDone();
-				removeDeathBanner();
-				showOverlay(
-					`<div style="font-size:20px;font-weight:bold;margin-bottom:8px">OPPONENT FINISHED</div>` +
-					`<div style="font-size:14px;margin-bottom:4px">Their score: ${opponentScore.toLocaleString()}</div>` +
-					`<div style="font-size:16px;font-weight:bold;color:#2d6a4f;margin-bottom:8px">Your score: ${myState.score.toLocaleString()}</div>` +
-					`<div style="font-size:13px;opacity:0.6">Calculating final result…</div>`,
 				);
 			},
 		});
@@ -812,27 +962,13 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 
 			tickAccumulator += delta;
 			while (tickAccumulator >= TICK_SECONDS && isGameActive()) {
-				// Apply opponent inputs to ghost
-				for (const [t, actions] of oppBuffer) {
-					if (t <= opponentState.tick) {
-						for (const a of actions) opponentState.character.queuedActions.push(a);
-						oppBuffer.delete(t);
-					}
-				}
-
 				tick(myState, config);
-				tick(opponentState, config);
-
-				// Opponent ghost died — visual only
-				if (opponentState.gameOver && !oppGhostDead) {
-					oppGhostDead = true;
-					if (render.opponent) render.opponent.root.visible = false;
-				}
 
 				// Self died → transition to done_sent
 				if (myState.gameOver && phase === 'playing') {
 					playCrash();
-					gameLog('died', { score: myState.score, inputsSent, tick: myState.tick, seed: currentSeed });
+					render.character.root.visible = false;
+					gameLog('died', { score: myState.score, inputsSent, tick: myState.tick, seed: currentSeed, inputs: inputLog });
 					setPhase('done_sent');
 					sendMatchDone();
 					// Safety: if the poll never detects the result (server
@@ -840,18 +976,19 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 					setTimeout(() => {
 						if (phase === 'done_sent') {
 							setPhase('series_end');
-							const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#1a1a2e;border-color:#1a1a2e">BACK</a>`;
+							const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">BACK</a>`;
 							showOverlay(
 								`<div style="font-size:16px;color:#c1121f;margin-bottom:12px">Result unavailable — connection issue</div>` +
 								backBtn,
 							);
 						}
-					}, 45_000);
-					if (oppGhostDead) {
-						showDeathBanner('CALCULATING RESULT', 'Both finished — server is replaying…');
-					} else {
-						showDeathBanner('YOU DIED', `Score: ${myState.score.toLocaleString()} (${inputsSent} inputs) — waiting for opponent…`);
-					}
+					}, 120_000); // 2 minutes — expert bots can take 60s+
+					if (seriesHud) seriesHud.style.display = 'none';
+					showOverlay(
+						`<div style="font-size:24px;font-weight:bold;margin-bottom:8px">YOU DIED</div>` +
+						`<div style="font-size:20px;margin-bottom:16px">Score: ${myState.score.toLocaleString()}</div>` +
+						`<div style="font-size:13px;opacity:0.6">Waiting for opponent to finish…</div>`,
+					);
 				}
 
 				// No early-stop on opponent ghost death. The ghost is built
@@ -871,10 +1008,8 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		}
 
 		// Update opponent HUD
-		if (phase === 'playing') updateOppHud();
 
 		syncRender(myState, render, scene, config);
-		if (!opponentState.gameOver) syncOpponent(opponentState, render, config);
 		renderFrame(scene);
 		requestAnimationFrame(loop);
 	}
@@ -884,6 +1019,248 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Single-player (unchanged from before)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Level mode — fixed seed, objectives, finish line
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function startLevel(level: LevelDef, skin: CharacterSkin) {
+	const config = DEFAULT_CONFIG;
+	const scene = createScene();
+	const render = createRenderState(scene, skin);
+	const state = makeInitialState(level.seed, config);
+
+	// Apply level overrides
+	state.treePresenceProb = level.initial.treePresenceProb;
+	state.maxTreeSize = level.initial.maxTreeSize;
+	state.fogDistance = level.initial.fogDistance;
+	state.fogTarget = level.initial.fogDistance;
+	state.maxRows = level.totalRows;
+	if (level.spawns) {
+		state.scriptedSpawns = level.spawns.map(s => ({ ...s }));
+	}
+
+	// ── Level phase state machine ────────────────────────────────
+	// 'ready'    → waiting for keypress to start
+	// 'playing'  → game is running, ticking
+	// 'complete' → objectives met, showing result overlay
+	// 'failed'   → died or ran out of road without meeting objectives
+	let phase: 'ready' | 'playing' | 'complete' | 'failed' = 'ready';
+	let stopped = false;
+
+	syncRender(state, render, scene, config);
+	renderFrame(scene);
+
+	const BTN = 'font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em';
+	const BTN_GHOST = 'font-family:monospace;font-size:12px;padding:8px 24px;background:transparent;color:#94a3b8;border:1px solid #334155;border-radius:6px;cursor:pointer;letter-spacing:0.1em';
+	const backBtn = `<button onclick="location.href='levels.html'" style="${BTN_GHOST}">BACK TO LEVELS</button>`;
+
+	const objListHtml = level.objectives
+		.map(o => `<div style="font-size:12px;opacity:0.8">&bull; ${o.label}</div>`)
+		.join('');
+
+	showOverlay(
+		`<div style="font-size:11px;letter-spacing:0.3em;opacity:0.5;margin-bottom:4px">LEVEL ${level.id}</div>` +
+		`<div style="font-size:22px;font-weight:bold;margin-bottom:8px">${level.name}</div>` +
+		`<div style="font-size:13px;opacity:0.7;margin-bottom:12px">${level.description}</div>` +
+		`<div style="text-align:left;display:inline-block;margin-bottom:16px">${objListHtml}</div>` +
+		`<div style="font-size:13px;opacity:0.5;margin-bottom:12px">Press any key to start</div>` +
+		backBtn,
+	);
+
+	let lastFrameTime = performance.now();
+	let tickAccumulator = 0;
+	const keysAllowed: Record<number, boolean> = {};
+	const ac = new AbortController();
+
+	// ── Objectives HUD ───────────────────────────────────────────
+	let objHud: HTMLDivElement | null = null;
+	function ensureObjHud() {
+		if (objHud) return;
+		objHud = document.createElement('div');
+		objHud.id = 'level-obj-hud';
+		objHud.style.cssText = 'position:fixed;top:12px;right:12px;z-index:100;' +
+			'background:rgba(0,0,0,0.7);border:1px solid rgba(95,234,255,0.3);border-radius:6px;' +
+			'padding:10px 14px;font-family:monospace;font-size:12px;color:#f8fafc;min-width:160px;' +
+			'backdrop-filter:blur(8px)';
+		document.body.appendChild(objHud);
+	}
+	function updateObjHud() {
+		if (!objHud) return;
+		const { results } = checkObjectives(level, state);
+		const progress = Math.min(100, Math.round((state.difficulty / level.totalRows) * 100));
+		let html = `<div style="font-size:10px;letter-spacing:0.2em;opacity:0.5;margin-bottom:6px">LEVEL ${level.id}</div>`;
+		html += `<div style="background:rgba(255,255,255,0.1);border-radius:3px;height:4px;margin-bottom:8px;overflow:hidden">` +
+			`<div style="background:#5feaff;height:100%;width:${progress}%;transition:width 0.3s"></div></div>`;
+		for (const r of results) {
+			const icon = r.done ? '<span style="color:#4ade80">&#10003;</span>' : '<span style="opacity:0.3">&#9675;</span>';
+			html += `<div style="margin-bottom:3px;${r.done ? 'opacity:0.5' : ''}">${icon} ${r.label} (${r.current}/${r.target})</div>`;
+		}
+		objHud.innerHTML = html;
+	}
+	function removeObjHud() {
+		if (objHud) { objHud.remove(); objHud = null; }
+	}
+
+	// ── Start playing ────────────────────────────────────────────
+	function beginPlaying() {
+		if (phase !== 'ready') return;
+		phase = 'playing';
+		lastFrameTime = performance.now();
+		tickAccumulator = 0;
+		hideOverlay();
+		ensureObjHud();
+		playGameStart();
+	}
+
+	// ── End states ───────────────────────────────────────────────
+	function showComplete() {
+		if (phase === 'complete' || phase === 'failed') return;
+		phase = 'complete';
+		saveLevelBest(level.id, state.score);
+		completeLevel(level.id);
+		playGameStart();
+		removeObjHud();
+
+		const { results } = checkObjectives(level, state);
+		const resultsHtml = results
+			.map(r => `<div style="font-size:13px;margin-bottom:4px"><span style="color:#4ade80">&#10003;</span> ${r.label}</div>`)
+			.join('');
+
+		const nextLevel = LEVELS.find(l => l.id === level.id + 1);
+		const nextBtn = nextLevel
+			? `<button onclick="location.href='dev.html?level=${nextLevel.id}'" style="${BTN}">NEXT LEVEL</button>`
+			: '';
+		showOverlay(
+			`<div style="font-size:11px;letter-spacing:0.3em;color:#4ade80;margin-bottom:4px">LEVEL ${level.id}</div>` +
+			`<div style="font-size:28px;font-weight:bold;color:#2d6a4f;margin-bottom:4px">COMPLETE!</div>` +
+			`<div style="font-size:16px;margin-bottom:12px">Score: ${state.score.toLocaleString()}</div>` +
+			`<div style="text-align:left;display:inline-block;margin-bottom:16px">${resultsHtml}</div>` +
+			`<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">` +
+			nextBtn +
+			`<button onclick="window.__boxyRestart()" style="${BTN_GHOST}">RETRY</button>` +
+			`</div>` +
+			`<div style="margin-top:12px">${backBtn}</div>`,
+		);
+	}
+
+	function showFailed(reason: string) {
+		if (phase === 'complete' || phase === 'failed') return;
+		phase = 'failed';
+		playCrash();
+		saveLevelBest(level.id, state.score);
+		removeObjHud();
+
+		const { results } = checkObjectives(level, state);
+		const resultsHtml = results
+			.map(r => {
+				const icon = r.done ? '<span style="color:#4ade80">&#10003;</span>' : '<span style="color:#ef4444">&#10007;</span>';
+				return `<div style="font-size:13px;margin-bottom:4px">${icon} ${r.label} (${r.current}/${r.target})</div>`;
+			})
+			.join('');
+
+		showOverlay(
+			`<div style="font-size:11px;letter-spacing:0.3em;opacity:0.5;margin-bottom:4px">LEVEL ${level.id}</div>` +
+			`<div style="font-size:24px;font-weight:bold;color:#c1121f;margin-bottom:8px">${reason}</div>` +
+			`<div style="font-size:16px;margin-bottom:4px">Score: ${state.score.toLocaleString()}</div>` +
+			`<div style="text-align:left;display:inline-block;margin-bottom:16px">${resultsHtml}</div>` +
+			`<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">` +
+			`<button onclick="window.__boxyRestart()" style="${BTN}">RETRY</button>` +
+			`</div>` +
+			`<div style="margin-top:12px">${backBtn}</div>`,
+		);
+	}
+
+	// ── Input ────────────────────────────────────────────────────
+	document.addEventListener('keydown', (e) => {
+		if (phase === 'complete' || phase === 'failed') return;
+		const key = e.keyCode;
+		if (keysAllowed[key] === false) return;
+		keysAllowed[key] = false;
+		if (phase === 'ready' && key > 18) { beginPlaying(); return; }
+		if (phase !== 'playing') return;
+		const action = keyToAction(key);
+		if (action) state.character.queuedActions.push(action);
+	}, { signal: ac.signal });
+	document.addEventListener('keyup', (e) => { keysAllowed[e.keyCode] = true; }, { signal: ac.signal });
+
+	installTouchControls({
+		onAction: (a) => { if (phase === 'playing') state.character.queuedActions.push(a); },
+		onStart: () => { if (phase === 'ready') beginPlaying(); },
+		isPlaying: () => phase === 'playing',
+	});
+
+	function restart() {
+		stopped = true;
+		removeObjHud();
+		ac.abort();
+		const world = document.getElementById('world');
+		if (world) world.innerHTML = '';
+		const scoreEl = document.getElementById('score');
+		const coinsEl = document.getElementById('coins');
+		if (scoreEl) scoreEl.textContent = '0';
+		if (coinsEl) coinsEl.textContent = '0';
+		const flameEl = document.getElementById('flame-indicator');
+		if (flameEl) flameEl.remove();
+		startLevel(level, skin);
+	}
+	(window as any).__boxyRestart = restart;
+
+	// ── Game loop ────────────────────────────────────────────────
+	function loop() {
+		if (stopped) return;
+		const now = performance.now();
+		let delta = (now - lastFrameTime) / 1000;
+		lastFrameTime = now;
+		delta = Math.min(delta, 0.1);
+
+		if (phase === 'playing') {
+			const preJumping = state.character.isJumping;
+			const preLane = state.character.currentLane;
+			const preCoinCount = state.coinCount;
+			const preCharges = state.flamethrowerCharges;
+
+			tickAccumulator += delta;
+			while (tickAccumulator >= TICK_SECONDS && phase === 'playing') {
+				tick(state, config);
+
+				// Check: objectives met → complete
+				if (checkObjectives(level, state).met) {
+					showComplete();
+					break;
+				}
+				// Check: died → failed
+				if (state.gameOver) {
+					showFailed('CRASHED');
+					break;
+				}
+				// Check: ran out of road → failed
+				if (state.finished) {
+					showFailed('TIME UP');
+					break;
+				}
+				tickAccumulator -= TICK_SECONDS;
+			}
+
+			// Audio (only if still playing — might have transitioned above)
+			if (phase === 'playing') {
+				if (state.coinCount > preCoinCount) playCoinCollect(state.lastCollectedTier || 'gold');
+				if (state.flamethrowerCharges > preCharges) playPowerupCollect();
+				if (state.flameJustFired) playFlameActivate();
+				if (state.character.isJumping && !preJumping) playJump();
+				if (state.character.currentLane !== preLane && !preJumping) playLaneSwitch();
+			}
+		}
+
+		syncRender(state, render, scene, config);
+		renderFrame(scene);
+		if (phase === 'playing') updateObjHud();
+
+		requestAnimationFrame(loop);
+	}
+
+	requestAnimationFrame(loop);
+}
 
 async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	const seedParam = params.get('seed');
@@ -898,7 +1275,7 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	updateBalanceDisplay(balance);
 
 	const needsPayment = tag && balance !== null && balance >= ENTRY_FEE;
-	const canPlayFree = !tag; // dev mode, no identity
+	const noWallet = !tag;
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
@@ -915,11 +1292,11 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	const playBtn = `<button onclick="window.__boxyPay()" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em">PAY & PLAY</button>`;
 
 	// Show appropriate start message
-	if (canPlayFree) {
-		showOverlay('Press any key to start' + menuBtn);
+	if (noWallet) {
+		showOverlay(`<div style="margin-bottom:12px">Connect your wallet to play</div><a href="index.html" style="font-family:monospace;font-size:14px;font-weight:bold;padding:12px 32px;background:#00e5ff;color:#060a12;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.1em;text-decoration:none;display:inline-block">CONNECT WALLET</a>` + menuBtn);
 	} else if (needsPayment) {
 		showOverlay(`Pay ${ENTRY_FEE} UCT to play<br><br>${playBtn}${menuBtn}`);
-	} else if (tag && (balance === null || balance < ENTRY_FEE)) {
+	} else if (balance === null || balance < ENTRY_FEE) {
 		showOverlay(`Insufficient balance (${balance ?? 0} UCT)<br>Need ${ENTRY_FEE} UCT to play<br><br><a href="index.html" style="color:#00e5ff">Deposit on Home Page</a>${menuBtn}`);
 	}
 
@@ -928,14 +1305,14 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 	const keysAllowed: Record<number, boolean> = {};
 
 	async function tryStart() {
-		if (canPlayFree || entryPaid) {
+		if (entryPaid) {
 			paused = false;
 			lastFrameTime = performance.now();
 			tickAccumulator = 0;
 			hideOverlay();
 			return;
 		}
-		if (!tag) return;
+		if (!tag) return; // no wallet connected
 		showOverlay('Paying...');
 		const ok = await deductEntryFee();
 		if (ok) {
@@ -963,7 +1340,7 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 		keysAllowed[key] = false;
 
 		if (paused && key > 18) {
-			if (canPlayFree || entryPaid) {
+			if (entryPaid) {
 				paused = false;
 				lastFrameTime = performance.now();
 				tickAccumulator = 0;
@@ -989,7 +1366,7 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 			if (!paused && !state.gameOver) state.character.queuedActions.push(a);
 		},
 		onStart: () => {
-			if (paused && !state.gameOver && (canPlayFree || entryPaid)) {
+			if (paused && !state.gameOver && (entryPaid)) {
 				paused = false;
 				lastFrameTime = performance.now();
 				tickAccumulator = 0;
@@ -1098,7 +1475,7 @@ function keyToAction(key: number): CharacterAction | null {
 }
 
 
-const BTN_STYLE = 'padding:12px 32px;background:#1a1a2e;color:#fff;border:2px solid #1a1a2e;border-radius:6px;font-family:monospace;font-weight:bold;cursor:pointer;letter-spacing:0.1em;text-decoration:none;display:inline-block;margin:6px;';
+const BTN_STYLE = 'padding:12px 32px;background:#00e5ff;color:#060a12;border:2px solid #00e5ff;border-radius:6px;font-family:monospace;font-weight:bold;cursor:pointer;letter-spacing:0.1em;text-decoration:none;display:inline-block;margin:6px;';
 
 /** Submit a score to the leaderboard API. Fire-and-forget. */
 function submitScore(nickname: string, score: number, coins: number): void {

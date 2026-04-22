@@ -123,29 +123,21 @@ runTest('reconcile: ready TTL expires after 30s', async () => {
 runTest('reconcile: offline opponent auto-readied after 5s', async () => {
 	const server = await startServer();
 	try {
-		await setupMatch(server, 't-off5', 'carol', 'dave');
-		// Both come online so the sync offline-auto-ready in applyReady doesn't fire
+		// Auto-ready of offline opponents now fires synchronously in
+		// applyReady for challenge-prefixed match IDs (not via the reconciler's
+		// 5s grace, which is disabled). Use a challenge-prefixed tournament.
+		await setupMatch(server, 'challenge-off5', 'carol', 'dave');
 		const c = await wsConnect(server.port, 'carol');
-		const d = await wsConnect(server.port, 'dave');
 		await sleep(100);
 
-		c.send({ type: 'match-ready', matchId: 't-off5/R0M0' });
-		await c.waitFor('match-status');
+		// Dave never connects (offline). Carol readies → sync auto-ready
+		// detects dave is offline and auto-readies him immediately for
+		// challenge-prefixed matches.
+		c.send({ type: 'match-ready', matchId: 'challenge-off5/R0M0' });
+		await sleep(500);
 
-		// Dave disconnects, leaving carol waiting. Match stays in ready_wait.
-		d.close();
-		await sleep(100);
-
-		const before = await api(server, '/api/tournaments/t-off5/matches/0/0/state');
-		const carolSide = before.playerA === 'carol' ? 'A' : 'B';
-		assertEqual(before.ready[carolSide], true);
-
-		// Advance 6s → past the 5s offline grace
-		await advanceClock(server, 6_000);
-		await tickOnce();
-
-		// Match should have started (both flags set, match transitions to active)
-		const after = await api(server, '/api/tournaments/t-off5/matches/0/0/state');
+		// Match should have started (both flags set via sync auto-ready)
+		const after = await api(server, '/api/tournaments/challenge-off5/matches/0/0/state');
 		assertEqual(after.phase, 'active', 'match started after auto-ready of offline dave');
 
 		c.close();

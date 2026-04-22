@@ -51,11 +51,19 @@ export interface MatchState {
 
 	// Timestamps the reconciler consults. Null when not in the relevant phase.
 	phaseEnteredAt: number;
+	/** When this match first entered awaiting_ready. Never reset by TTL clears. */
+	matchCreatedAt: number;
 	firstReadyAt: number | null;
 	firstDoneAt: number | null;
 
 	// Financials
 	wager: number;
+
+	// Per-player scores from replay, set when each player sends done.
+	deadScores: { A: number | null; B: number | null };
+
+	// Rematch tracking — which players have requested a rematch after match-end.
+	rematchRequested: { A: boolean; B: boolean };
 
 	// Result of the most recently resolved game (for match-end/game-result messages)
 	lastGameResult: {
@@ -73,6 +81,9 @@ export const READY_TTL_MS = 30_000;
 export const READY_OFFLINE_GRACE_MS = Infinity;
 export const DONE_OFFLINE_GRACE_MS = 30_000;
 export const STUCK_BOTH_OFFLINE_MS = 45_000;
+/** Forfeit timeout: challenges = 90s, tournaments = 5 min. */
+export const READY_FORFEIT_CHALLENGE_MS = 90_000;
+export const READY_FORFEIT_TOURNAMENT_MS = 5 * 60_000;
 export const GAME_COUNTDOWN_MS = 3_000;
 export const SERIES_NEXT_DELAY_MS = 4_000;
 
@@ -89,7 +100,8 @@ export type MatchEvent =
 			scoreA: number;
 			scoreB: number;
 	  }
-	| { type: 'advance_to_next_game'; now: number; newSeed: string };
+	| { type: 'advance_to_next_game'; now: number; newSeed: string }
+	| { type: 'rematch'; nametag: string; now: number; balance?: number };
 
 // ─── Effects (outputs, executed by caller) ──────────────────────────
 
@@ -109,6 +121,7 @@ export type Effect =
 	 * game number with the right per-side wins. */
 	| { type: 'persist_series_progress'; winsA: number; winsB: number; currentGame: number; currentSeed: string }
 	| { type: 'persist_result'; winner: string; scoreA: number; scoreB: number }
+	| { type: 'replay_dead_player'; side: 'A' | 'B'; gameNumber: number; seed: string }
 	| { type: 'advance_bracket'; winner: string }
 	| { type: 'settle_wager'; winner: string; loser: string; amount: number }
 	| { type: 'log'; level: 'info' | 'warn'; msg: string };
@@ -138,9 +151,12 @@ export function initialState(opts: {
 		ready: { A: false, B: false },
 		done: { A: false, B: false },
 		phaseEnteredAt: opts.now,
+		matchCreatedAt: opts.now,
 		firstReadyAt: null,
 		firstDoneAt: null,
 		wager: opts.wager ?? 0,
+		deadScores: { A: null, B: null },
+		rematchRequested: { A: false, B: false },
 		lastGameResult: null,
 	};
 }
@@ -170,8 +186,11 @@ function resetForNewGame(state: MatchState, newSeed: string, now: number): Match
 		ready: { A: false, B: false },
 		done: { A: false, B: false },
 		phaseEnteredAt: now,
+		matchCreatedAt: now, // reset forfeit clock for the new game
 		firstReadyAt: null,
 		firstDoneAt: null,
+		deadScores: { A: null, B: null },
+		rematchRequested: { A: false, B: false },
 		lastGameResult: null,
 	};
 }
@@ -201,6 +220,8 @@ export function apply(state: MatchState, event: MatchEvent): {
 			return applyGameResolved(state, event);
 		case 'advance_to_next_game':
 			return applyAdvanceToNextGame(state, event);
+		case 'rematch':
+			return applyRematch(state, event);
 	}
 }
 
@@ -231,11 +252,11 @@ function applyReady(
 	const firstReadyAt = state.firstReadyAt ?? event.now;
 	const effects: Effect[] = [];
 
-	// Opponent is offline at ready time → auto-ready them so the readier
-	// doesn't have to wait out the 5s reconciler grace. This matches the
-	// legacy pre-machine behavior and keeps offline-opponent games
-	// starting promptly.
-	if (event.opponentOnline === false) {
+	// Auto-ready offline opponents only in CHALLENGE mode (1v1 direct
+	// challenges where the challenger is waiting). In tournaments,
+	// players must explicitly ready up from the tournament page.
+	const isChallenge = state.matchId.startsWith('challenge-');
+	if (isChallenge && event.opponentOnline === false) {
 		const oppSide = side === 'A' ? 'B' : 'A';
 		if (!ready[oppSide]) {
 			ready = { ...ready, [oppSide]: true };
@@ -318,9 +339,13 @@ function applyDone(
 		};
 	}
 
+	// First player done — replay them immediately so the alive player
+	// can see their score via the poll and decide when to stop.
 	return {
 		state: { ...state, done, firstDoneAt },
-		effects: [],
+		effects: [
+			{ type: 'replay_dead_player', side, gameNumber: state.currentGame, seed: state.seed },
+		],
 	};
 }
 
@@ -444,6 +469,77 @@ function applyAdvanceToNextGame(
 	};
 }
 
+function applyRematch(
+	state: MatchState,
+	event: { type: 'rematch'; nametag: string; now: number; balance?: number },
+): { state: MatchState; effects: Effect[] } {
+	// Only valid after a match is resolved (series complete).
+	if (state.phase !== 'resolved') return { state, effects: [] };
+
+	const side = sideOf(state, event.nametag);
+	if (!side) return { state, effects: [] };
+
+	// If there's a wager, check that this player can afford it
+	if (state.wager > 0 && event.balance !== undefined && event.balance < state.wager) {
+		return {
+			state,
+			effects: [
+				{ type: 'log', level: 'info', msg: `[${state.matchId}] ${event.nametag} can't afford rematch wager (${event.balance} < ${state.wager})` },
+			],
+		};
+	}
+
+	const requested = { ...state.rematchRequested, [side]: true };
+
+	// If only one player requested, notify both and wait for the other.
+	if (!requested.A || !requested.B) {
+		return {
+			state: { ...state, rematchRequested: requested },
+			effects: [
+				{ type: 'broadcast_status', readyA: requested.A, readyB: requested.B },
+			],
+		};
+	}
+
+	// Both requested — start a new series with fresh seed and reset wins.
+	// Wager carries over — each rematch is a new bet at the same stakes.
+	const newSeed = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+	const next: MatchState = {
+		...state,
+		phase: 'awaiting_ready',
+		currentGame: 1,
+		seed: newSeed,
+		wins: { A: 0, B: 0 },
+		ready: { A: false, B: false },
+		done: { A: false, B: false },
+		phaseEnteredAt: event.now,
+		matchCreatedAt: event.now, // reset forfeit clock for rematch
+		firstReadyAt: null,
+		firstDoneAt: null,
+		deadScores: { A: null, B: null },
+		rematchRequested: { A: false, B: false },
+		lastGameResult: null,
+	};
+	return {
+		state: next,
+		effects: [
+			{
+				type: 'send_series_next',
+				gameNumber: 1,
+				seed: newSeed,
+				winsA: 0, winsB: 0,
+				startsAt: event.now + GAME_COUNTDOWN_MS,
+			},
+			{
+				type: 'persist_series_progress',
+				winsA: 0, winsB: 0,
+				currentGame: 1, currentSeed: newSeed,
+			},
+			{ type: 'log', level: 'info', msg: `[${state.matchId}] rematch accepted — new series seed=0x${newSeed}` },
+		],
+	};
+}
+
 function applyReconcile(
 	state: MatchState,
 	event: { type: 'reconcile'; now: number; onlineA: boolean; onlineB: boolean },
@@ -531,6 +627,49 @@ function applyReconcile(
 		}
 	}
 
+	// No-show forfeit: 5 minutes in awaiting_ready without both players ready.
+	// One readied → they advance. Neither readied → double forfeit (playerA default).
+	if (state.phase === 'awaiting_ready') {
+		const totalElapsed = event.now - state.matchCreatedAt;
+		const forfeitMs = state.matchId.startsWith('challenge-')
+			? READY_FORFEIT_CHALLENGE_MS : READY_FORFEIT_TOURNAMENT_MS;
+		if (totalElapsed >= forfeitMs) {
+			const aReady = state.ready.A;
+			const bReady = state.ready.B;
+			// Neither showed up → no winner, match is dead
+			if (!aReady && !bReady) {
+				const deadEffects: Effect[] = [
+					{ type: 'persist_result', winner: '', scoreA: 0, scoreB: 0 },
+					{ type: 'log', level: 'warn', msg: `[${state.matchId}] double no-show — no winner` },
+				];
+				return {
+					state: { ...state, phase: 'resolved', phaseEnteredAt: event.now },
+					effects: deadEffects,
+				};
+			}
+			// One showed up → they win by forfeit
+			const winner = bReady && !aReady ? state.playerB : state.playerA;
+			const forfeitEffects: Effect[] = [
+				{ type: 'persist_result', winner, scoreA: state.wins.A, scoreB: state.wins.B },
+				{ type: 'advance_bracket', winner },
+				{
+					type: 'send_match_end', winner,
+					scoreA: state.wins.A, scoreB: state.wins.B,
+					seriesEnd: true, forfeit: true,
+				},
+				{ type: 'log', level: 'warn', msg: `[${state.matchId}] no-show forfeit → ${winner} (A=${aReady} B=${bReady})` },
+			];
+			if (state.wager > 0) {
+				const loser = winner === state.playerA ? state.playerB : state.playerA;
+				forfeitEffects.push({ type: 'settle_wager', winner, loser, amount: state.wager });
+			}
+			return {
+				state: { ...state, phase: 'resolved', phaseEnteredAt: event.now },
+				effects: forfeitEffects,
+			};
+		}
+	}
+
 	// Playing phase reconciler rules (independent of each other):
 	if (state.phase === 'playing') {
 		// Rule 1: 30s auto-done grace for an offline opponent (requires that
@@ -561,6 +700,27 @@ function applyReconcile(
 						};
 					}
 					return { state: { ...state, done: next }, effects: [] };
+				}
+			}
+		}
+
+		// Abandoned match: one player sent done, the other hasn't responded
+		// for 90 seconds (regardless of online status — they might be "online"
+		// on the challenge page but not in the game). Auto-done the non-responder.
+		if (state.firstDoneAt !== null) {
+			const elapsed = event.now - state.firstDoneAt;
+			if (elapsed >= 90_000) {
+				let next = state.done;
+				if (!next.A) next = { ...next, A: true };
+				if (!next.B) next = { ...next, B: true };
+				if (next !== state.done) {
+					return {
+						state: { ...state, done: next, phase: 'resolving', phaseEnteredAt: event.now },
+						effects: [
+							{ type: 'replay_game', gameNumber: state.currentGame, seed: state.seed },
+							{ type: 'log', level: 'warn', msg: `[${state.matchId}] abandoned match — auto-done after 90s` },
+						],
+					};
 				}
 			}
 		}

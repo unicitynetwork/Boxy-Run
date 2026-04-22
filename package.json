@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "build:sdk": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020",
-    "build:game": "esbuild src/game/main.ts --bundle --outfile=js/game.js --format=iife --target=es2020",
+    "build:game": "esbuild src/game/main.ts --bundle --outfile=js/game.js --format=iife --target=es2020 --minify",
     "build:server": "esbuild tournament/server/server.ts --bundle --outfile=dist/server.js --platform=node --format=cjs --packages=external",
     "build:pages": "esbuild src/pages/challenge.ts --bundle --outfile=js/challenge-page.js --format=iife --target=es2020",
     "build": "npm run build:sdk && npm run build:game && npm run build:pages",
@@ -17,6 +17,7 @@
     "dev": "esbuild src/sphere-connect.ts --bundle --outfile=js/sphere-connect.js --format=iife --global-name=SphereConnect --target=es2020 --watch=forever --servedir=."
   },
   "dependencies": {
+    "@babylonjs/core": "^9.3.1",
     "@libsql/client": "^0.17.2",
     "@unicitylabs/sphere-sdk": "^0.6.0-dev.1",
     "ws": "^8.20.0"

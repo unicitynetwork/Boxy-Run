@@ -23,6 +23,8 @@ COPY --from=build /app/logo.png ./
 COPY --from=build /app/unicity-logo.png ./
 COPY --from=build /app/dev.html ./
 COPY --from=build /app/admin.html ./
+COPY --from=build /app/levels.html ./
+COPY --from=build /app/music ./music
 
 ENV PORT=8080
 ENV STATIC_DIR=/app

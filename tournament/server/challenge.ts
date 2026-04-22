@@ -45,10 +45,13 @@ export function getPendingChallenge(id: string): PendingChallenge | undefined {
 }
 
 // When a challenge is accepted, store the result so the challenger can poll it.
-const acceptedChallenges = new Map<string, { matchId: string; tournamentId: string }>();
+const acceptedChallenges = new Map<string, {
+	matchId: string; tournamentId: string; seed: string;
+	playerA: string; playerB: string; bestOf: number;
+}>();
 
-/** Get the status of a challenge: pending, accepted (with matchId), or expired. */
-export function getChallengeStatus(id: string): { status: 'pending' } | { status: 'accepted'; matchId: string; tournamentId: string } | { status: 'expired' } {
+/** Get the status of a challenge: pending, accepted (with match details), or expired. */
+export function getChallengeStatus(id: string): any {
 	if (pending.has(id)) return { status: 'pending' };
 	const accepted = acceptedChallenges.get(id);
 	if (accepted) return { status: 'accepted', ...accepted };
@@ -224,7 +227,10 @@ export async function applyChallengeAccept(
 		});
 
 		// Store so the challenger can poll the status
-		acceptedChallenges.set(challengeId, { matchId, tournamentId: tId });
+		acceptedChallenges.set(challengeId, {
+			matchId, tournamentId: tId, seed: result.seed,
+			playerA: result.playerA, playerB: result.playerB, bestOf: ch.bestOf,
+		});
 		// Clean up after 60s (challenger should have redirected by then)
 		setTimeout(() => acceptedChallenges.delete(challengeId), 60_000);
 

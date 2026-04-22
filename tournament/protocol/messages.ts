@@ -102,6 +102,11 @@ export interface MatchDoneMessage extends MessageBase<'match-done'> {
 	matchId: string;
 }
 
+/** Request a rematch after match-end. When both send this, a new series starts. */
+export interface RematchMessage extends MessageBase<'rematch'> {
+	matchId: string;
+}
+
 export type ClientMessage =
 	| RegisterMessage
 	| ChallengeMessage
@@ -110,7 +115,8 @@ export type ClientMessage =
 	| ChatClientMessage
 	| MatchReadyMessage
 	| InputMessage
-	| MatchDoneMessage;
+	| MatchDoneMessage
+	| RematchMessage;
 
 // ═══════════════════════════════════════════════════════════════════
 // Server → Client

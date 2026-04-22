@@ -121,16 +121,17 @@ runTest('same-nametag: rapid reconnect doesn\'t lose ready flag', async () => {
 	try {
 		await api(server, '/api/tournaments', {
 			method: 'POST', asAdmin: true,
-			body: { id: 'sn-2', name: 'sn-2', maxPlayers: 2 },
+			body: { id: 'challenge-sn-2', name: 'sn-2', maxPlayers: 2 },
 		});
-		await api(server, '/api/tournaments/sn-2/register', { method: 'POST', body: { nametag: 'carol' } });
-		await api(server, '/api/tournaments/sn-2/register', { method: 'POST', body: { nametag: 'dave' } });
-		await api(server, '/api/tournaments/sn-2/start', { method: 'POST', asAdmin: true });
+		await api(server, '/api/tournaments/challenge-sn-2/register', { method: 'POST', body: { nametag: 'carol' } });
+		await api(server, '/api/tournaments/challenge-sn-2/register', { method: 'POST', body: { nametag: 'dave' } });
+		await api(server, '/api/tournaments/challenge-sn-2/start', { method: 'POST', asAdmin: true });
 
 		const carol = await wsConnect(server.port, 'carol');
 		// dave is offline — carol readies, offline auto-ready fires immediately
+		// (auto-ready only works for challenge-prefixed match IDs)
 		await sleep(100);
-		carol.send({ type: 'match-ready', matchId: 'sn-2/R0M0' });
+		carol.send({ type: 'match-ready', matchId: 'challenge-sn-2/R0M0' });
 		await carol.waitFor('match-start');
 
 		// Carol refreshes her page 3 times in quick succession
@@ -143,7 +144,7 @@ runTest('same-nametag: rapid reconnect doesn\'t lose ready flag', async () => {
 		}
 
 		// Match is still active — the reconnects didn't corrupt anything
-		const state = await api(server, '/api/tournaments/sn-2/matches/0/0/state');
+		const state = await api(server, '/api/tournaments/challenge-sn-2/matches/0/0/state');
 		assertEqual(state.phase, 'active');
 		assertEqual(state.playerA === 'carol' || state.playerB === 'carol', true);
 

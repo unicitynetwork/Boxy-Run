@@ -175,6 +175,13 @@ runTest('wager: Bo3 series settles ONCE at series end, not per game', async () =
 		d.send({ type: 'match-ready', matchId });
 		await c.waitFor('match-start');
 		await d.waitFor('match-start');
+		// Carol switches lane + jumps every tick to beat no-input dave
+		const b64 = (s: string) => Buffer.from(s).toString('base64');
+		c.send({ type: 'input', matchId, tick: 1, payload: b64('left') });
+		for (let t = 1; t <= 700; t += 2) {
+			c.send({ type: 'input', matchId, tick: t, payload: b64('up') });
+		}
+		await sleep(500);
 		c.send({ type: 'match-done', matchId });
 		d.send({ type: 'match-done', matchId });
 		await c.waitFor('game-result'); // game 1
@@ -186,6 +193,11 @@ runTest('wager: Bo3 series settles ONCE at series end, not per game', async () =
 		d.send({ type: 'match-ready', matchId });
 		await c.waitFor('match-start');
 		await d.waitFor('match-start');
+		c.send({ type: 'input', matchId, tick: 1, payload: b64('left') });
+		for (let t = 1; t <= 700; t += 2) {
+			c.send({ type: 'input', matchId, tick: t, payload: b64('up') });
+		}
+		await sleep(500);
 		c.send({ type: 'match-done', matchId });
 		d.send({ type: 'match-done', matchId });
 		const end = await c.waitFor('match-end');

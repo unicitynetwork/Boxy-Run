@@ -119,7 +119,10 @@ runTest('machine: one done in playing — no phase change yet', async () => {
 	assertEqual(r.state.phase, 'playing');
 	assertEqual(r.state.done.A, true);
 	assertEqual(r.state.firstDoneAt, 10);
-	assertEqual(r.effects.length, 0);
+	// First done now emits replay_dead_player so the alive player can see
+	// the dead player's score via polling.
+	assertEqual(r.effects.length, 1);
+	assertEqual((r.effects[0] as any).type, 'replay_dead_player');
 });
 
 runTest('machine: both done → resolving + replay effect', async () => {
@@ -286,13 +289,11 @@ runTest('reconcile: 30s TTL clears ready flags + notifies both', async () => {
 });
 
 runTest('reconcile: 5s offline grace auto-readies opponent → match starts', async () => {
-	let s = seed();
-	s = apply(s, { type: 'ready', nametag: 'alice', now: 1000 }).state;
-	const r = apply(s, {
-		type: 'reconcile',
-		now: 1000 + READY_OFFLINE_GRACE_MS + 100,
-		onlineA: true, onlineB: false, // bob offline
-	});
+	// Auto-ready of offline opponents now happens synchronously in applyReady
+	// for challenge-prefixed matches, not via the reconciler's 5s grace
+	// (READY_OFFLINE_GRACE_MS = Infinity disables the reconcile path).
+	let s = seed({ matchId: 'challenge-t/R0M0', tournamentId: 'challenge-t' });
+	const r = apply(s, { type: 'ready', nametag: 'alice', now: 1000, opponentOnline: false });
 	assertEqual(r.state.ready.A, true);
 	assertEqual(r.state.ready.B, true);
 	assertEqual(r.state.phase, 'playing', 'auto-ready flipped phase to playing');

@@ -21,6 +21,16 @@ import {
 	stopServer,
 } from './harness';
 
+/** Switch lane at tick 1 + jump every tick to ensure the player survives
+ *  longer than a no-input opponent across virtually any seed. */
+function sendWinningInputs(client: any, matchId: string) {
+	const b64 = (s: string) => Buffer.from(s).toString('base64');
+	client.send({ type: 'input', matchId, tick: 1, payload: b64('left') });
+	for (let t = 1; t <= 700; t += 2) {
+		client.send({ type: 'input', matchId, tick: t, payload: b64('up') });
+	}
+}
+
 function wsConnect(port: number, nametag: string): Promise<{
 	ws: WebSocket;
 	messages: any[];
@@ -118,7 +128,9 @@ runTest('series: Bo3 2-0 sweep — seriesEnd on game 2, no series-next after', a
 		await b.waitFor('match-start');
 		assertEqual(startMsg.bestOf, 3);
 
-		// Game 1 — both empty inputs → tie → playerA wins by tiebreak
+		// Game 1 — alice sends inputs to beat bob (no-input)
+		sendWinningInputs(a, 'sw-bo3-20/R0M0');
+		await sleep(500);
 		a.send({ type: 'match-done', matchId: 'sw-bo3-20/R0M0' });
 		b.send({ type: 'match-done', matchId: 'sw-bo3-20/R0M0' });
 		const g1 = await a.waitFor('game-result');
@@ -137,7 +149,9 @@ runTest('series: Bo3 2-0 sweep — seriesEnd on game 2, no series-next after', a
 		b.send({ type: 'match-ready', matchId: 'sw-bo3-20/R0M0' });
 		await a.waitFor('match-start');
 		await b.waitFor('match-start');
-		// Both done — playerA wins again → series 2-0 → match-end with seriesEnd
+		// Alice sends inputs again → wins game 2 → series 2-0 → match-end with seriesEnd
+		sendWinningInputs(a, 'sw-bo3-20/R0M0');
+		await sleep(500);
 		a.send({ type: 'match-done', matchId: 'sw-bo3-20/R0M0' });
 		b.send({ type: 'match-done', matchId: 'sw-bo3-20/R0M0' });
 		const end = await a.waitFor('match-end');
@@ -189,6 +203,9 @@ runTest('series: Bo5 sweep — 3-0, seriesEnd on game 3', async () => {
 		assertEqual(start.bestOf, 5);
 
 		for (let g = 1; g <= 2; g++) {
+			// Carol sends inputs to score higher than no-input dave
+			sendWinningInputs(c, 'sw-bo5/R0M0');
+			await sleep(500);
 			c.send({ type: 'match-done', matchId: 'sw-bo5/R0M0' });
 			d.send({ type: 'match-done', matchId: 'sw-bo5/R0M0' });
 			const gr = await c.waitFor('game-result');
@@ -202,7 +219,9 @@ runTest('series: Bo5 sweep — 3-0, seriesEnd on game 3', async () => {
 			await d.waitFor('match-start');
 		}
 
-		// Game 3 — sweep → match-end with seriesEnd
+		// Game 3 — carol sends inputs, sweep → match-end with seriesEnd
+		sendWinningInputs(c, 'sw-bo5/R0M0');
+		await sleep(100);
 		c.send({ type: 'match-done', matchId: 'sw-bo5/R0M0' });
 		d.send({ type: 'match-done', matchId: 'sw-bo5/R0M0' });
 		const end = await c.waitFor('match-end', 10_000);

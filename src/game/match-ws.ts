@@ -16,6 +16,8 @@ export function connectMatchWS(opts: {
 	matchId: string;
 	onOpponentInput: (tick: number, action: CharacterAction) => void;
 	onChat: (from: string, message: string) => void;
+	onChallengeStart?: (msg: any) => void;
+	onSeriesNext?: (msg: any) => void;
 }): MatchWS {
 	const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const wsUrl = `${wsProto}//${location.host}`;
@@ -51,6 +53,12 @@ export function connectMatchWS(opts: {
 				}
 				if (msg.type === 'chat' && msg.from) {
 					opts.onChat(msg.from, msg.message);
+				}
+				if (msg.type === 'challenge-start') {
+					opts.onChallengeStart?.(msg);
+				}
+				if (msg.type === 'series-next') {
+					opts.onSeriesNext?.(msg);
 				}
 			} catch {}
 		};

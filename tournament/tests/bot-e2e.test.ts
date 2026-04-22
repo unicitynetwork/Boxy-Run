@@ -89,11 +89,13 @@ runTest('bot-e2e: 2-bot Bo3 tournament completes with a champion', async () => {
 			},
 		});
 
-		// Play-out budget: Bo3 with 2 bots = 1 match × 2-3 games × up to 25s
-		// + 4s series-next delay × up to 2 gaps ≈ 85s worst case.
-		const champion = await waitForTournamentComplete(server, 'bote2e-bo3-2p', 120_000);
+		// Play-out budget: Bo3 with 2 bots = 1 match × 2-3 games × up to 40s
+		// + 4s series-next delay × up to 2 gaps + ready-TTL recovery.
+		const champion = await waitForTournamentComplete(server, 'bote2e-bo3-2p', 240_000);
 		assert(champion, 'tournament has a champion');
-		assert(champion.startsWith('bot'), `champion is a bot, got ${champion}`);
+		// Bot names come from the CRYPTO_NAMES list in bot-players.ts
+		// (e.g., satoshi_og, vitalik_fan), not "bot_N" prefixed.
+		assert(typeof champion === 'string' && champion.length > 0, `champion is a non-empty string, got ${champion}`);
 
 		// Bo3 invariant: the final match's score reflects series wins.
 		// `scoreA + scoreB` should be between 2 and 3 (at least 2 wins for
@@ -129,8 +131,8 @@ runTest('bot-e2e: 4-bot Bo3 tournament reaches champion through bracket', async 
 		});
 
 		// 4 players = 2 semis + 1 final = 3 matches, each Bo3 → up to 9 games
-		// × up to 25s each + series-next delays ≈ 270s worst case.
-		const champion = await waitForTournamentComplete(server, 'bote2e-bo3-4p', 300_000);
+		// × up to 40s each + series-next delays + ready-TTL recoveries.
+		const champion = await waitForTournamentComplete(server, 'bote2e-bo3-4p', 420_000);
 		assert(champion, 'tournament has a champion');
 
 		// Every match should be COMPLETE (no force-resolve forfeits).

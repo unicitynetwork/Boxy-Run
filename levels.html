@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run — Levels</title>
+<link rel="icon" type="image/png" href="logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a12;--surface:rgba(20,32,56,0.85);
+  --cyan:#5feaff;--cyan-dim:rgba(95,234,255,0.2);--cyan-glow:rgba(95,234,255,0.5);
+  --orange:#ff9534;--green:#2d6a4f;--red:#c1121f;
+  --text:#f8fafc;--text2:#cbd5e1;--text3:#94a3b8;
+  --border:rgba(95,234,255,0.25);--border-hi:rgba(95,234,255,0.4);
+  --r:6px;
+  --display:'Orbitron',monospace;--body:'IBM Plex Mono','SF Mono',monospace;
+}
+body{font-family:var(--body);background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
+.grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,229,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.02) 1px,transparent 1px);
+  background-size:60px 60px;mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,black 20%,transparent 70%)}
+
+main{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:40px 24px 80px}
+
+.header{display:flex;align-items:center;gap:16px;margin-bottom:40px}
+.back{font-family:var(--display);font-size:11px;font-weight:600;letter-spacing:.1em;text-decoration:none;color:var(--text3);border:1px solid var(--border);padding:8px 16px;border-radius:var(--r);transition:.2s}
+.back:hover{color:var(--cyan);border-color:var(--cyan)}
+.header h1{font-family:var(--display);font-size:clamp(24px,4vw,36px);font-weight:800}
+.header h1 span{color:var(--cyan);text-shadow:0 0 20px var(--cyan-glow)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}
+
+.level-card{
+  background:var(--surface);backdrop-filter:blur(20px);
+  border:1px solid var(--border);border-radius:var(--r);
+  padding:24px;position:relative;overflow:hidden;
+  transition:.3s;cursor:pointer;text-decoration:none;display:block;color:inherit;
+}
+.level-card:hover:not(.locked){border-color:var(--cyan);transform:translateY(-2px);box-shadow:0 4px 24px rgba(95,234,255,0.15)}
+.level-card.locked{opacity:0.4;cursor:default;pointer-events:none}
+.level-card.completed{border-color:rgba(45,106,79,0.5)}
+.level-card.completed::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--green),transparent);
+}
+
+.level-num{font-family:var(--display);font-size:10px;font-weight:600;letter-spacing:.4em;color:var(--text3);margin-bottom:6px}
+.level-name{font-family:var(--display);font-size:16px;font-weight:700;margin-bottom:6px}
+.level-desc{font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.5}
+
+.level-meta{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.level-target{font-size:11px;color:var(--text3)}
+.level-target strong{color:var(--cyan);font-size:13px}
+.level-best{font-size:11px;color:var(--text3);text-align:right}
+.level-best strong{color:var(--orange);font-size:13px}
+
+.level-badge{
+  position:absolute;top:12px;right:12px;
+  font-family:var(--display);font-size:9px;font-weight:700;letter-spacing:.2em;
+  padding:4px 10px;border-radius:3px;
+}
+.badge-complete{background:rgba(45,106,79,0.3);color:#4ade80}
+.badge-locked{background:rgba(148,163,184,0.15);color:var(--text3)}
+.badge-new{background:var(--cyan-dim);color:var(--cyan)}
+
+.difficulty-bar{display:flex;gap:3px;margin-bottom:12px}
+.difficulty-bar .pip{width:16px;height:4px;border-radius:2px;background:rgba(255,255,255,0.1)}
+.difficulty-bar .pip.filled{background:var(--cyan)}
+.difficulty-bar .pip.filled.high{background:var(--orange)}
+.difficulty-bar .pip.filled.max{background:var(--red)}
+
+@media(max-width:600px){
+  .grid{grid-template-columns:1fr}
+  .header{flex-direction:column;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<main>
+  <div class="header">
+    <a href="index.html" class="back">&larr; MENU</a>
+    <h1>LEVEL <span>SELECT</span></h1>
+  </div>
+  <div class="grid" id="levels-grid"></div>
+</main>
+
+<script>
+const LEVELS = [
+  { id:1,  name:'First Run',       desc:'Easy forest. Survive and score 20,000.',                 objectives:['Score 20,000'],                                         difficulty:2 },
+  { id:2,  name:'Coin Hunter',     desc:'Collect 30 coins while dodging trees.',                  objectives:['Collect 30 coins'],                                     difficulty:3 },
+  { id:3,  name:'Seeing Red',      desc:'Red coins are rare and worth 5,000 points. Find 2.',    objectives:['Collect 2 red coins'],                                  difficulty:3 },
+  { id:4,  name:'Dense Forest',    desc:'Trees pack tight. Survive long enough to score 30,000.', objectives:['Score 30,000'],                                         difficulty:5 },
+  { id:5,  name:'Burn It Down',    desc:'Collect flamethrowers and clear the path.',              objectives:['Use flamethrower 3 times'],                             difficulty:5 },
+  { id:6,  name:'Blue Streak',     desc:'Blue coins hide in tricky spots. Grab 5.',              objectives:['Collect 5 blue coins'],                                 difficulty:6 },
+  { id:7,  name:'Fogbound',        desc:'Visibility is low. Score 35,000 blind.',                objectives:['Score 35,000'],                                         difficulty:8 },
+  { id:8,  name:'Red Rush',        desc:'Dense forest, big trees. Hunt down 3 red coins.',       objectives:['Collect 3 red coins'],                                  difficulty:8 },
+  { id:9,  name:'Inferno',         desc:'Maximum density. Burn your way through.',                objectives:['Use flamethrower 5 times'],                             difficulty:9 },
+  { id:10, name:'The Gauntlet',    desc:'Everything at max. Score 25K and collect 3 red coins.', objectives:['Score 25,000','Collect 3 red coins'],                   difficulty:10 },
+];
+
+function getUnlocked() {
+  try { return Math.max(1, parseInt(localStorage.getItem('boxyrun-level-unlocked') || '1', 10)); }
+  catch { return 1; }
+}
+function getBest(id) {
+  try { return parseInt(localStorage.getItem('boxyrun-level-' + id + '-best') || '0', 10); }
+  catch { return 0; }
+}
+
+function render() {
+  const unlocked = getUnlocked();
+  const grid = document.getElementById('levels-grid');
+  grid.innerHTML = '';
+  for (const lv of LEVELS) {
+    const best = getBest(lv.id);
+    const isUnlocked = lv.id <= unlocked;
+    const isCompleted = lv.id < unlocked;
+    const isNext = lv.id === unlocked;
+
+    const card = document.createElement('a');
+    card.className = 'level-card' + (isCompleted ? ' completed' : '') + (!isUnlocked ? ' locked' : '');
+    if (isUnlocked) card.href = 'dev.html?level=' + lv.id;
+
+    // Badge
+    let badge = '';
+    if (!isUnlocked) badge = '<div class="level-badge badge-locked">LOCKED</div>';
+    else if (isCompleted) badge = '<div class="level-badge badge-complete">COMPLETE</div>';
+    else if (isNext) badge = '<div class="level-badge badge-new">PLAY</div>';
+
+    // Difficulty pips
+    let pips = '';
+    for (let i = 1; i <= 10; i++) {
+      const filled = i <= lv.difficulty;
+      const cls = filled ? (i >= 9 ? 'pip filled max' : i >= 7 ? 'pip filled high' : 'pip filled') : 'pip';
+      pips += '<div class="' + cls + '"></div>';
+    }
+
+    // Objectives list
+    const objHtml = lv.objectives.map(function(o) {
+      return '<div style="font-size:11px;color:var(--text3);margin-bottom:2px">&bull; ' + o + '</div>';
+    }).join('');
+
+    // Best score
+    const bestHtml = best > 0
+      ? '<div class="level-best">Best<br><strong>' + best.toLocaleString() + '</strong></div>'
+      : '';
+
+    card.innerHTML =
+      badge +
+      '<div class="level-num">LEVEL ' + lv.id + '</div>' +
+      '<div class="level-name">' + lv.name + '</div>' +
+      '<div class="level-desc">' + lv.desc + '</div>' +
+      '<div class="difficulty-bar">' + pips + '</div>' +
+      '<div style="margin-bottom:10px">' + objHtml + '</div>' +
+      '<div class="level-meta">' +
+        '<div></div>' +
+        bestHtml +
+      '</div>';
+
+    grid.appendChild(card);
+  }
+}
+
+render();
+</script>
+</body>
+</html>

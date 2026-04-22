@@ -146,12 +146,17 @@ function handleMsg(msg: ServerMessage): void {
 			showIncoming(msg);
 			break;
 		case 'challenge-sent':
-			showStatus(`Challenge sent to ${esc(msg.opponent)}. Waiting...`, 'var(--cyan-dim)', 'var(--cyan)');
+			// Already handled by the REST response — ignore WS echo
 			break;
 		case 'challenge-declined':
-			// Empty `by` = server-side expiry; non-empty = the actual decliner
+			clearPending();
 			if (msg.by) {
-				showStatus(`${esc(msg.by)} declined.`, 'rgba(218,54,51,0.1)', 'var(--red)');
+				// Fast decline (< 3s) = bot busy or auto-reject
+				const fast = pendingStart > 0 && (Date.now() - pendingStart) < 3000;
+				const text = fast
+					? `${esc(msg.by)} is busy — try again shortly.`
+					: `${esc(msg.by)} declined.`;
+				showStatus(text, 'rgba(218,54,51,0.1)', 'var(--red)');
 			} else {
 				showStatus('Challenge expired — opponent didn\u2019t respond in time.', 'rgba(218,54,51,0.1)', 'var(--red)');
 			}
@@ -168,6 +173,7 @@ function handleMsg(msg: ServerMessage): void {
 			}
 			break;
 		case 'challenge-start': {
+			clearPending();
 			// Redirect straight to the game — match is already started
 			const p = new URLSearchParams({
 				tournament: '1', matchId: msg.matchId, seed: msg.seed,
@@ -187,39 +193,58 @@ function handleMsg(msg: ServerMessage): void {
 
 // ─── Online roster rendering ─────────────────────────────────────
 
+// Persist wager/bestof across re-renders
+let savedWager = '0';
+let savedBestOf = '3';
+
 function render(): void {
 	const el = $('online-list');
-	// Filter out bots (used for tournament testing) and self
-	const others = onlinePlayers.filter(n => n !== myNametag && !n.startsWith('bot'));
+	const others = onlinePlayers.filter(n => n !== myNametag);
 	$('online-count').textContent = `${others.length} online`;
+
+	// Save current values before re-render
+	const wagerEl = document.getElementById('wager-input') as HTMLInputElement | null;
+	const bestofEl = document.getElementById('bestof-input') as HTMLSelectElement | null;
+	if (wagerEl) savedWager = wagerEl.value;
+	if (bestofEl) savedBestOf = bestofEl.value;
+
 	if (!others.length) {
 		el.innerHTML = '<div class="empty">No other players online right now</div>';
 		return;
 	}
 	el.innerHTML = `<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
 		<label style="font-size:12px;color:var(--text2)">Wager:</label>
-		<input type="number" id="wager-input" value="0" min="0" step="10" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px;text-align:center">
+		<input type="number" id="wager-input" value="${esc(savedWager)}" min="0" step="10" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px;text-align:center">
 		<span style="font-size:12px;color:var(--text3)">UCT</span>
 		<label style="font-size:12px;color:var(--text2);margin-left:8px">Best of:</label>
 		<select id="bestof-input" style="padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px">
-			<option value="1">1</option>
-			<option value="3" selected>3</option>
-			<option value="5">5</option>
+			<option value="1"${savedBestOf === '1' ? ' selected' : ''}>1</option>
+			<option value="3"${savedBestOf === '3' ? ' selected' : ''}>3</option>
+			<option value="5"${savedBestOf === '5' ? ' selected' : ''}>5</option>
 		</select>
 	</div>` + others.map(n =>
-		`<button class="player-btn" onclick="challenge('${esc(n)}')">${esc(n)}</button>`
+		`<button class="player-btn" onclick="challenge('${esc(n)}')"${pendingChallenge ? ' disabled' : ''}>${esc(n)}</button>`
 	).join('');
 }
 
 // ─── Outgoing challenges ─────────────────────────────────────────
 
+let pendingChallenge: string | null = null; // challengeId while waiting
+let pendingTimer: ReturnType<typeof setInterval> | null = null;
+let pendingStart = 0;
+
 async function challenge(opponent: string): Promise<void> {
+	if (pendingChallenge) return; // already waiting
+	pendingChallenge = 'sending'; // guard immediately, before any await
+	render(); // disable buttons instantly
+
 	const wagerInput = document.getElementById('wager-input') as HTMLInputElement | null;
 	const bestofInput = document.getElementById('bestof-input') as HTMLSelectElement | null;
 	const wager = parseInt(wagerInput?.value || '0', 10);
 	const bestOf = parseInt(bestofInput?.value || '1', 10);
-	// REST: works even if our WS is zombie. Server pushes challenge-received
-	// to the opponent over WS and challenge-sent back to us.
+
+	showStatus(`Sending challenge to ${esc(opponent)}...`, 'var(--cyan-dim)', 'var(--cyan)');
+
 	try {
 		const r = await fetch('/api/challenges', {
 			method: 'POST',
@@ -228,20 +253,52 @@ async function challenge(opponent: string): Promise<void> {
 		});
 		const data = await r.json();
 		if (!r.ok) {
+			clearPending();
 			showStatus(data.message || data.error || 'Challenge failed', 'rgba(218,54,51,0.1)', 'var(--red)');
+			return;
 		}
+		// Challenge sent — show waiting status with countdown
+		pendingChallenge = data.challengeId || 'pending';
+		pendingStart = Date.now();
+		showPendingStatus(opponent);
+		pendingTimer = setInterval(() => showPendingStatus(opponent), 1000);
+		// Auto-clear after 30s (server expires challenges at 30s)
+		setTimeout(() => {
+			if (pendingChallenge) {
+				clearPending();
+				showStatus('Challenge expired — no response.', 'rgba(218,54,51,0.1)', 'var(--red)');
+			}
+		}, 32_000);
+		render(); // disable buttons
 	} catch (err) {
-		showStatus('Network error', 'rgba(218,54,51,0.1)', 'var(--red)');
+		clearPending();
+		showStatus('Could not reach server — check your connection', 'rgba(218,54,51,0.1)', 'var(--red)');
 	}
 }
 
-function showStatus(text: string, bg: string, color: string): void {
+function showPendingStatus(opponent: string): void {
+	const elapsed = Math.floor((Date.now() - pendingStart) / 1000);
+	const remaining = Math.max(0, 30 - elapsed);
+	showStatus(
+		`Challenge sent to ${esc(opponent)} — waiting for response (${remaining}s)`,
+		'var(--cyan-dim)', 'var(--cyan)',
+		false, // don't auto-hide
+	);
+}
+
+function clearPending(): void {
+	pendingChallenge = null;
+	if (pendingTimer) { clearInterval(pendingTimer); pendingTimer = null; }
+	render(); // re-enable buttons
+}
+
+function showStatus(text: string, bg: string, color: string, autoHide = true): void {
 	const el = $('challenge-status');
 	el.style.display = 'block';
 	el.style.background = bg;
 	el.style.color = color;
-	el.textContent = text;
-	setTimeout(() => { el.style.display = 'none'; }, 5000);
+	el.innerHTML = text;
+	if (autoHide) setTimeout(() => { el.style.display = 'none'; }, 5000);
 }
 
 const shownChallenges = new Set<string>();
@@ -396,39 +453,5 @@ setInterval(async () => {
 // Initial fetch
 if (myNametag) fetch('/api/online').then(r => r.json()).then(d => { onlinePlayers = d.players || []; render(); }).catch(() => {});
 
-// ── REST poll: catch missed challenge-start ──────────────────────
-// If the WS push for challenge-start was lost (deploy, reconnect, etc),
-// the challenger is stuck on this page forever. Poll the server every 3s
-// to check if a match involving us was created. If so, redirect.
-setInterval(async () => {
-	if (!myNametag) return;
-	try {
-		const r = await fetch('/api/tournaments');
-		if (!r.ok) return;
-		const { tournaments } = await r.json();
-		// Find a challenge tournament that's active and involves us
-		for (const t of tournaments) {
-			if (t.status !== 'active' || !t.id.startsWith('challenge-')) continue;
-			// Check if we're a participant
-			const br = await fetch(`/api/tournaments/${encodeURIComponent(t.id)}/bracket`);
-			if (!br.ok) continue;
-			const { matches } = await br.json();
-			const m = matches?.find((m: any) =>
-				(m.playerA === myNametag || m.playerB === myNametag)
-				&& (m.status === 'ready_wait' || m.status === 'active'),
-			);
-			if (m) {
-				const side = m.playerA === myNametag ? 'A' : 'B';
-				const opponent = side === 'A' ? m.playerB : m.playerA;
-				const p = new URLSearchParams({
-					tournament: '1', matchId: m.id, seed: m.seed || '0',
-					side, opponent, name: myNametag,
-					tid: t.id, bestOf: String(t.best_of || 1),
-					startsAt: String(Date.now() + 3000),
-				});
-				location.href = 'dev.html?' + p;
-				return;
-			}
-		}
-	} catch {}
-}, 3000);
+// Redirect poll removed — accept does a direct redirect,
+// challenger gets redirect via WS challenge-start.

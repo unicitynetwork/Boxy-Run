@@ -153,6 +153,8 @@ export function installTouchControls(opts: {
 				opts.onAction('up'); // tap = jump
 			} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
 				opts.onAction('up'); // swipe up = jump
+			} else if (absDy > absDx && dy > SWIPE_THRESHOLD) {
+				opts.onAction('fire'); // swipe down = flamethrower
 			} else if (absDx > absDy) {
 				if (dx < -SWIPE_THRESHOLD) opts.onAction('left');
 				else if (dx > SWIPE_THRESHOLD) opts.onAction('right');

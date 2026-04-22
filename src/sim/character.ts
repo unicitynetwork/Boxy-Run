@@ -34,6 +34,7 @@ export function updateCharacter(state: GameState, config: GameConfig): void {
 			state.flamethrowerCharges--;
 			state.flameTicks = 1;
 			state.flameJustFired = true;
+			state.flamethrowerUses++;
 		}
 	}
 

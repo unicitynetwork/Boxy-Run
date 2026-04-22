@@ -283,7 +283,14 @@ async function runEffect(
 				break;
 
 			case 'persist_result':
-				await updateMatchResult(state.matchId, effect.winner, effect.scoreA, effect.scoreB);
+				// Critical — if this fails, the match stays 'active' in DB and
+				// can be resurrected as a zombie by the reconciler. Retry once.
+				try {
+					await updateMatchResult(state.matchId, effect.winner, effect.scoreA, effect.scoreB);
+				} catch (err) {
+					console.error(`[machine] persist_result failed, retrying:`, err);
+					await updateMatchResult(state.matchId, effect.winner, effect.scoreA, effect.scoreB);
+				}
 				break;
 
 			case 'advance_bracket': {
@@ -296,6 +303,28 @@ async function runEffect(
 						effect.winner,
 					);
 					await checkRoundAdvance(state.tournamentId);
+				}
+				break;
+			}
+
+			case 'replay_dead_player': {
+				// Replay the dead player's inputs to get their final score.
+				// Store it on the machine state so the poll can return it.
+				try {
+					const { getInputs } = await import('./tournament-db');
+					const gameNum = effect.gameNumber;
+					const seedNum = parseInt(effect.seed, 16) >>> 0;
+					const tag = gameNum > 1 ? `${effect.side}:g${gameNum}` : effect.side;
+					const inputs = await getInputs(state.matchId, tag);
+					const score = replayGame(seedNum, inputs as any[]);
+					// Update the live machine state
+					const current = states.get(state.matchId);
+					if (current) {
+						current.deadScores = { ...current.deadScores, [effect.side]: score };
+					}
+					console.log(`[machine] dead score: side=${effect.side} score=${score} game=${gameNum}`);
+				} catch (err) {
+					console.error(`[machine] replay_dead_player error:`, err);
 				}
 				break;
 			}
@@ -371,9 +400,16 @@ async function applyEventInner(
 	const { state: next, effects } = apply(state, event);
 	states.set(matchId, next);
 	if (effects.length > 0) await runEffects(next, effects, io);
-	// Drop resolved matches from memory once effects have run.
+	// Keep resolved state in memory briefly so polls can read lastGameResult.
+	// Clean up after 30s — long enough for any pending client poll to see it.
 	if (next.phase === 'resolved') {
-		states.delete(matchId);
+		// Challenges get 5 minutes for rematch requests. Tournaments get 30s.
+		const cleanupMs = matchId.startsWith('challenge-') ? 5 * 60_000 : 30_000;
+		setTimeout(() => {
+			if (states.get(matchId)?.phase === 'resolved') {
+				states.delete(matchId);
+			}
+		}, cleanupMs);
 	}
 	return next;
 }
@@ -432,6 +468,36 @@ export async function reconcile(matchId: string, io: ManagerIO): Promise<void> {
 	const onlineA = io.isOnline(state.playerA);
 	const onlineB = io.isOnline(state.playerB);
 	await applyEvent(matchId, { type: 'reconcile', now: now(), onlineA, onlineB }, io);
+
+	// Server-side early-decide: if one player is dead and the alive
+	// player's partial replay already beats them, auto-done the alive
+	// player. Needed because bots don't poll the state endpoint.
+	// Uses deadScores (already computed) + partial replay of alive player.
+	const afterReconcile = states.get(matchId);
+	if (afterReconcile && afterReconcile.phase === 'playing'
+			&& (afterReconcile.done.A !== afterReconcile.done.B)) {
+		const deadSide: 'A' | 'B' = afterReconcile.done.A ? 'A' : 'B';
+		const aliveSide: 'A' | 'B' = deadSide === 'A' ? 'B' : 'A';
+		const deadScore = afterReconcile.deadScores[deadSide];
+		if (deadScore !== null) {
+			try {
+				const { getInputs } = await import('./tournament-db');
+				const { replayGamePartial } = await import('./tournament-logic');
+				const gameNum = afterReconcile.currentGame;
+				const seedNum = parseInt(afterReconcile.seed, 16) >>> 0;
+				const aliveTag = gameNum > 1 ? `${aliveSide}:g${gameNum}` : aliveSide;
+				const aliveInputs = await getInputs(matchId, aliveTag);
+				const aliveScore = replayGamePartial(seedNum, aliveInputs as any[]);
+				if (aliveScore > deadScore) {
+					const alivePlayer = aliveSide === 'A' ? afterReconcile.playerA : afterReconcile.playerB;
+					console.log(`[reconcile] early-decide: ${alivePlayer} (${aliveScore}) > dead (${deadScore}) — auto-done`);
+					await applyEvent(matchId, { type: 'done', nametag: alivePlayer, now: now() }, io);
+				}
+			} catch (err) {
+				console.error(`[reconcile] early-decide error:`, err);
+			}
+		}
+	}
 }
 
 /** Remove a stale match from in-memory state. */

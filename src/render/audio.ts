@@ -4,19 +4,14 @@
  * user interaction (browser autoplay policy).
  */
 
-let ctx: AudioContext | null = null;
+import { getSharedAudioContext } from './audio-context';
+
 let muted = false;
 let initialized = false;
 let resumed = false;
 
 function getCtx(): AudioContext | null {
-	if (!ctx) {
-		try {
-			ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-		} catch { return null; }
-	}
-	if (ctx.state === 'suspended') ctx.resume();
-	return ctx;
+	return getSharedAudioContext();
 }
 
 /** Call from any user gesture to ensure audio works */
@@ -247,6 +242,46 @@ export function playGameStart() {
 			osc.connect(gain).connect(c.destination);
 			osc.start(t + i * 0.12);
 			osc.stop(t + i * 0.12 + 0.25);
+		});
+	});
+}
+
+/** Near-miss whoosh — fast wind past */
+export function playNearMiss() {
+	play((c, t) => {
+		const bufSize = c.sampleRate * 0.15;
+		const buf = c.createBuffer(1, bufSize, c.sampleRate);
+		const data = buf.getChannelData(0);
+		for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1);
+		const noise = c.createBufferSource();
+		noise.buffer = buf;
+		const filter = c.createBiquadFilter();
+		filter.type = 'bandpass';
+		filter.frequency.setValueAtTime(2000, t);
+		filter.frequency.exponentialRampToValueAtTime(400, t + 0.12);
+		filter.Q.setValueAtTime(5, t);
+		const gain = c.createGain();
+		gain.gain.setValueAtTime(0.08, t);
+		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+		noise.connect(filter).connect(gain).connect(c.destination);
+		noise.start(t);
+	});
+}
+
+/** Level complete — triumphant arpeggio */
+export function playLevelComplete() {
+	play((c, t) => {
+		const notes = [523, 659, 784, 1047, 1319, 1568];
+		notes.forEach((freq, i) => {
+			const osc = c.createOscillator();
+			const gain = c.createGain();
+			osc.type = i < 3 ? 'square' : 'sine';
+			osc.frequency.setValueAtTime(freq, t + i * 0.1);
+			gain.gain.setValueAtTime(0.1, t + i * 0.1);
+			gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.4);
+			osc.connect(gain).connect(c.destination);
+			osc.start(t + i * 0.1);
+			osc.stop(t + i * 0.1 + 0.4);
 		});
 	});
 }

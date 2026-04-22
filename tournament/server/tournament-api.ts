@@ -72,6 +72,20 @@ export async function handleTournamentApi(
 		return true;
 	}
 
+	// GET /api/admin/inputs/:matchId — dump stored inputs (admin only, for debugging)
+	const inputsMatch = path.match(/^\/api\/admin\/inputs\/(.+)$/);
+	if (inputsMatch && req.method === 'GET') {
+		if (!isAdmin(req)) { json(res, 403, { error: 'Unauthorized' }); return true; }
+		const { getInputs } = await import('./tournament-db');
+		const matchId = decodeURIComponent(inputsMatch[1]);
+		const game = parseInt(url.searchParams.get('game') || '1', 10);
+		const sideA = game > 1 ? `A:g${game}` : 'A';
+		const sideB = game > 1 ? `B:g${game}` : 'B';
+		const [a, b] = await Promise.all([getInputs(matchId, sideA), getInputs(matchId, sideB)]);
+		json(res, 200, { matchId, game, A: a, B: b });
+		return true;
+	}
+
 	// GET /api/challenges/:id/status — poll challenge state (pending/accepted/expired)
 	const challengeStatusMatch = path.match(/^\/api\/challenges\/([^/]+)\/status$/);
 	if (challengeStatusMatch && req.method === 'GET') {
@@ -267,6 +281,35 @@ export async function handleTournamentApi(
 	const bracketMatch = path.match(/^\/api\/tournaments\/([^/]+)\/bracket$/);
 	const startMatch = path.match(/^\/api\/tournaments\/([^/]+)\/start$/);
 	const payPrizeMatch = path.match(/^\/api\/tournaments\/([^/]+)\/pay-prize$/);
+	// POST /api/tournaments/:tid/matches/:round/:slot/reset — admin only
+	const matchResetMatch = path.match(/^\/api\/tournaments\/([^/]+)\/matches\/(\d+)\/(\d+)\/reset$/);
+	if (matchResetMatch && req.method === 'POST') {
+		if (!isAdmin(req)) { json(res, 403, { error: 'Unauthorized' }); return true; }
+		const tid = matchResetMatch[1];
+		const round = parseInt(matchResetMatch[2], 10);
+		const slot = parseInt(matchResetMatch[3], 10);
+		const matchId = `${tid}/R${round}M${slot}`;
+		try {
+			const db = getDb();
+			await db.execute({
+				sql: 'UPDATE matches SET status = ?, winner = NULL, score_a = NULL, score_b = NULL WHERE id = ?',
+				args: ['ready_wait', matchId],
+			});
+			// Update tournament status back to active if it was complete
+			await db.execute({
+				sql: 'UPDATE tournaments SET status = ?, completed_at = NULL WHERE id = ? AND status = ?',
+				args: ['active', tid, 'complete'],
+			});
+			// Clear any in-memory machine state
+			const { cleanupMatch } = await import('./match-manager');
+			cleanupMatch(matchId);
+			json(res, 200, { status: 'reset', matchId });
+		} catch (err: any) {
+			json(res, 500, { error: err.message });
+		}
+		return true;
+	}
+
 	const matchStateMatch = path.match(/^\/api\/tournaments\/([^/]+)\/matches\/(\d+)\/(\d+)\/state$/);
 	const matchReadyMatch = path.match(/^\/api\/tournaments\/([^/]+)\/matches\/(\d+)\/(\d+)\/ready$/);
 	const matchDoneMatch = path.match(/^\/api\/tournaments\/([^/]+)\/matches\/(\d+)\/(\d+)\/done$/);
@@ -367,8 +410,8 @@ export async function handleTournamentApi(
 				online: live.online,
 				series: live.series,
 				machinePhase: live.machinePhase,
-				deadScore: live.deadScore,
 				lastGameResult: live.lastGameResult,
+				deadScores: live.deadScores,
 				now: Date.now(),
 			});
 			return true;

@@ -35,26 +35,31 @@ const COIN_ROW_Z_OFFSET = 1500;
  * already true. Call once per 1/60 second of game time.
  */
 export function tick(state: GameState, config: GameConfig): void {
-	if (state.gameOver) return;
+	if (state.gameOver || state.finished) return;
 
 	// --- 1. Spawn a new tree row if the previous one has moved far
 	// enough, or if the world is empty. Difficulty ticks up on spawn.
+	// In level mode (maxRows set), stop spawning once the cap is hit.
+	const spawnCapped = state.maxRows !== null && state.difficulty >= state.maxRows;
 	let shouldSpawnNewRow = false;
-	if (state.trees.length === 0) {
-		shouldSpawnNewRow = true;
-	} else {
-		const lastTree = state.trees[state.trees.length - 1];
-		if (lastTree.z > state.lastTreeRowZ + config.spawnDistance) {
+	if (!spawnCapped) {
+		if (state.trees.length === 0) {
 			shouldSpawnNewRow = true;
+		} else {
+			const lastTree = state.trees[state.trees.length - 1];
+			if (lastTree.z > state.lastTreeRowZ + config.spawnDistance) {
+				shouldSpawnNewRow = true;
+			}
 		}
 	}
 
 	if (shouldSpawnNewRow) {
 		state.difficulty += 1;
 
-		// Level transitions: adjust tree density and max size. Ported
-		// verbatim from the original level progression.
-		if (state.difficulty % LEVEL_LENGTH === 0) {
+		// Level transitions: adjust tree density and max size.
+		// In level mode (maxRows set), skip — the level's initial
+		// values define the difficulty for the entire run.
+		if (state.maxRows === null && state.difficulty % LEVEL_LENGTH === 0) {
 			const level = state.difficulty / LEVEL_LENGTH;
 			switch (level) {
 				case 1:
@@ -87,17 +92,17 @@ export function tick(state: GameState, config: GameConfig): void {
 			}
 		}
 
-		// Fog closes in during levels 5 and 8 of difficulty.
-		if (
-			state.difficulty >= 5 * LEVEL_LENGTH &&
-			state.difficulty < 6 * LEVEL_LENGTH
-		) {
-			state.fogDistance -= 15000 / LEVEL_LENGTH;
-		} else if (
-			state.difficulty >= 8 * LEVEL_LENGTH &&
-			state.difficulty < 9 * LEVEL_LENGTH
-		) {
-			state.fogDistance -= 3000 / LEVEL_LENGTH;
+		// Dynamic fog weather — rolls in and out randomly.
+		// Consumes 1 RNG call EVERY row unconditionally (determinism).
+		// Every 15 rows, uses that roll to pick a new fog target.
+		// Skip in level mode — fog is fixed by the level definition.
+		const fogRoll = rngNext(state); // always consumed
+		if (state.maxRows === null && state.difficulty % 10 === 0 && state.difficulty >= 60) {
+			// Floor: starts at 35K, drops to 20K by row 300 — never truly blind
+			const fogFloor = Math.max(20000, 40000 - state.difficulty * 65);
+			// Ceiling: starts at 55K, drops to 30K by row 300
+			const fogCeil = Math.max(30000, 60000 - state.difficulty * 100);
+			state.fogTarget = fogFloor + (fogCeil - fogFloor) * fogRoll;
 		}
 
 		spawnTreeRow(
@@ -123,6 +128,38 @@ export function tick(state: GameState, config: GameConfig): void {
 		}
 		// Maybe spawn flamethrower powerup
 		maybeSpawnPowerup(state, config, NEW_ROW_SPAWN_Z + COIN_ROW_Z_OFFSET);
+
+		// Scripted spawns — inject specific items at specific rows.
+		// No RNG calls, so normal-mode replays are unaffected.
+		for (let i = state.scriptedSpawns.length - 1; i >= 0; i--) {
+			const s = state.scriptedSpawns[i];
+			if (s.atRow === state.difficulty) {
+				const z = NEW_ROW_SPAWN_Z + COIN_ROW_Z_OFFSET;
+				if (s.type === 'coin') {
+					state.coins.push({
+						x: s.lane * config.laneWidth,
+						y: 200, z,
+						tier: s.tier || 'gold',
+						collected: false,
+					});
+				} else if (s.type === 'powerup') {
+					state.powerups.push({
+						x: s.lane * config.laneWidth,
+						y: 350, z,
+						collected: false,
+					});
+				}
+				state.scriptedSpawns.splice(i, 1);
+			}
+		}
+	}
+
+	// --- 1b. Smooth fog weather transitions.
+	if (state.fogTarget !== state.fogDistance) {
+		const diff = state.fogTarget - state.fogDistance;
+		// Lerp at ~4% per tick — fog rolls in over ~25 ticks (~0.4s)
+		state.fogDistance += diff * 0.04;
+		if (Math.abs(diff) < 200) state.fogDistance = state.fogTarget;
 	}
 
 	// --- 2. Move all world objects toward the character.
@@ -156,6 +193,9 @@ export function tick(state: GameState, config: GameConfig): void {
 			state.coinCount += 1;
 			state.score += COIN_TIER_VALUES[coin.tier] ?? config.coinScoreBonus;
 			state.lastCollectedTier = coin.tier;
+			if (coin.tier === 'gold') state.goldCollected++;
+			else if (coin.tier === 'blue') state.blueCollected++;
+			else if (coin.tier === 'red') state.redCollected++;
 			state.coins.splice(i, 1);
 		}
 	}
@@ -196,4 +236,9 @@ export function tick(state: GameState, config: GameConfig): void {
 	// --- 7. Advance score and tick counter.
 	state.score += config.scorePerTick;
 	state.tick += 1;
+
+	// --- 8. Level finish detection: all rows spawned + world cleared.
+	if (spawnCapped && state.trees.length === 0 && !state.gameOver) {
+		state.finished = true;
+	}
 }

@@ -57,7 +57,6 @@ export async function getMatchLiveState(
 	} | null;
 	machinePhase: string | null;
 	lastGameResult: { scoreA: number; scoreB: number; winner: string } | null;
-	deadScore: { side: 'A' | 'B'; score: number } | null;
 }> {
 	// Machine state is the ONLY source of truth. If the match isn't in the
 	// machine, we have no live state to project — callers should fall back
@@ -93,27 +92,11 @@ export async function getMatchLiveState(
 	// If exactly one player is done (dead), replay their inputs to get
 	// their real score. Cached per match+side+game so the replay doesn't
 	// run on every poll request.
-	let deadScore: { side: 'A' | 'B'; score: number } | null = null;
-	if (machineState && machineState.phase === 'playing'
-			&& (machineState.done.A !== machineState.done.B)) {
-		const deadSide: 'A' | 'B' = machineState.done.A ? 'A' : 'B';
-		try {
-			const { getInputs } = await import('./tournament-db');
-			const { replayGame } = await import('./tournament-logic');
-			const gameNum = machineState.currentGame;
-			const tagged = gameNum > 1 ? `${deadSide}:g${gameNum}` : deadSide;
-			const inputs = await getInputs(machineState.matchId, tagged);
-			const seedNum = parseInt(machineState.seed, 16) >>> 0;
-			const score = replayGame(seedNum, inputs as any[]);
-			deadScore = { side: deadSide, score };
-		} catch {}
-	}
-
 	return {
 		ready, done, online, series: seriesOut,
 		machinePhase: machineState?.phase ?? null,
 		lastGameResult: machineState?.lastGameResult ?? null,
-		deadScore,
+		deadScores: machineState?.deadScores ?? null,
 	};
 }
 
@@ -339,6 +322,35 @@ async function setMatchWinnerAndAdvance(matchId: string, winner: string, scoreA:
  * the state machine; this wrapper just routes the event and broadcasts
  * the bracket-update push when the machine drops the resolved state.
  */
+/**
+ * Handle a "rematch" message — player wants to play again.
+ * When both players request, the machine resets for a new series.
+ */
+export async function handleRematch(nametag: string, matchId: string): Promise<void> {
+	console.log(`[handleRematch] ${matchId}: ${nametag} requests rematch, state=${manager.getState(matchId)?.phase ?? 'NONE'}`);
+	// Fetch balance for wager check
+	let balance: number | undefined;
+	const state = manager.getState(matchId);
+	if (state && state.wager > 0) {
+		try {
+			const { getDb, ensureSchema } = await import('./db');
+			await ensureSchema();
+			const db = getDb();
+			const r = await db.execute({
+				sql: 'SELECT COALESCE(SUM(amount), 0) as balance FROM player_transactions WHERE nametag = ?',
+				args: [nametag],
+			});
+			balance = (r.rows[0]?.balance as number) ?? 0;
+		} catch {}
+	}
+	const result = await manager.applyEvent(matchId, { type: 'rematch', nametag, now: now(), balance }, managerIO);
+	if (!result) {
+		sendTo(nametag, { type: 'error', v: 0, code: 'not_found', message: 'Match not found' });
+	} else if (state && state.wager > 0 && balance !== undefined && balance < state.wager) {
+		sendTo(nametag, { type: 'error', v: 0, code: 'insufficient_balance', message: `Need ${state.wager} UCT for rematch (you have ${balance})` });
+	}
+}
+
 export async function handleDone(nametag: string, matchId: string): Promise<void> {
 	const result = await manager.applyEvent(matchId, { type: 'done', nametag, now: now() }, managerIO);
 	if (!result) {

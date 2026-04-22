@@ -124,6 +124,9 @@ export interface GameState {
 	/** Fog distance. Sim state so renderer and sim agree on visual range. */
 	fogDistance: number;
 
+	/** Fog target for smooth weather transitions. fogDistance lerps toward this. */
+	fogTarget: number;
+
 	/** Z position of the most recently spawned tree row. */
 	lastTreeRowZ: number;
 
@@ -147,6 +150,31 @@ export interface GameState {
 
 	/** Tier of last collected coin (for audio). Reset each tick. */
 	lastCollectedTier: CoinTier | null;
+
+	// ── Level mode counters (no-ops in tournament mode) ──────────
+
+	/** Max tree rows to spawn. null = unlimited (normal mode). */
+	maxRows: number | null;
+
+	/** Per-tier coin collection counters. */
+	goldCollected: number;
+	blueCollected: number;
+	redCollected: number;
+
+	/** Number of times the flamethrower was activated. */
+	flamethrowerUses: number;
+
+	/** True once maxRows reached and all trees have scrolled past. */
+	finished: boolean;
+
+	/** Scripted spawns: inject specific items at specific difficulty rows.
+	 *  Consumed (spliced) as they fire. No RNG calls — determinism-safe. */
+	scriptedSpawns: Array<{
+		atRow: number;
+		type: 'coin' | 'powerup';
+		lane: -1 | 0 | 1;
+		tier?: CoinTier;
+	}>;
 
 	/** Player character state. */
 	character: CharacterState;

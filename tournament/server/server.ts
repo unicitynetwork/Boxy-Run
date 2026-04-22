@@ -6,6 +6,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createGzip } from 'node:zlib';
 import { extname, join, resolve } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -18,6 +19,7 @@ import {
 	getNametag,
 	getOnlinePlayers,
 	handleDone,
+	handleRematch,
 	handleInput,
 	handleReady,
 	reconcileMatch,
@@ -55,7 +57,21 @@ const MIME: Record<string, string> = {
 // ── HTTP server ──────────────────────────────────────────────────
 const TEST_MODE = process.env.TEST_MODE === '1';
 
+// ── Traffic counters ─────────────────────────────────────────────
+let httpReqs = 0;
+let wsMessages = 0;
+let httpBytes = 0;
+setInterval(() => {
+	if (httpReqs > 0 || wsMessages > 0) {
+		console.log(`[traffic] http=${httpReqs} req/min ws=${wsMessages} msg/min bytes=${(httpBytes/1024).toFixed(1)}KB/min`);
+		httpReqs = 0;
+		wsMessages = 0;
+		httpBytes = 0;
+	}
+}, 60_000);
+
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+	httpReqs++;
 	// Test-only endpoints: fake-clock controls. Available only when TEST_MODE=1.
 	if (TEST_MODE && req.url?.startsWith('/__test/')) {
 		const urlPath = new URL(req.url, `http://${req.headers.host}`).pathname;
@@ -105,8 +121,18 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 	if (ext === '.html' || ext === '.js') {
 		headers['Cache-Control'] = 'no-cache, must-revalidate';
 	}
-	res.writeHead(200, headers);
-	createReadStream(filePath).pipe(res);
+	// Gzip text-based files (JS, HTML, CSS, JSON)
+	const compressible = ['.js', '.html', '.css', '.json', '.svg'].includes(ext);
+	const acceptsGzip = (req.headers['accept-encoding'] || '').includes('gzip');
+	if (compressible && acceptsGzip) {
+		headers['Content-Encoding'] = 'gzip';
+		headers['Vary'] = 'Accept-Encoding';
+		res.writeHead(200, headers);
+		createReadStream(filePath).pipe(createGzip()).pipe(res);
+	} else {
+		res.writeHead(200, headers);
+		createReadStream(filePath).pipe(res);
+	}
 });
 
 // ── WebSocket server ─────────────────────────────────────────────
@@ -130,6 +156,7 @@ wss.on('connection', (ws) => {
 	allSockets.add(ws);
 
 	ws.on('message', async (raw) => {
+		wsMessages++;
 		let msg: any;
 		try {
 			msg = JSON.parse(raw.toString());
@@ -199,6 +226,11 @@ wss.on('connection', (ws) => {
 			case 'match-done':
 				if (nametag && msg.matchId) {
 					await handleDone(nametag, msg.matchId);
+				}
+				break;
+			case 'rematch':
+				if (nametag && msg.matchId) {
+					await handleRematch(nametag, msg.matchId);
 				}
 				break;
 		}
@@ -285,6 +317,10 @@ async function boot() {
 	httpServer.listen(PORT, '::', () => {
 		console.log(`[server] listening on http://0.0.0.0:${PORT}`);
 		console.log(`[server] static files: ${STATIC_DIR}`);
+		// Spawn bots after server is listening
+		import('./bots').then(({ spawnBots }) => spawnBots(PORT)).catch(err => {
+			console.error('[bots] failed to spawn:', err);
+		});
 	});
 }
 

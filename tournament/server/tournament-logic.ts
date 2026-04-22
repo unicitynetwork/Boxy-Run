@@ -279,23 +279,38 @@ export function replayGame(seed: number, inputs: Array<{ tick: number; payload: 
 	return replaySim(seed, inputs);
 }
 
-function replaySim(seed: number, inputs: Array<{ tick: number; payload: string }>): number {
+/**
+ * Replay a player's sim but stop at the last input tick (partial replay).
+ * Returns the score at that point, even if the character hasn't died yet.
+ * Used by early-decide to check an alive player's current score.
+ */
+export function replayGamePartial(seed: number, inputs: Array<{ tick: number; payload: string }>): number {
+	return replaySim(seed, inputs, true);
+}
+
+function replaySim(seed: number, inputs: Array<{ tick: number; payload: string }>, partialOnly = false): number {
 	const config = DEFAULT_CONFIG;
 	const state = makeInitialState(seed, config);
 	const TIME_CAP = 36000;
 
 	const inputsByTick = new Map<number, CharacterAction[]>();
+	let lastInputTick = 0;
 	for (const inp of inputs) {
 		try {
 			const action = atob(inp.payload) as CharacterAction;
 			if (action === 'up' || action === 'left' || action === 'right' || action === 'fire') {
 				if (!inputsByTick.has(inp.tick)) inputsByTick.set(inp.tick, []);
 				inputsByTick.get(inp.tick)!.push(action);
+				if (inp.tick > lastInputTick) lastInputTick = inp.tick;
 			}
 		} catch {}
 	}
 
-	while (!state.gameOver && state.tick < TIME_CAP) {
+	// In partial mode, stop at the last input tick (alive player's current score).
+	// In full mode, run until death or time cap (dead player's final score).
+	const stopTick = partialOnly ? lastInputTick + 1 : TIME_CAP;
+
+	while (!state.gameOver && state.tick < stopTick) {
 		const actions = inputsByTick.get(state.tick);
 		if (actions) {
 			for (const a of actions) state.character.queuedActions.push(a);

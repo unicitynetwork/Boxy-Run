@@ -13,8 +13,8 @@ import type { GameState } from '../sim/state';
 let cachedElements: {
 	score: HTMLElement | null;
 	coins: HTMLElement | null;
-	mobileScoreStrong: HTMLElement | null;
-	mobileCoinsStrong: HTMLElement | null;
+	mobileScore: HTMLElement | null;
+	mobileCoins: HTMLElement | null;
 } | null = null;
 
 function elements() {
@@ -22,12 +22,8 @@ function elements() {
 		cachedElements = {
 			score: document.getElementById('score'),
 			coins: document.getElementById('coins'),
-			mobileScoreStrong: document
-				.getElementById('mobile-score')
-				?.querySelector('strong') as HTMLElement | null,
-			mobileCoinsStrong: document
-				.getElementById('mobile-coins')
-				?.querySelector('strong') as HTMLElement | null,
+			mobileScore: document.getElementById('mobile-score'),
+			mobileCoins: document.getElementById('mobile-coins'),
 		};
 	}
 	return cachedElements;
@@ -36,12 +32,12 @@ function elements() {
 /** Push the current score and coin count from sim state to the DOM. */
 export function updateHud(state: GameState): void {
 	const els = elements();
-	const scoreText = String(state.score);
+	const scoreText = state.score.toLocaleString();
 	const coinsText = String(state.coinCount);
-	if (els.score) els.score.innerHTML = scoreText;
-	if (els.coins) els.coins.innerHTML = coinsText;
-	if (els.mobileScoreStrong) els.mobileScoreStrong.innerHTML = scoreText;
-	if (els.mobileCoinsStrong) els.mobileCoinsStrong.innerHTML = coinsText;
+	if (els.score) els.score.textContent = scoreText;
+	if (els.coins) els.coins.textContent = coinsText;
+	if (els.mobileScore) els.mobileScore.textContent = scoreText;
+	if (els.mobileCoins) els.mobileCoins.textContent = coinsText + ' coins';
 
 	// Flamethrower indicator
 	let flameEl = document.getElementById('flame-indicator');

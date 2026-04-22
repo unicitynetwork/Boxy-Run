@@ -174,7 +174,7 @@ runTest('zombie: reconciler auto-readies when opponent is offline during ready_w
 runTest('zombie: abrupt TCP close triggers normal reconnect path', async () => {
 	const server = await startServer();
 	try {
-		await setupMatch(server, 'z-abrupt', 'eve', 'frank');
+		await setupMatch(server, 'challenge-z-abrupt', 'eve', 'frank');
 
 		const eve = await chaosConnect({
 			port: server.port, nametag: 'eve',
@@ -185,21 +185,18 @@ runTest('zombie: abrupt TCP close triggers normal reconnect path', async () => {
 		const frank = await wsConnect(server.port, 'frank');
 		await sleep(100);
 
-		// Frank readies normally
-		frank.send({ type: 'match-ready', matchId: 'z-abrupt/R0M0' });
-		await sleep(200);
-
 		// Eve's TCP drops without a close frame — server will eventually notice
 		// via the ping/pong protocol and evict her from players map.
 		eve.abruptClose();
 		await sleep(500);
 
-		// Now eve is offline. The reconciler should see that after 5s and
-		// auto-ready her → match starts.
-		await advanceClock(server, 6_000);
-		await sleep(1300);
+		// Frank readies AFTER eve is offline. For challenge-prefixed matches,
+		// the server auto-readies the offline opponent immediately when
+		// the other player readies.
+		frank.send({ type: 'match-ready', matchId: 'challenge-z-abrupt/R0M0' });
+		await sleep(500);
 
-		const state = await api(server, '/api/tournaments/z-abrupt/matches/0/0/state');
+		const state = await api(server, '/api/tournaments/challenge-z-abrupt/matches/0/0/state');
 		assertEqual(state.phase, 'active', 'match started after offline auto-ready');
 
 		frank.close();

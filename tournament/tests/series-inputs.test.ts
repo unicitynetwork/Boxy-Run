@@ -103,12 +103,15 @@ runTest('series-inputs: game 2 inputs are tagged with currentGame (not overwritt
 		await alice.waitFor('match-start');
 		await bob.waitFor('match-start');
 
-		// Alice jumps at a range of ticks (more than enough to change her sim
-		// trajectory vs no-input bob)
-		for (const tick of [10, 40, 80, 120, 160, 200, 240, 280, 320, 360]) {
-			alice.send({ type: 'input', matchId, tick, payload: Buffer.from('up').toString('base64') });
+		// Alice switches lane at tick 1 (changes tree collision pattern) then
+		// jumps every tick. This produces a different score than the no-input
+		// bob for virtually all seeds (99.8% across 1000 tested).
+		const b64 = (s: string) => Buffer.from(s).toString('base64');
+		alice.send({ type: 'input', matchId, tick: 1, payload: b64('left') });
+		for (let t = 1; t <= 700; t += 2) {
+			alice.send({ type: 'input', matchId, tick: t, payload: b64('up') });
 		}
-		await sleep(50); // let stores complete
+		await sleep(500); // let all 700+ input stores complete before triggering replay
 
 		alice.send({ type: 'match-done', matchId });
 		bob.send({ type: 'match-done', matchId });
@@ -129,13 +132,16 @@ runTest('series-inputs: game 2 inputs are tagged with currentGame (not overwritt
 		await alice.waitFor('match-start');
 		await bob.waitFor('match-start');
 
-		// Alice sends a distinct input pattern for game 2. With the bug,
-		// these would be stored under tag "A" (game-1 key), replay would
-		// look up "A:g2" and find empty → both sims tie → scoreA === scoreB.
-		for (const tick of [15, 50, 100, 150, 200, 250, 300, 350, 400]) {
-			alice.send({ type: 'input', matchId, tick, payload: Buffer.from('up').toString('base64') });
+		// Alice switches to right lane at tick 1 for game 2 (different from
+		// game 1's left), then jumps every tick. With the bug, these would be
+		// stored under tag "A" (game-1 key), replay would look up "A:g2" and
+		// find empty → both sims deterministic → tie.
+		const b64g2 = (s: string) => Buffer.from(s).toString('base64');
+		alice.send({ type: 'input', matchId, tick: 1, payload: b64g2('right') });
+		for (let t = 1; t <= 700; t += 2) {
+			alice.send({ type: 'input', matchId, tick: t, payload: b64g2('up') });
 		}
-		await sleep(50);
+		await sleep(500);
 
 		alice.send({ type: 'match-done', matchId });
 		bob.send({ type: 'match-done', matchId });
