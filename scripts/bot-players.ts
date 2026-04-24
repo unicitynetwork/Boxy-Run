@@ -50,11 +50,12 @@ interface SkillTier {
 	switchPreference: number; // 0..1 chance to prefer lane-switch over jump
 }
 
+// Tiers calibrated to: beginner ~13k, medium ~43k, expert ~59k avg score.
+// 'smart' bots count trees per lane and pick the safest; 'simple' just jump.
 const SKILL_TIERS: SkillTier[] = [
-	{ label: 'expert',   reactionZ: 3200, errorRate: 0.03, switchPreference: 0.85 },
-	{ label: 'skilled',  reactionZ: 2400, errorRate: 0.08, switchPreference: 0.75 },
-	{ label: 'casual',   reactionZ: 1600, errorRate: 0.15, switchPreference: 0.60 },
-	{ label: 'beginner', reactionZ: 900,  errorRate: 0.28, switchPreference: 0.50 },
+	{ label: 'expert',   reactionZ: 4000, errorRate: 0.01, switchPreference: 1 },  // ~59k, smart
+	{ label: 'medium',   reactionZ: 3200, errorRate: 0.04, switchPreference: 1 },  // ~43k, smart
+	{ label: 'beginner', reactionZ: 900,  errorRate: 0.30, switchPreference: 0 },  // ~13k, simple (jump only)
 ];
 
 function skillForIdx(idx: number): SkillTier {
@@ -74,60 +75,45 @@ function laneOfX(x: number): number {
 
 function pickAction(state: GameState, skill: SkillTier): CharacterAction | null {
 	const char = state.character;
-	// Don't queue while already evading (let the action complete)
-	if (char.isJumping) return null;
+	if (char.isJumping || char.isSwitchingLeft || char.isSwitchingRight) return null;
 	if (char.queuedActions.length > 0) return null;
 
 	const myLane = char.currentLane;
 	const charZ = char.z;
 
-	// World moves toward character: trees spawn at very negative z and z increases
-	// toward the character (at charZ ≈ -4000). A tree is "ahead" if tree.z < charZ,
-	// and "imminent" if (charZ - tree.z) is within reactionZ.
-	const imminent = state.trees
-		.filter(t => {
-			if (laneOfX(t.x) !== myLane) return false;
-			const dist = charZ - t.z; // positive = ahead of character
-			return dist > 0 && dist < skill.reactionZ;
-		})
-		.sort((a, b) => (charZ - a.z) - (charZ - b.z)); // closest ahead first
+	// Count trees ahead in my lane
+	const myCount = state.trees.filter(t => {
+		if (laneOfX(t.x) !== myLane) return false;
+		const d = charZ - t.z;
+		return d > 0 && d < skill.reactionZ;
+	}).length;
 
-	if (imminent.length === 0) return null;
+	if (myCount === 0) return null; // no threat
+	if (Math.random() < skill.errorRate) return null; // error (freeze)
 
-	// Chance to freeze (simulate poor reflexes)
-	if (Math.random() < skill.errorRate) return null;
+	// Simple mode (switchPreference === 0): just jump
+	if (skill.switchPreference === 0) return 'up';
 
-	// Find safe adjacent lanes (no tree in that lane within 70% of reaction range ahead,
-	// and no tree right next to us as we switch into it)
-	const candidates: number[] = [];
-	if (myLane > -1) candidates.push(myLane - 1);
-	if (myLane < 1) candidates.push(myLane + 1);
-	const safeLanes = candidates.filter(l => {
-		return !state.trees.some(t => {
-			if (laneOfX(t.x) !== l) return false;
-			const dist = charZ - t.z;
-			return dist > -400 && dist < skill.reactionZ * 0.7;
-		});
-	});
-
-	const prefersSwitch = Math.random() < skill.switchPreference;
-
-	if (prefersSwitch && safeLanes.length > 0) {
-		// Pick the lane with the fewest trees in a wider look-ahead
-		safeLanes.sort((a, b) => {
-			const count = (lane: number) => state.trees.filter(t => {
-				if (laneOfX(t.x) !== lane) return false;
-				const d = charZ - t.z;
-				return d > 0 && d < skill.reactionZ * 2;
-			}).length;
-			return count(a) - count(b);
-		});
-		const target = safeLanes[0];
-		return target < myLane ? 'left' : 'right';
+	// Smart mode: count trees in all lanes, pick safest
+	function treesInLane(lane: number, range: number): number {
+		return state.trees.filter(t => {
+			if (laneOfX(t.x) !== lane) return false;
+			const d = charZ - t.z;
+			return d > -400 && d < range;
+		}).length;
 	}
 
-	// Otherwise jump (works against small trees, risky against large ones)
-	return 'up';
+	const lanes = ([-1, 0, 1] as const).map(l => ({
+		lane: l,
+		count: treesInLane(l, skill.reactionZ * 1.5),
+	})).sort((a, b) => a.count - b.count);
+
+	const best = lanes[0];
+	if (best.lane === myLane) return 'up'; // current lane is safest
+	if (best.count < myCount) {
+		return best.lane < myLane ? 'left' : 'right';
+	}
+	return 'up'; // all lanes bad, jump
 }
 
 // ── Crypto-style names ───────────────────────────────────────────
@@ -320,6 +306,30 @@ async function runBot(idx: number): Promise<void> {
 					// Capture gameNum in the closure — match-start may race in
 					// and reset currentGameNum to 1, which would make us re-run
 					// game 1 (dedup rejects, tournament stalls).
+					setTimeout(() => startGame(msg.matchId, msg.seed, gameNum), delay + 100);
+					break;
+				}
+
+				case 'challenge-received':
+					// Auto-accept challenges — lets humans practice vs bots
+					log(`challenge from ${msg.from} (Bo${msg.bestOf}) — auto-accepting`);
+					fetch(`${HTTP_BASE}/api/challenges/${msg.challengeId}/accept`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ by: nametag }),
+					}).catch(err => log(`accept failed: ${err}`));
+					break;
+
+				case 'challenge-start': {
+					// Redirect equivalent for bots — start playing the challenge match
+					currentMatchId = msg.matchId;
+					const gameNum = msg.gameNumber || 1;
+					currentGameNum = gameNum;
+					readied.clear();
+					started.clear();
+					log(`challenge-start vs ${msg.opponent} seed=0x${msg.seed} game=${gameNum}`);
+					safeSend({ type: 'match-ready', matchId: msg.matchId });
+					const delay = Math.max(0, (msg.startsAt || Date.now()) - Date.now());
 					setTimeout(() => startGame(msg.matchId, msg.seed, gameNum), delay + 100);
 					break;
 				}

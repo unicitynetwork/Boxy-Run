@@ -4,11 +4,11 @@
  * user interaction (browser autoplay policy).
  */
 
-import { getSharedAudioContext } from './audio-context';
+import { getSharedAudioContext, unlockAudio, isAudioReady, attachUnlockListeners } from './audio-context';
+import { toggleMusicMute, isMusicMuted } from './ambient-music';
 
 let muted = false;
 let initialized = false;
-let resumed = false;
 
 function getCtx(): AudioContext | null {
 	return getSharedAudioContext();
@@ -16,43 +16,29 @@ function getCtx(): AudioContext | null {
 
 /** Call from any user gesture to ensure audio works */
 export function resumeAudio(): void {
-	if (resumed) return;
-	const c = getCtx();
-	if (c && c.state !== 'suspended') resumed = true;
+	unlockAudio();
 }
 
 export function initAudio(): void {
 	if (initialized) return;
 	initialized = true;
-
-	// Try to create AudioContext immediately (may be suspended)
-	getCtx();
-
-	// Resume on any user interaction
-	function onGesture() {
-		resumeAudio();
-		if (resumed) {
-			document.removeEventListener('keydown', onGesture, true);
-			document.removeEventListener('click', onGesture, true);
-			document.removeEventListener('touchstart', onGesture, true);
-		}
-	}
-	// Use capture phase so we fire before game handlers
-	document.addEventListener('keydown', onGesture, true);
-	document.addEventListener('click', onGesture, true);
-	document.addEventListener('touchstart', onGesture, true);
+	// Ensure unlock listeners are attached
+	attachUnlockListeners();
 
 	// Create the toggle button
 	let btn = document.getElementById('sound-toggle');
 	if (!btn) {
 		btn = document.createElement('button');
 		btn.id = 'sound-toggle';
+		btn.style.cssText = 'position:fixed;top:12px;right:120px;z-index:200;background:rgba(0,0,0,0.5);border:1px solid rgba(95,234,255,0.3);border-radius:6px;padding:6px 8px;cursor:pointer;line-height:0';
 		document.body.appendChild(btn);
 	}
 	updateToggle(btn);
 	btn.addEventListener('click', () => {
 		muted = !muted;
 		updateToggle(btn!);
+		// Keep music in sync
+		if (muted !== isMusicMuted()) toggleMusicMute();
 	});
 }
 
@@ -64,6 +50,7 @@ function updateToggle(btn: HTMLElement) {
 
 function play(fn: (ctx: AudioContext, t: number) => void) {
 	if (muted) return;
+	if (!isAudioReady()) return; // context not unlocked yet — skip silently
 	const c = getCtx();
 	if (!c) return;
 	fn(c, c.currentTime);

@@ -92,17 +92,33 @@ export function tick(state: GameState, config: GameConfig): void {
 			}
 		}
 
-		// Dynamic fog weather — rolls in and out randomly.
-		// Consumes 1 RNG call EVERY row unconditionally (determinism).
-		// Every 15 rows, uses that roll to pick a new fog target.
-		// Skip in level mode — fog is fixed by the level definition.
+		// Fog wave system — deterministic in/out cycle.
+		// Consumes 1 RNG call per row unconditionally (determinism).
+		// After row 60, fog follows a wave: clear → dense → hold → clear.
+		// Wave period controlled by RNG (varies between 20-40 rows).
 		const fogRoll = rngNext(state); // always consumed
-		if (state.maxRows === null && state.difficulty % 10 === 0 && state.difficulty >= 60) {
-			// Floor: starts at 35K, drops to 20K by row 300 — never truly blind
-			const fogFloor = Math.max(20000, 40000 - state.difficulty * 65);
-			// Ceiling: starts at 55K, drops to 30K by row 300
-			const fogCeil = Math.max(30000, 60000 - state.difficulty * 100);
-			state.fogTarget = fogFloor + (fogCeil - fogFloor) * fogRoll;
+		if (state.maxRows === null && state.difficulty >= 60) {
+			// Wave cycle: period = 20-40 rows (~9-18 seconds)
+			// Dense floor gets deeper as difficulty increases
+			const fogMin = Math.max(6000, 20000 - state.difficulty * 50);
+			const fogMax = 60000;
+			// Use difficulty as the wave position within a cycle
+			const cycle = 30; // rows per full wave
+			const pos = state.difficulty % cycle;
+			let t: number;
+			if (pos < 10) {
+				// Rows 0-9 of cycle: ramp IN (clear → dense)
+				t = pos / 10; // 0 → 1
+			} else if (pos < 14) {
+				// Rows 10-13: HOLD at dense (4 rows ≈ 1.8 seconds)
+				t = 1;
+			} else {
+				// Rows 14-29: ramp OUT (dense → clear)
+				t = 1 - (pos - 14) / 16; // 1 → 0
+			}
+			// Smooth the ramp with ease-in-out
+			const smooth = t * t * (3 - 2 * t);
+			state.fogTarget = fogMax - (fogMax - fogMin) * smooth;
 		}
 
 		spawnTreeRow(
@@ -158,7 +174,7 @@ export function tick(state: GameState, config: GameConfig): void {
 	if (state.fogTarget !== state.fogDistance) {
 		const diff = state.fogTarget - state.fogDistance;
 		// Lerp at ~4% per tick — fog rolls in over ~25 ticks (~0.4s)
-		state.fogDistance += diff * 0.04;
+		state.fogDistance += diff * 0.08; // fast transition — fog snaps in/out
 		if (Math.abs(diff) < 200) state.fogDistance = state.fogTarget;
 	}
 

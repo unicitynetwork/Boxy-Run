@@ -255,13 +255,9 @@ function applyReady(
 	// Auto-ready offline opponents only in CHALLENGE mode (1v1 direct
 	// challenges where the challenger is waiting). In tournaments,
 	// players must explicitly ready up from the tournament page.
-	const isChallenge = state.matchId.startsWith('challenge-');
-	if (isChallenge && event.opponentOnline === false) {
-		const oppSide = side === 'A' ? 'B' : 'A';
-		if (!ready[oppSide]) {
-			ready = { ...ready, [oppSide]: true };
-		}
-	}
+	// Auto-ready disabled. Both players must explicitly click READY.
+	// Auto-ready caused the bot to start playing before the human
+	// was on the game page, giving the bot a 10-15 second head start.
 
 	// Both ready → transition to playing, emit match-start.
 	if (ready.A && ready.B) {

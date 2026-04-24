@@ -357,7 +357,9 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			location.href = 'dev.html?' + p;
 		},
 		onSeriesNext(msg) {
-			// Rematch accepted — reload with new seed, same matchId
+			// Only reload for REMATCH (game resets to 1). Normal series
+			// advance (game 2, 3) is handled by the poll's onSeriesAdvance.
+			if (msg.gameNumber > 1) return;
 			const p = new URLSearchParams({
 				tournament: '1', matchId: matchId, seed: msg.seed,
 				side: mySide, opponent: opponentName, name: playerName,
@@ -622,6 +624,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	}
 
 	function showReadyPrompt(message?: string) {
+		gameLog('showReadyPrompt', { message: message || 'initial', currentGame: currentGameNumber });
 		setPhase('ready_prompt');
 		const msg = message ? `<div style="font-size:14px;color:#c1121f;margin-bottom:8px">${message}</div>` : '';
 		showOverlay(
@@ -636,12 +639,11 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		if (isInitial) {
 			showReadyPrompt();
 		} else {
+			// Synchronous: set phase + send ready immediately.
+			// No setTimeout, no overlay delay. The 3-second countdown
+			// (triggered by onBothReady) provides the visual pause.
 			setPhase('ready_prompt');
-			showOverlay(
-				`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}` +
-				`<div style="font-size:13px;margin-top:10px;opacity:0.7">Getting ready…</div>`,
-			);
-			setTimeout(() => { resumeAudio(); sendReady(); }, 200);
+			sendReady();
 		}
 	}
 
@@ -655,14 +657,22 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	let readyDeadline = 0;
 
 	function sendReady() {
-		if (phase !== 'ready_prompt') return;
+		if (phase !== 'ready_prompt') {
+			gameLog('sendReady_SKIPPED', { phase });
+			return;
+		}
 		gameLog('sendReady');
 		setPhase('waiting');
-		readyDeadline = Date.now() + 10_000;
+		// Game 1: 10s deadline to show READY button if opponent doesn't respond.
+		// Series games: no client deadline — server handles timeouts.
+		readyDeadline = seriesResultBanner ? Infinity : Date.now() + 10_000;
 
-		showOverlay(`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}<div style="font-size:13px;margin-top:10px;opacity:0.7">Sending ready…</div>`);
+		// Between series games, keep the death/result overlay — don't flash "Sending ready"
+		if (!seriesResultBanner) {
+			showOverlay(`<div style="font-size:18px">vs ${opponentName}</div>${getSeriesInfo()}<div style="font-size:13px;margin-top:10px;opacity:0.7">Sending ready…</div>`);
+		}
 		const waitingTimer = setTimeout(() => {
-			if (phase === 'waiting') updateWaitingOverlay();
+			if (phase === 'waiting' && !seriesResultBanner) updateWaitingOverlay();
 		}, 400);
 
 		const parsed = matchId.match(/^(.+)\/R(\d+)M(\d+)$/);
@@ -686,6 +696,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 
 	function updateWaitingOverlay() {
 		if (phase !== 'waiting') return;
+		gameLog('updateWaitingOverlay', { remaining: Math.ceil((readyDeadline - Date.now()) / 1000), seriesBanner: !!seriesResultBanner });
 		const remaining = Math.max(0, Math.ceil((readyDeadline - Date.now()) / 1000));
 		if (remaining === 0) {
 			showReadyPrompt('Ready expired — opponent didn\'t ready in time');
@@ -697,11 +708,12 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			`<div style="font-size:32px;font-weight:bold;color:#f97316;margin-top:12px">${remaining}s</div>`,
 		);
 	}
-	setInterval(() => { if (phase === 'waiting') updateWaitingOverlay(); }, 500);
+	setInterval(() => { if (phase === 'waiting' && !seriesResultBanner) updateWaitingOverlay(); }, 500);
 
 	/** Transition to countdown. Single-entry — second call is always a no-op. */
 	let countdownLastShown = -1;
 	let countdownActive = false;
+	let seriesResultBanner = ''; // HTML shown above countdown between series games
 	function kickCountdown(countdownStart: number) {
 		if (countdownActive) return;
 		if (phase !== 'waiting' && phase !== 'ready_prompt') return;
@@ -713,14 +725,15 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			const ms = countdownStart - Date.now();
 			const currentSec = Math.ceil(ms / 1000);
 			if (ms > 1000) {
-				showOverlay(`<div style="font-size:12px;color:#f97316;margin-bottom:6px;letter-spacing:.2em">GET READY</div><div style="font-size:56px;font-weight:800;line-height:1">${currentSec}</div>`);
+				showOverlay(seriesResultBanner + `<div style="font-size:12px;color:#f97316;margin-bottom:6px;letter-spacing:.2em">GET READY</div><div style="font-size:56px;font-weight:800;line-height:1">${currentSec}</div>`);
 				if (currentSec !== countdownLastShown) { countdownLastShown = currentSec; playBeep(1); }
 				setTimeout(tick, 100);
 			} else if (ms > 0) {
-				showOverlay('<div style="font-size:12px;color:#f97316;margin-bottom:6px;letter-spacing:.2em">GET READY</div><div style="font-size:56px;font-weight:800;line-height:1">1</div>');
+				showOverlay(seriesResultBanner + '<div style="font-size:12px;color:#f97316;margin-bottom:6px;letter-spacing:.2em">GET READY</div><div style="font-size:56px;font-weight:800;line-height:1">1</div>');
 				if (countdownLastShown !== 1) { countdownLastShown = 1; playBeep(1); }
 				setTimeout(tick, ms);
 			} else {
+				seriesResultBanner = '';
 				showOverlay('<div style="font-size:56px;font-weight:800;color:#f97316;line-height:1">GO!</div>');
 				playGameStart();
 				// Both setTimeout AND rAF are throttled in background tabs.
@@ -817,6 +830,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			},
 			onSeriesAdvance(s) {
 				gameLog('seriesAdvance', { serverGame: s.series.currentGame, localGame: currentGameNumber, winsA: s.series.winsA, winsB: s.series.winsB });
+
 				const prevWinsA = currentWinsA;
 				const prevWinsB = currentWinsB;
 				const newWinsA = s.series.winsA || 0;
@@ -824,25 +838,24 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				const iWonGame = (mySide === 'A') ? (newWinsA > prevWinsA) : (newWinsB > prevWinsB);
 				const myWins = mySide === 'A' ? newWinsA : newWinsB;
 				const oppWins = mySide === 'A' ? newWinsB : newWinsA;
-				const gameJustPlayed = currentGameNumber;
+				const gameJustPlayed = (s.series.currentGame || 2) - 1;
+				const gameMyScore = s.lastGameResult ? (mySide === 'A' ? s.lastGameResult.scoreA : s.lastGameResult.scoreB) : 0;
+				const gameOppScore = s.lastGameResult ? (mySide === 'A' ? s.lastGameResult.scoreB : s.lastGameResult.scoreA) : 0;
+
+				// Update state + send ready immediately (no setTimeout)
 				currentGameNumber = s.series.currentGame;
 				currentWinsA = newWinsA;
 				currentWinsB = newWinsB;
-				setPhase('game_result');
-				removeDeathBanner();
-				const gameMyScore = s.lastGameResult ? (mySide === 'A' ? s.lastGameResult.scoreA : s.lastGameResult.scoreB) : 0;
-				const gameOppScore = s.lastGameResult ? (mySide === 'A' ? s.lastGameResult.scoreB : s.lastGameResult.scoreA) : 0;
+				resetForNextGame(s);
+
+				// Save result banner — shown above the countdown numbers
 				const scoreLine = (gameMyScore || gameOppScore)
-					? `<div style="font-size:14px;margin-bottom:12px;color:#888">${gameMyScore.toLocaleString()} — ${gameOppScore.toLocaleString()}</div>`
+					? `<div style="font-size:12px;color:#888">${gameMyScore.toLocaleString()} — ${gameOppScore.toLocaleString()}</div>`
 					: '';
-				showOverlay(
-					`<div style="font-size:26px;font-weight:bold;color:${iWonGame ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">Game ${gameJustPlayed}: ${iWonGame ? 'WIN' : 'LOSS'}</div>` +
+				seriesResultBanner =
+					`<div style="font-size:20px;font-weight:bold;color:${iWonGame ? '#2d6a4f' : '#c1121f'};margin-bottom:2px">Game ${gameJustPlayed}: ${iWonGame ? 'WIN' : 'LOSS'}</div>` +
 					scoreLine +
-					`<div style="font-size:12px;color:#666;letter-spacing:.2em;margin-bottom:4px">SERIES (Best of ${bestOf})</div>` +
-					`<div style="font-size:28px;font-weight:bold;margin-bottom:16px">${myWins} — ${oppWins}</div>` +
-					`<div style="font-size:13px;opacity:0.7">Next game starting…</div>`,
-				);
-				setTimeout(() => resetForNextGame(s), 3000);
+					`<div style="font-size:11px;color:#666;letter-spacing:.2em;margin-bottom:12px">SERIES ${myWins} — ${oppWins}</div>`;
 			},
 			onForceStart() {
 				// Server is already in playing phase but we're stuck
@@ -872,20 +885,34 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				showReadyPrompt('Ready expired — opponent didn\'t ready in time');
 			},
 			onGameResult(result) {
-				// Server resolved this game — both scores are final.
-				const myScore = mySide === 'A' ? result.scoreA : result.scoreB;
-				const oppScore = mySide === 'A' ? result.scoreB : result.scoreA;
 				const iWon = result.winner === playerName;
 				gameLog('gameResult', { result, iWon });
 
 				// Stop the game if still playing (early-decide case)
 				if (phase === 'playing') {
 					sendMatchDone();
+					setPhase('done_sent');
+					render.character.root.visible = false;
+					hideOppStatus();
+					if (seriesHud) seriesHud.style.display = 'none';
 				}
-				setPhase('done_sent');
-				render.character.root.visible = false;
-				hideOppStatus();
-				if (seriesHud) seriesHud.style.display = 'none';
+
+				// In a series, show a brief result — onSeriesAdvance will
+				// replace it with the countdown shortly after.
+				if (bestOf > 1) {
+					const myScore = mySide === 'A' ? result.scoreA : result.scoreB;
+					const oppScore = mySide === 'A' ? result.scoreB : result.scoreA;
+					showOverlay(
+						`<div style="font-size:22px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#c1121f'};margin-bottom:4px">${iWon ? 'YOU WIN!' : 'YOU LOSE'}</div>` +
+						`<div style="font-size:14px;margin-bottom:4px">${myScore.toLocaleString()} — ${oppScore.toLocaleString()}</div>` +
+						`<div style="font-size:12px;opacity:0.5">Next game loading…</div>`,
+					);
+					return;
+				}
+
+				// Bo1: show full result
+				const myScore = mySide === 'A' ? result.scoreA : result.scoreB;
+				const oppScore = mySide === 'A' ? result.scoreB : result.scoreA;
 				showOverlay(
 					`<div style="font-size:24px;font-weight:bold;color:${iWon ? '#2d6a4f' : '#c1121f'};margin-bottom:8px">${iWon ? 'YOU WIN!' : 'YOU LOSE'}</div>` +
 					`<div style="font-size:18px;margin-bottom:4px">You: ${myScore.toLocaleString()}</div>` +

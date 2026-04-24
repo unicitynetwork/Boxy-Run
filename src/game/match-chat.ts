@@ -8,13 +8,17 @@ export function createChatPanel(opts: {
 }): {
 	addMessage: (from: string, text: string, isMe: boolean) => void;
 } {
+	// Hide chat on mobile — takes up too much screen space
+	const isMobile = 'ontouchstart' in window || window.innerWidth < 768;
+
 	const panel = document.createElement('div');
 	panel.id = 'game-chat';
 	panel.style.cssText =
 		'position:fixed;bottom:16px;right:16px;z-index:150;width:280px;' +
 		'background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.1);' +
 		'border-radius:8px;font-family:monospace;font-size:12px;' +
-		'backdrop-filter:blur(8px);display:flex;flex-direction:column;';
+		'backdrop-filter:blur(8px);display:flex;flex-direction:column;' +
+		(isMobile ? 'display:none;' : '');
 	panel.innerHTML =
 		'<div id="game-chat-messages" style="height:120px;overflow-y:auto;padding:8px 10px;color:#ccc"></div>' +
 		'<div style="display:flex;border-top:1px solid rgba(255,255,255,0.1)">' +

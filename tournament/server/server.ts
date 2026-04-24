@@ -6,7 +6,6 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { createGzip } from 'node:zlib';
 import { extname, join, resolve } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -121,18 +120,10 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 	if (ext === '.html' || ext === '.js') {
 		headers['Cache-Control'] = 'no-cache, must-revalidate';
 	}
-	// Gzip text-based files (JS, HTML, CSS, JSON)
-	const compressible = ['.js', '.html', '.css', '.json', '.svg'].includes(ext);
-	const acceptsGzip = (req.headers['accept-encoding'] || '').includes('gzip');
-	if (compressible && acceptsGzip) {
-		headers['Content-Encoding'] = 'gzip';
-		headers['Vary'] = 'Accept-Encoding';
-		res.writeHead(200, headers);
-		createReadStream(filePath).pipe(createGzip()).pipe(res);
-	} else {
-		res.writeHead(200, headers);
-		createReadStream(filePath).pipe(res);
-	}
+	// Let Fly.io's proxy handle gzip — manual gzip can cause
+	// double-compression or partial content issues.
+	res.writeHead(200, headers);
+	createReadStream(filePath).pipe(res);
 });
 
 // ── WebSocket server ─────────────────────────────────────────────

@@ -21,17 +21,30 @@ interface SkillTier {
 	switchPreference: number;
 }
 
+// Tuned via local simulation to hit target score ranges.
+// reactD = distance at which bot dodges (sweet spot ~5000).
+// errorRate = chance of ignoring a tree (adds variance + human-like mistakes).
+// canSwitch = lane switching (much more effective than jumping).
+// useFlame = flamethrower usage (clears tree walls).
 const SKILL_TIERS: SkillTier[] = [
-	{ label: 'expert',   reactionZ: 4000, errorRate: 0.01, switchPreference: 1 },
-	{ label: 'medium',   reactionZ: 3200, errorRate: 0.04, switchPreference: 1 },
-	{ label: 'beginner', reactionZ: 900,  errorRate: 0.30, switchPreference: 0 },
+	{ label: 'beginner', reactionZ: 4000, errorRate: 0.10, switchPreference: 0 },  // ~20K avg, jump only
+	{ label: 'medium',   reactionZ: 5000, errorRate: 0.15, switchPreference: 1 },  // ~40K avg, switch
+	{ label: 'expert',   reactionZ: 5000, errorRate: 0.03, switchPreference: 1 },  // ~60K avg, switch+flame
+	{ label: 'god',      reactionZ: 4800, errorRate: 0.00, switchPreference: 1 },  // ~70K avg, switch+flame
 ];
 
 // ── Bot names ────────────────────────────────────────────────────
+// Each bot is assigned a skill tier by index (mod SKILL_TIERS.length).
 
 const BOT_NAMES = [
-	'satoshi_og', 'vitalik_fan', 'degen_ape', 'gm_wagmi',
-	'ser_pumps', 'rug_survivor',
+	'noob_cube',       // beginner
+	'ser_pumps',       // medium
+	'degen_ape',       // expert
+	'satoshi_og',      // god
+	'gm_wagmi',        // beginner
+	'vitalik_fan',     // medium
+	'rug_survivor',    // expert
+	'boxy_supreme',    // god
 ];
 
 // ── Action decision ──────────────────────────────────────────────
@@ -42,44 +55,93 @@ function laneOfX(x: number): number {
 	return 0;
 }
 
+/**
+ * Bot decision per tick. The key insight from simulation tuning:
+ *
+ *   1. ONE action at a time. Never over-queue. Wait until idle to decide.
+ *   2. Prefer lane switching over jumping — switching moves you OUT of
+ *      danger entirely, jumping risks landing into the next tree.
+ *   3. React at ~5000 units (sweet spot). Too early = jumps waste time.
+ *      Too late = no time to switch lanes.
+ *   4. Use flamethrower whenever available (clears impossible walls).
+ */
 function pickAction(state: GameState, skill: SkillTier): CharacterAction | null {
 	const char = state.character;
-	if (char.isJumping || char.isSwitchingLeft || char.isSwitchingRight) return null;
-	if (char.queuedActions.length > 0) return null;
-
-	const myLane = char.currentLane;
 	const charZ = char.z;
+	const reactD = skill.reactionZ;
+	const useFlame = skill.reactionZ >= 5000; // expert + god
 
-	const myCount = state.trees.filter(t => {
-		if (laneOfX(t.x) !== myLane) return false;
-		const d = charZ - t.z;
-		return d > 0 && d < skill.reactionZ;
-	}).length;
+	// Fire flamethrower when any tree is ahead and we have charges
+	if (useFlame && state.flamethrowerCharges > 0) {
+		for (const t of state.trees) {
+			const d = charZ - t.z;
+			if (d > 0 && d < 5000) return 'fire';
+		}
+	}
 
-	if (myCount === 0) return null;
+	// ONE non-fire action at a time. Wait until fully idle.
+	const nonFire = char.queuedActions.filter(a => a !== 'fire').length;
+	if (nonFire >= 1) return null;
+	if (char.isJumping || char.isSwitchingLeft || char.isSwitchingRight) return null;
+
+	const effLane = char.currentLane;
+
+	// Distance to first tree in each lane
+	function firstTreeDist(lane: number): number {
+		let best = Infinity;
+		for (const t of state.trees) {
+			if (laneOfX(t.x) !== lane) continue;
+			const d = charZ - t.z;
+			if (d > 0 && d < best) best = d;
+		}
+		return best;
+	}
+
+	const myD = firstTreeDist(effLane);
+
+	// Nothing ahead within scan range — look for powerups to collect
+	if (myD > reactD * 2 || myD === Infinity) {
+		for (const p of state.powerups) {
+			if (p.collected) continue;
+			const d = charZ - p.z;
+			const pLane = laneOfX(p.x);
+			if (d > 0 && d < 6000 && pLane !== effLane && Math.abs(pLane - effLane) === 1) {
+				if (firstTreeDist(pLane) > 3000) {
+					return pLane < effLane ? 'left' : 'right';
+				}
+			}
+		}
+		return null;
+	}
+
+	// Error: randomly ignore the threat (makes beginner/medium worse)
 	if (Math.random() < skill.errorRate) return null;
 
-	if (skill.switchPreference === 0) return 'up';
-
-	function treesInLane(lane: number, range: number): number {
-		return state.trees.filter(t => {
-			if (laneOfX(t.x) !== lane) return false;
-			const d = charZ - t.z;
-			return d > -400 && d < range;
-		}).length;
+	// Beginner: jump only
+	if (skill.switchPreference === 0) {
+		return myD < reactD ? 'up' : null;
 	}
 
-	const lanes = ([-1, 0, 1] as const).map(l => ({
-		lane: l,
-		count: treesInLane(l, skill.reactionZ * 1.5),
-	})).sort((a, b) => a.count - b.count);
+	// Adjacent lanes sorted by first tree distance (safest first)
+	const adjLanes = ([-1, 0, 1] as const)
+		.filter(l => l !== effLane && Math.abs(l - effLane) === 1)
+		.map(l => ({ lane: l, d: firstTreeDist(l) }))
+		.sort((a, b) => b.d - a.d);
 
-	const best = lanes[0];
-	if (best.lane === myLane) return 'up';
-	if (best.count < myCount) {
-		return best.lane < myLane ? 'left' : 'right';
+	if (myD < reactD) {
+		// Must dodge — prefer switching to a safe lane
+		if (adjLanes.length > 0 && adjLanes[0].d > reactD) {
+			return adjLanes[0].lane < effLane ? 'left' : 'right';
+		}
+		return 'up';
 	}
-	return 'up';
+
+	// Preemptive: move to a much clearer lane
+	if (adjLanes.length > 0 && adjLanes[0].d > myD * 1.5) {
+		return adjLanes[0].lane < effLane ? 'left' : 'right';
+	}
+
+	return null;
 }
 
 // ── Single bot ───────────────────────────────────────────────────
@@ -98,7 +160,13 @@ function runBot(port: number, idx: number): void {
 	const started = new Set<string>();
 
 	let matchStartedAt = 0;
-	const MATCH_TIMEOUT_MS = 120_000; // 2 min safety — clear stuck matches
+	const MATCH_TIMEOUT_MS = 120_000;
+
+	function setMatchId(id: string | null) {
+		currentMatchId = id;
+		if (id) matchStartedAt = Date.now();
+		botMatchState.set(nametag, id);
+	}
 
 	/** True if the bot is actively in a game. Auto-clears after 2 min. */
 	function isInMatch(): boolean {
@@ -106,7 +174,7 @@ function runBot(port: number, idx: number): void {
 		if (Date.now() - matchStartedAt > MATCH_TIMEOUT_MS) {
 			log(`match ${currentMatchId} timed out after 2min — clearing`);
 			stopSim();
-			currentMatchId = null;
+			setMatchId(null);
 			readied.clear();
 			started.clear();
 			return false;
@@ -212,12 +280,12 @@ function runBot(port: number, idx: number): void {
 					readied.delete(rk);
 					started.delete(rk);
 					stopSim();
-					currentMatchId = null;
+					setMatchId(null);
 					break;
 				}
 
 				case 'match-start': {
-					currentMatchId = msg.matchId; matchStartedAt = Date.now();
+					setMatchId(msg.matchId);
 					const gameNum = msg.gameNumber || 1;
 					currentGameNum = gameNum;
 					const delay = Math.max(0, (msg.startsAt || Date.now()) - Date.now());
@@ -241,7 +309,7 @@ function runBot(port: number, idx: number): void {
 						safeSend({ type: 'rematch', matchId: currentMatchId });
 						log('rematch requested');
 					}
-					currentMatchId = null;
+					setMatchId(null);
 					break;
 
 				case 'game-result':
@@ -249,7 +317,7 @@ function runBot(port: number, idx: number): void {
 					break;
 
 				case 'series-next': {
-					currentMatchId = msg.matchId; matchStartedAt = Date.now();
+					setMatchId(msg.matchId);
 					const gameNum = msg.gameNumber || (currentGameNum + 1);
 					currentGameNum = gameNum;
 					safeSend({ type: 'match-ready', matchId: msg.matchId });
@@ -286,7 +354,7 @@ function runBot(port: number, idx: number): void {
 					break;
 
 				case 'challenge-start': {
-					currentMatchId = msg.matchId; matchStartedAt = Date.now();
+					setMatchId(msg.matchId);
 					const gameNum = msg.gameNumber || 1;
 					currentGameNum = gameNum;
 					readied.clear();
@@ -319,6 +387,9 @@ function runBot(port: number, idx: number): void {
 	connect();
 }
 
+// ── Shared state for API queries ─────────────────────────────────
+const botMatchState = new Map<string, string | null>(); // nametag → currentMatchId
+
 // ── Public API ───────────────────────────────────────────────────
 
 /**
@@ -337,4 +408,17 @@ export function spawnBots(port: number): void {
 /** Get the list of bot nametags (for UI display). */
 export function getBotNames(): string[] {
 	return [...BOT_NAMES];
+}
+
+/** Get bot info with skill levels. */
+export function getBotInfo(): { name: string; skill: string }[] {
+	return BOT_NAMES.map((name, idx) => ({
+		name,
+		skill: SKILL_TIERS[idx % SKILL_TIERS.length].label,
+	}));
+}
+
+/** Get bots currently in a match (for filtering the online list). */
+export function getBusyBots(): string[] {
+	return BOT_NAMES.filter(name => !!botMatchState.get(name));
 }

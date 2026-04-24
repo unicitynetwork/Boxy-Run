@@ -1047,10 +1047,12 @@ function updateMyMatch() {
       }
     } else {
       document.getElementById('section-match').style.display = 'none';
-      // User is in the tournament but has no match in current round — show waiting
-      if (inTournament && waitingEl && waitingMsg) {
+      // User is in the tournament but has no match in current round
+      if (inTournament && waitingEl && waitingMsg && currentTournament?.status !== 'complete') {
         waitingEl.style.display = 'block';
         waitingMsg.textContent = `Waiting for your Round ${round + 1} opponent to be determined...`;
+      } else if (currentTournament?.status === 'complete') {
+        hideWaiting(); // tournament is over — don't show waiting
       } else if (!inTournament && waitingEl && waitingMsg) {
         waitingEl.style.display = 'block';
         waitingMsg.textContent = 'You are not in this tournament.';
@@ -1130,6 +1132,7 @@ function onMatchStart(msg) {
     startsAt: String(msg.startsAt), name: myNametag || '',
     tid: msg.tournamentId || tournamentId || '',
     bestOf: String(msg.bestOf || 1),
+    readied: '1', // player already clicked READY on tournament page
   });
   location.href = 'dev.html?' + p;
 }

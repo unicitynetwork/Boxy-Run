@@ -285,6 +285,18 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			await recordDeposit(req, res, url);
 			return true;
 		}
+		if (path === '/api/admin/wipe-leaderboard' && req.method === 'POST') {
+			if (req.headers['x-admin-key'] !== (process.env.ADMIN_KEY || 'boxyrun-admin-2024')) {
+				json(res, 403, { error: 'Unauthorized' });
+				return true;
+			}
+			await ensureSchema();
+			const db = getDb();
+			await db.execute('DELETE FROM scores');
+			await db.execute('DELETE FROM alltime');
+			json(res, 200, { status: 'ok', message: 'Leaderboard wiped (scores + alltime)' });
+			return true;
+		}
 		if (path === '/api/log' && req.method === 'POST') {
 			await clientLog(req, res, url);
 			return true;

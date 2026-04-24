@@ -65,10 +65,19 @@ export async function handleTournamentApi(
 		return true;
 	}
 
-	// GET /api/online — list connected players
+	// GET /api/online — list connected players, separated into bots and humans
 	if (path === '/api/online' && req.method === 'GET') {
 		const { getOnlinePlayers } = await import('./tournament-ws');
-		json(res, 200, { players: getOnlinePlayers() });
+		const { getBotNames, getBusyBots, getBotInfo } = await import('./bots');
+		const all = getOnlinePlayers();
+		const botSet = new Set(getBotNames());
+		const busySet = new Set(getBusyBots());
+		const botInfo = getBotInfo();
+		const bots = botInfo
+			.filter(b => all.includes(b.name))
+			.map(b => ({ name: b.name, skill: b.skill, busy: busySet.has(b.name) }));
+		const humans = all.filter(n => !botSet.has(n));
+		json(res, 200, { players: all, busy: getBusyBots(), bots, humans });
 		return true;
 	}
 
@@ -267,6 +276,82 @@ export async function handleTournamentApi(
 				json(res, r.status, { error: r.code, message: r.message });
 			} else {
 				json(res, 200, { status: 'ok', declined: r.data.declined });
+			}
+			return true;
+		} catch (err: any) {
+			json(res, 400, { error: err.message });
+			return true;
+		}
+	}
+
+	// ── Challenge Links (shareable URLs) ─────────────────────────────
+
+	// POST /api/challenge-links — create a shareable link
+	if (path === '/api/challenge-links' && req.method === 'POST') {
+		try {
+			const body = JSON.parse(await readBody(req));
+			const from = String(body.from || '').trim();
+			if (!from) { json(res, 400, { error: 'from_required' }); return true; }
+			const bestOf = Number(body.bestOf) || 1;
+			const wager = Number(body.wager) || 0;
+			const { createChallengeLink } = await import('./challenge');
+			const r = await createChallengeLink(from, bestOf, Math.max(0, wager));
+			if (!r.ok) {
+				json(res, r.status, { error: r.code, message: r.message });
+			} else {
+				json(res, 201, { code: r.data.code, challengeId: r.data.challengeId });
+			}
+			return true;
+		} catch (err: any) {
+			json(res, 400, { error: err.message });
+			return true;
+		}
+	}
+
+	// GET /api/challenge-links/:code — get link info
+	const linkInfoMatch = path.match(/^\/api\/challenge-links\/([^/]+)$/);
+	if (linkInfoMatch && req.method === 'GET') {
+		const { getChallengeLinkByCode, getAcceptedLinkByCode } = await import('./challenge');
+		const code = linkInfoMatch[1];
+		const ch = getChallengeLinkByCode(code);
+		if (ch) {
+			json(res, 200, {
+				code: ch.code, from: ch.from, bestOf: ch.bestOf,
+				wager: ch.wager, accepted: false, challengeId: ch.id,
+			});
+		} else {
+			const accepted = getAcceptedLinkByCode(code);
+			if (accepted) {
+				json(res, 200, {
+					code, accepted: true,
+					matchId: accepted.matchId, tournamentId: accepted.tournamentId,
+					seed: accepted.seed, acceptedBy: accepted.acceptedBy,
+				});
+			} else {
+				json(res, 404, { error: 'not_found', message: 'Challenge link not found or expired' });
+			}
+		}
+		return true;
+	}
+
+	// POST /api/challenge-links/:code/accept — accept via code (resolves to unified accept)
+	const linkAcceptMatch = path.match(/^\/api\/challenge-links\/([^/]+)\/accept$/);
+	if (linkAcceptMatch && req.method === 'POST') {
+		try {
+			const body = JSON.parse(await readBody(req));
+			const acceptor = String(body.by || '').trim();
+			if (!acceptor) { json(res, 400, { error: 'by_required' }); return true; }
+			const { getChallengeLinkByCode, applyChallengeAccept } = await import('./challenge');
+			const ch = getChallengeLinkByCode(linkAcceptMatch[1]);
+			if (!ch) {
+				json(res, 404, { error: 'not_found', message: 'Challenge link not found or expired' });
+				return true;
+			}
+			const r = await applyChallengeAccept(acceptor, ch.id);
+			if (!r.ok) {
+				json(res, r.status, { error: r.code, message: r.message });
+			} else {
+				json(res, 200, { status: 'accepted', ...r.data });
 			}
 			return true;
 		} catch (err: any) {

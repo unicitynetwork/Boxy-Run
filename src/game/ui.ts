@@ -9,6 +9,9 @@ import type { CharacterAction, GameState } from '../sim/state';
 // ─── Overlay ─────────────────────────────────────────────────────
 
 export function showOverlay(text: string): void {
+	// Log first 80 chars of overlay content for debugging
+	const preview = text.replace(/<[^>]*>/g, '').trim().slice(0, 80);
+	console.log('[overlay]', preview);
 	const el = document.getElementById('variable-content');
 	if (el) {
 		el.style.visibility = 'visible';
@@ -116,9 +119,11 @@ export function installTouchControls(opts: {
 	let startY = 0;
 	let startTime = 0;
 
+	// Prevent ALL touch scrolling/pull-to-refresh on the game page.
+	// Without this, swiping near screen edges triggers browser navigation.
 	document.addEventListener(
 		'touchmove',
-		(e) => { if (opts.isPlaying()) e.preventDefault(); },
+		(e) => { e.preventDefault(); },
 		{ passive: false },
 	);
 
@@ -126,7 +131,6 @@ export function installTouchControls(opts: {
 		'touchstart',
 		(e) => {
 			if (!opts.isPlaying()) {
-				// Tap to start
 				opts.onStart();
 				return;
 			}

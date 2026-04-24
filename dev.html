@@ -12,7 +12,15 @@
 			@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
 			.mp .sp-only{display:none}
 
-			body { background: #000 !important; }
+			body {
+				background: #000 !important;
+				overscroll-behavior: none;
+				overflow: hidden;
+				position: fixed;
+				width: 100%;
+				height: 100%;
+				touch-action: none;
+			}
 
 			/* ── Desktop panel ─────────────────────────────── */
 			.panel {
@@ -114,12 +122,14 @@
 			/* ── Mobile controls hint ──────────────────────── */
 			#mobile-controls-hint {
 				display: none;
-				position: fixed; bottom: 16px; left: 0; right: 0;
+				position: fixed; bottom: 8px; left: 8px; right: 8px;
 				text-align: center;
 				font-family: 'IBM Plex Mono', monospace;
-				font-size: 10px;
-				color: rgba(255,255,255,0.4);
-				pointer-events: none;
+				font-size: 11px;
+				background: rgba(0,0,0,0.6);
+				padding: 8px 12px;
+				border-radius: 6px;
+				color: rgba(255,255,255,0.7);
 				z-index: 100;
 			}
 
@@ -176,7 +186,6 @@
 				<label>Coins</label>
 				<p id="coins">0</p>
 			</div>
-			<div class="animate-flicker" id="variable-content">Loading...</div>
 			<div id="coin-values" style="margin-top:1.5em;font-size:0.65em;text-transform:uppercase;letter-spacing:0.1em">
 				<div style="color:#ffd700;margin-bottom:4px">&#9679; Gold - 250 pts</div>
 				<div style="color:#00bfff;margin-bottom:4px">&#9679; Blue - 1,000 pts</div>
@@ -212,6 +221,14 @@
 			swipe: &#8592; &#8594; move &nbsp; &#8593; jump &nbsp; &#8595; flame &nbsp; tap: jump
 		</div>
 
+		<script>
+		if ('ontouchstart' in window || window.innerWidth < 1025) {
+			var h = document.getElementById('mobile-controls-hint');
+			if (h) h.style.display = 'block';
+		}
+		</script>
+		<!-- Overlay — outside panel so it's visible on mobile -->
+		<div class="animate-flicker" id="variable-content">Loading...</div>
 		<div id="world"></div>
 	</body>
 </html>

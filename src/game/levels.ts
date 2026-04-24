@@ -59,11 +59,11 @@ export const LEVELS: LevelDef[] = [
 	{
 		id: 2,
 		name: 'Coin Hunter',
-		description: 'Collect 30 coins while dodging trees.',
+		description: 'Collect 20 coins while dodging trees.',
 		seed: 2002,
 		totalRows: 130,
 		objectives: [
-			{ type: 'collect_coins', target: 30, label: 'Collect 30 coins' },
+			{ type: 'collect_coins', target: 20, label: 'Collect 20 coins' },
 		],
 		initial: { treePresenceProb: 0.30, maxTreeSize: 0.55, fogDistance: 65000 },
 	},
@@ -180,12 +180,11 @@ export const LEVELS: LevelDef[] = [
 	{
 		id: 10,
 		name: 'The Gauntlet',
-		description: 'Everything at max. Score 25K and collect 3 red coins.',
+		description: 'Everything at max. Score 100K to survive.',
 		seed: 10010,
-		totalRows: 140,
+		totalRows: 200,
 		objectives: [
-			{ type: 'score', target: 25000, label: 'Score 25,000' },
-			{ type: 'collect_red', target: 3, label: 'Collect 3 red coins' },
+			{ type: 'score', target: 100000, label: 'Score 100,000' },
 		],
 		initial: { treePresenceProb: 0.55, maxTreeSize: 1.25, fogDistance: 15000 },
 		spawns: [

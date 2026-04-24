@@ -93,7 +93,11 @@ export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<
 			// 2. Series advanced → show game result, reset for next game.
 			//    Fire once per game number advance.
 			const serverGame = s.series?.currentGame ?? 0;
-			if (s.series && serverGame > cb.getCurrentGameNumber()
+			const localGame = cb.getCurrentGameNumber();
+			if (s.series && serverGame > localGame) {
+				cb.onPollResult?.(`ADVANCE? server=${serverGame} local=${localGame} fired=${firedSeriesAdvance}`);
+			}
+			if (s.series && serverGame > localGame
 					&& firedSeriesAdvance < serverGame) {
 				firedSeriesAdvance = serverGame;
 				// Reset one-shot flags for the new game
@@ -107,21 +111,27 @@ export function startStatePoll(stateUrl: string, cb: PollCallbacks): ReturnType<
 
 			const phase = cb.getPhase();
 
-			// 3. Server already playing but we're stuck pre-game (once).
-			if (s.machinePhase === 'playing'
-					&& (phase === 'waiting' || phase === 'ready_prompt')
-					&& !firedForceStart) {
-				firedForceStart = true;
-				cb.onForceStart?.();
-				return;
-			}
-
-			// 4. Both ready → countdown (once).
+			// 3. Both ready → countdown (once). Must be checked BEFORE
+			//    forceStart: when both players ready near-simultaneously the
+			//    machine transitions to 'playing' instantly, and the next
+			//    poll would see machinePhase=playing → forceStart (skipping
+			//    the 3-2-1 countdown). Checking bothReady first guarantees
+			//    the normal countdown path wins the race.
 			if (s.ready?.A && s.ready?.B
 					&& (phase === 'waiting' || phase === 'ready_prompt')
 					&& !firedBothReady) {
 				firedBothReady = true;
 				cb.onBothReady();
+				return;
+			}
+
+			// 4. Server already playing but we're stuck pre-game (once).
+			//    Only fires after bothReady has already been checked above.
+			if (s.machinePhase === 'playing'
+					&& (phase === 'waiting' || phase === 'ready_prompt')
+					&& !firedForceStart) {
+				firedForceStart = true;
+				cb.onForceStart?.();
 				return;
 			}
 

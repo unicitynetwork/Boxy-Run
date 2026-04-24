@@ -12,7 +12,11 @@
  * - Idempotent — safe to call repeatedly
  */
 
-import { getSharedAudioContext } from './audio-context';
+import { getSharedAudioContext, isAudioReady, onNextGesture } from './audio-context';
+
+function debugAudio(msg: string): void {
+	console.log('[music] ' + msg);
+}
 
 const GAME_TRACK = '/music/surpass.mp3';
 
@@ -56,11 +60,12 @@ export function startAmbientMusic(): void {
 	if (loadAttempts > 0) return;
 	loadAttempts++;
 
-	const ctx = getSharedAudioContext();
-	if (!ctx || ctx.state === 'suspended') {
+	if (!isAudioReady()) {
 		loadAttempts = 0; // retry next frame when context is ready
 		return;
 	}
+	const ctx = getSharedAudioContext()!;
+	debugAudio('decoding, preloaded=' + !!preloadedBytes);
 
 	// Use preloaded bytes if available, otherwise fetch
 	const bytesPromise = preloadedBytes
@@ -71,21 +76,33 @@ export function startAmbientMusic(): void {
 		});
 
 	bytesPromise
-		.then(buf => ctx.decodeAudioData(buf.slice(0))) // slice: decodeAudioData detaches the buffer
+		.then(buf => {
+			debugAudio('got bytes: ' + buf.byteLength);
+			return ctx.decodeAudioData(buf.slice(0));
+		})
 		.then(decoded => {
+			debugAudio('decoded OK, duration=' + decoded.duration.toFixed(1) + 's');
 			audioBuffer = decoded;
 			startPlayback();
+			if (!playing) {
+				// Safari may have blocked start() outside gesture — defer
+				pendingPlay = true;
+				debugAudio('deferred: waiting for next gesture');
+				onNextGesture(tryDeferredPlay);
+			}
 		})
 		.catch(err => {
-			console.warn('[music] decode failed, will retry:', err.message);
+			debugAudio('decode FAILED: ' + err.message);
 			setTimeout(() => { loadAttempts = 0; }, 2000);
 		});
 }
 
+let pendingPlay = false;
+
 function startPlayback(): void {
 	if (!audioBuffer || playing) return;
-	const ctx = getSharedAudioContext();
-	if (!ctx || ctx.state === 'suspended') return;
+	if (!isAudioReady()) return;
+	const ctx = getSharedAudioContext()!;
 
 	if (!gainNode) {
 		gainNode = ctx.createGain();
@@ -104,9 +121,23 @@ function startPlayback(): void {
 	sourceNode.connect(gainNode);
 	sourceNode.start();
 	playing = true;
+	// Start at audible volume immediately — don't wait for slow ramp
+	if (!musicMuted) gainNode.gain.value = 0.3;
+	debugAudio('playback started, muted=' + musicMuted + ' gain=' + gainNode.gain.value);
 
 	// Ensure mute is respected
 	if (musicMuted) gainNode.gain.value = 0;
+}
+
+// Safari workaround: if decoding finishes outside a gesture, defer
+// start() until the next user gesture. The unlock listener will call
+// tryDeferredPlay().
+function tryDeferredPlay(): void {
+	if (pendingPlay && audioBuffer && !playing) {
+		pendingPlay = false;
+		debugAudio('deferred play triggered by gesture');
+		startPlayback();
+	}
 }
 
 /**
