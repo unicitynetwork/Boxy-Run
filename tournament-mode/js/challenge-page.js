@@ -8,7 +8,8 @@
   var WS_URL = `${WS_PROTO}//${location.host}`;
   var myNametag = localStorage.getItem("boxyrun-nametag");
   var ws = null;
-  var onlinePlayers = [];
+  var bots = [];
+  var humans = [];
   var wsLastMessageAt = 0;
   var wsWatchdog = null;
   function esc(s) {
@@ -17,9 +18,7 @@
     return d.innerHTML;
   }
   function $(id) {
-    const el = document.getElementById(id);
-    if (!el) throw new Error(`element #${id} missing`);
-    return el;
+    return document.getElementById(id);
   }
   if (myNametag) {
     $("id-disconnected").style.display = "none";
@@ -34,7 +33,6 @@
     const liveTag = w.identity.nametag;
     if (myNametag === liveTag) return;
     if (myNametag && myNametag !== liveTag) {
-      console.warn("[challenge] wallet identity changed", myNametag, "\u2192", liveTag);
       if (ws) try {
         ws.close();
       } catch {
@@ -65,8 +63,7 @@
         const msg = JSON.parse(e.data);
         if (msg.type === "heartbeat") return;
         handleMsg(msg);
-      } catch (err) {
-        console.error("[ws] handleMsg error:", err);
+      } catch {
       }
     };
     ws.onclose = () => {
@@ -82,7 +79,6 @@
     };
     wsWatchdog = setInterval(() => {
       if (ws && ws.readyState === 1 && Date.now() - wsLastMessageAt > 25e3) {
-        console.warn("[ws] idle >25s \u2014 forcing reconnect");
         try {
           ws.close();
         } catch {
@@ -97,30 +93,15 @@
   }
   function handleMsg(msg) {
     switch (msg.type) {
-      case "registered":
-        if (msg.protocolVersion !== PROTOCOL_VERSION) {
-          console.warn(`[challenge] protocol mismatch: server=${msg.protocolVersion} client=${PROTOCOL_VERSION}`);
-        }
-        break;
-      case "player-online":
-        break;
       case "challenge-received":
-        showIncoming(msg);
-        break;
-      case "challenge-sent":
+        pollIncomingChallenges();
         break;
       case "challenge-declined":
-        clearPending();
+        clearBotPending();
         if (msg.by) {
-          const fast = pendingStart > 0 && Date.now() - pendingStart < 3e3;
-          const text = fast ? `${esc(msg.by)} is busy \u2014 try again shortly.` : `${esc(msg.by)} declined.`;
-          showStatus(text, "rgba(218,54,51,0.1)", "var(--red)");
+          showStatus(`${esc(msg.by)} declined.`, "rgba(218,54,51,0.1)", "var(--red)");
         } else {
-          showStatus("Challenge expired \u2014 opponent didn\u2019t respond in time.", "rgba(218,54,51,0.1)", "var(--red)");
-        }
-        if (msg.challengeId) {
-          const buttons = document.querySelectorAll(`.challenge-incoming button[onclick*="'${msg.challengeId}'"]`);
-          buttons.forEach((b) => b.closest(".challenge-incoming")?.remove());
+          showStatus("Challenge expired.", "rgba(218,54,51,0.1)", "var(--red)");
         }
         break;
       case "chat":
@@ -129,7 +110,8 @@
         }
         break;
       case "challenge-start": {
-        clearPending();
+        clearBotPending();
+        clearLinkUI();
         const p = new URLSearchParams({
           tournament: "1",
           matchId: msg.matchId,
@@ -147,125 +129,99 @@
       }
     }
   }
-  var savedWager = "0";
-  var savedBestOf = "3";
-  function render() {
-    const el = $("online-list");
-    const others = onlinePlayers.filter((n) => n !== myNametag);
-    $("online-count").textContent = `${others.length} online`;
-    const wagerEl = document.getElementById("wager-input");
-    const bestofEl = document.getElementById("bestof-input");
-    if (wagerEl) savedWager = wagerEl.value;
-    if (bestofEl) savedBestOf = bestofEl.value;
-    if (!others.length) {
-      el.innerHTML = '<div class="empty">No other players online right now</div>';
+  var pendingBot = null;
+  function renderBots() {
+    const el = $("bot-list");
+    if (!bots.length) {
+      el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">Bots are starting up...</div>';
       return;
     }
-    el.innerHTML = `<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-		<label style="font-size:12px;color:var(--text2)">Wager:</label>
-		<input type="number" id="wager-input" value="${esc(savedWager)}" min="0" step="10" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px;text-align:center">
-		<span style="font-size:12px;color:var(--text3)">UCT</span>
-		<label style="font-size:12px;color:var(--text2);margin-left:8px">Best of:</label>
-		<select id="bestof-input" style="padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px">
-			<option value="1"${savedBestOf === "1" ? " selected" : ""}>1</option>
-			<option value="3"${savedBestOf === "3" ? " selected" : ""}>3</option>
-			<option value="5"${savedBestOf === "5" ? " selected" : ""}>5</option>
-		</select>
-	</div>` + others.map(
-      (n) => `<button class="player-btn" onclick="challenge('${esc(n)}')"${pendingChallenge ? " disabled" : ""}>${esc(n)}</button>`
-    ).join("");
+    const skillColor = { god: "#e879f9", expert: "#ff5e5e", medium: "#ff9534", beginner: "#4ade80" };
+    el.innerHTML = bots.map((b) => {
+      const disabled = pendingBot || b.busy;
+      const sColor = skillColor[b.skill] || "var(--text3)";
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(95,234,255,0.08)">
+			<div style="display:flex;align-items:center;gap:10px">
+				<span style="color:${b.busy ? "var(--text3)" : "var(--cyan)"};font-weight:600">${esc(b.name)}</span>
+				<span style="font-size:9px;font-family:var(--display);letter-spacing:.1em;text-transform:uppercase;color:${sColor};padding:2px 8px;border:1px solid ${sColor};border-radius:99px">${esc(b.skill)}</span>
+				${b.busy ? '<span style="font-size:10px;color:var(--text3)">\u2694 in match</span>' : ""}
+			</div>
+			<button class="btn btn-primary" style="padding:6px 16px;font-size:10px" onclick="challengeBot('${esc(b.name)}')" ${disabled ? "disabled" : ""}>${pendingBot === b.name ? "Starting..." : "Play"}</button>
+		</div>`;
+    }).join("");
   }
-  var pendingChallenge = null;
-  var pendingTimer = null;
-  var pendingStart = 0;
-  async function challenge(opponent) {
-    if (pendingChallenge) return;
-    pendingChallenge = "sending";
-    render();
+  async function challengeBot(name) {
+    if (!myNametag || pendingBot) return;
+    pendingBot = name;
+    renderBots();
     const wagerInput = document.getElementById("wager-input");
     const bestofInput = document.getElementById("bestof-input");
     const wager = parseInt(wagerInput?.value || "0", 10);
     const bestOf = parseInt(bestofInput?.value || "1", 10);
-    showStatus(`Sending challenge to ${esc(opponent)}...`, "var(--cyan-dim)", "var(--cyan)");
     try {
       const r = await fetch("/api/challenges", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: myNametag, opponent, wager: Math.max(0, wager), bestOf })
+        body: JSON.stringify({ from: myNametag, opponent: name, wager: Math.max(0, wager), bestOf })
       });
       const data = await r.json();
       if (!r.ok) {
-        clearPending();
-        showStatus(data.message || data.error || "Challenge failed", "rgba(218,54,51,0.1)", "var(--red)");
+        clearBotPending();
+        showStatus(data.message || "Challenge failed", "rgba(218,54,51,0.1)", "var(--red)");
         return;
       }
-      pendingChallenge = data.challengeId || "pending";
-      pendingStart = Date.now();
-      showPendingStatus(opponent);
-      pendingTimer = setInterval(() => showPendingStatus(opponent), 1e3);
       setTimeout(() => {
-        if (pendingChallenge) {
-          clearPending();
-          showStatus("Challenge expired \u2014 no response.", "rgba(218,54,51,0.1)", "var(--red)");
+        if (pendingBot) {
+          clearBotPending();
+          showStatus("Bot didn't respond \u2014 try again.", "rgba(218,54,51,0.1)", "var(--red)");
         }
-      }, 32e3);
-      render();
-    } catch (err) {
-      clearPending();
-      showStatus("Could not reach server \u2014 check your connection", "rgba(218,54,51,0.1)", "var(--red)");
+      }, 1e4);
+    } catch {
+      clearBotPending();
+      showStatus("Network error", "rgba(218,54,51,0.1)", "var(--red)");
     }
   }
-  function showPendingStatus(opponent) {
-    const elapsed = Math.floor((Date.now() - pendingStart) / 1e3);
-    const remaining = Math.max(0, 30 - elapsed);
-    showStatus(
-      `Challenge sent to ${esc(opponent)} \u2014 waiting for response (${remaining}s)`,
-      "var(--cyan-dim)",
-      "var(--cyan)",
-      false
-      // don't auto-hide
-    );
+  function clearBotPending() {
+    pendingBot = null;
+    renderBots();
   }
-  function clearPending() {
-    pendingChallenge = null;
-    if (pendingTimer) {
-      clearInterval(pendingTimer);
-      pendingTimer = null;
+  var lastIncomingIds = "";
+  async function pollIncomingChallenges() {
+    if (!myNametag) return;
+    try {
+      const r = await fetch(`/api/challenges/pending?nametag=${encodeURIComponent(myNametag)}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      renderIncomingChallenges(data.challenges || []);
+    } catch {
     }
-    render();
   }
-  function showStatus(text, bg, color, autoHide = true) {
-    const el = $("challenge-status");
-    el.style.display = "block";
-    el.style.background = bg;
-    el.style.color = color;
-    el.innerHTML = text;
-    if (autoHide) setTimeout(() => {
-      el.style.display = "none";
-    }, 5e3);
-  }
-  var shownChallenges = /* @__PURE__ */ new Set();
-  function showIncoming(msg) {
+  function renderIncomingChallenges(challenges) {
     const box = $("incoming-challenges");
-    box.querySelectorAll(".challenge-incoming").forEach((el) => {
-      if (el.getAttribute("data-from") === msg.from) el.remove();
-    });
-    if (shownChallenges.has(msg.challengeId)) return;
-    shownChallenges.add(msg.challengeId);
-    const div = document.createElement("div");
-    div.className = "challenge-incoming";
-    div.setAttribute("data-from", msg.from);
-    const wagerText = msg.wager > 0 ? ` for <strong style="color:var(--orange)">${msg.wager} UCT</strong>` : "";
-    const boText = msg.bestOf > 1 ? ` (best of ${msg.bestOf})` : "";
-    div.innerHTML = `
-		<span><strong>${esc(msg.from)}</strong> challenges you${wagerText}${boText}</span>
-		<span>
-			<button class="btn btn-primary" style="padding:8px 16px;font-size:10px" onclick="accept('${msg.challengeId}',this)">Accept</button>
-			<button class="btn btn-ghost" style="padding:8px 16px;font-size:10px;margin-left:4px" onclick="decline('${msg.challengeId}',this)">Decline</button>
-		</span>`;
-    box.appendChild(div);
+    const ids = challenges.map((c) => c.id).join(",");
+    if (ids === lastIncomingIds) return;
+    lastIncomingIds = ids;
+    if (!challenges.length) {
+      box.innerHTML = "";
+      return;
+    }
+    box.innerHTML = challenges.map((ch) => {
+      const wagerText = ch.wager > 0 ? ` for <strong style="color:var(--orange)">${ch.wager} UCT</strong>` : "";
+      const boText = ch.bestOf > 1 ? ` (best of ${ch.bestOf})` : "";
+      const isLink = ch.to === null;
+      const label = isLink ? `<strong style="color:var(--cyan)">${esc(ch.from)}</strong> has an open challenge${wagerText}${boText}` : `<strong style="color:var(--cyan)">${esc(ch.from)}</strong> challenges you${wagerText}${boText}`;
+      return `<div class="challenge-incoming" data-id="${ch.id}">
+			<span>${label}</span>
+			<span>
+				<button class="btn btn-primary" style="padding:8px 16px;font-size:10px" onclick="acceptChallenge('${ch.id}',this)">Accept</button>
+				${!isLink ? `<button class="btn btn-ghost" style="padding:8px 16px;font-size:10px;margin-left:4px" onclick="declineChallenge('${ch.id}',this)">Decline</button>` : ""}
+			</span>
+		</div>`;
+    }).join("");
   }
-  async function accept(id, btn) {
+  setInterval(pollIncomingChallenges, 2e3);
+  if (myNametag) pollIncomingChallenges();
+  async function acceptChallenge(id, btn) {
     btn.closest(".challenge-incoming")?.remove();
     showStatus("Starting match...", "var(--cyan-dim)", "var(--cyan)");
     try {
@@ -276,7 +232,7 @@
       });
       const data = await r.json();
       if (!r.ok) {
-        showStatus(data.message || data.error || "Accept failed", "rgba(218,54,51,0.1)", "var(--red)");
+        showStatus(data.message || "Accept failed", "rgba(218,54,51,0.1)", "var(--red)");
         return;
       }
       const p = new URLSearchParams({
@@ -291,11 +247,11 @@
         startsAt: String(Date.now() + 3e3)
       });
       location.href = "dev.html?" + p;
-    } catch (err) {
+    } catch {
       showStatus("Network error", "rgba(218,54,51,0.1)", "var(--red)");
     }
   }
-  async function decline(id, btn) {
+  async function declineChallenge(id, btn) {
     btn.closest(".challenge-incoming")?.remove();
     try {
       await fetch(`/api/challenges/${encodeURIComponent(id)}/decline`, {
@@ -305,6 +261,166 @@
       });
     } catch {
     }
+  }
+  var joinCode = new URLSearchParams(location.search).get("join");
+  if (joinCode) showJoinUI(joinCode);
+  async function showJoinUI(code) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.marginBottom = "20px";
+    card.innerHTML = `
+		<div class="card-head"><h2>Challenge Invite</h2></div>
+		<div class="card-body" id="join-body">
+			<div style="text-align:center;color:var(--text3);font-size:13px">Loading...</div>
+		</div>`;
+    const firstCard = document.querySelector(".card");
+    if (firstCard) firstCard.parentNode.insertBefore(card, firstCard);
+    else document.querySelector(".page").appendChild(card);
+    try {
+      const r = await fetch(`/api/challenge-links/${encodeURIComponent(code)}`);
+      if (!r.ok) {
+        $("join-body").innerHTML = `<div style="text-align:center;color:var(--red);font-size:14px">This challenge link has expired or doesn't exist.</div>`;
+        return;
+      }
+      const data = await r.json();
+      if (data.accepted) {
+        $("join-body").innerHTML = '<div style="text-align:center;color:var(--text3);font-size:14px">This challenge has already been accepted.</div>';
+        return;
+      }
+      const wagerText = data.wager > 0 ? ` for <strong style="color:var(--orange)">${data.wager} UCT</strong>` : "";
+      const boText = data.bestOf > 1 ? ` (Best of ${data.bestOf})` : "";
+      $("join-body").innerHTML = `
+			<div style="text-align:center">
+				<div style="font-size:16px;margin-bottom:12px">
+					<strong style="color:var(--cyan)">${esc(data.from)}</strong> challenges you${wagerText}${boText}
+				</div>
+				${myNametag ? `<button class="btn btn-primary" id="join-accept" style="padding:14px 32px;font-size:13px">Accept Challenge</button>` : `<div style="color:var(--text3);font-size:13px">Connect your wallet on the <a href="index.html" style="color:var(--cyan)">home page</a> first.</div>`}
+			</div>`;
+      document.getElementById("join-accept")?.addEventListener("click", () => {
+        const btn = document.getElementById("join-accept");
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Starting...";
+        }
+        fetch(`/api/challenge-links/${encodeURIComponent(code)}/accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ by: myNametag })
+        }).then((r2) => r2.json().then((d) => ({ ok: r2.ok, data: d }))).then(({ ok, data: data2 }) => {
+          if (!ok) {
+            $("join-body").innerHTML = `<div style="text-align:center;color:var(--red);font-size:14px">${esc(data2.message || "Failed")}</div>`;
+            return;
+          }
+          const p = new URLSearchParams({
+            tournament: "1",
+            matchId: data2.matchId,
+            seed: data2.seed || "0",
+            side: data2.youAre,
+            opponent: data2.opponent,
+            name: myNametag,
+            tid: data2.tournamentId,
+            bestOf: String(data2.bestOf || 1),
+            startsAt: String(Date.now() + 3e3)
+          });
+          location.href = "dev.html?" + p;
+        }).catch(() => {
+          $("join-body").innerHTML = '<div style="text-align:center;color:var(--red);font-size:14px">Network error \u2014 try again.</div>';
+        });
+      });
+    } catch {
+      $("join-body").innerHTML = '<div style="text-align:center;color:var(--red);font-size:14px">Could not load challenge info.</div>';
+    }
+  }
+  var linkPollTimer = null;
+  function clearLinkUI() {
+    if (linkPollTimer) {
+      clearInterval(linkPollTimer);
+      linkPollTimer = null;
+    }
+    const area = document.getElementById("link-area");
+    if (area) {
+      area.style.display = "none";
+      area.innerHTML = "";
+    }
+  }
+  async function createLink() {
+    if (!myNametag) return;
+    const wagerInput = document.getElementById("wager-input");
+    const bestofInput = document.getElementById("bestof-input");
+    const wager = parseInt(wagerInput?.value || "0", 10);
+    const bestOf = parseInt(bestofInput?.value || "1", 10);
+    const linkArea = $("link-area");
+    linkArea.style.display = "block";
+    linkArea.innerHTML = '<div style="color:var(--text3);font-size:13px">Creating link...</div>';
+    try {
+      const r = await fetch("/api/challenge-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: myNametag, bestOf, wager: Math.max(0, wager) })
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        linkArea.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(data.message || "Failed")}</div>`;
+        return;
+      }
+      const url = `${location.origin}/challenge.html?join=${data.code}`;
+      linkArea.innerHTML = `
+			<div style="font-size:12px;color:var(--text3);margin-bottom:8px;font-family:var(--display);letter-spacing:.1em">SHARE THIS LINK</div>
+			<div style="display:flex;gap:8px;align-items:center">
+				<input type="text" value="${esc(url)}" readonly id="link-url" style="flex:1;padding:10px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--cyan);font-family:var(--body);font-size:12px;outline:none">
+				<button class="btn btn-primary" id="copy-link" style="padding:10px 16px;font-size:10px;white-space:nowrap">Copy</button>
+			</div>
+			<div style="font-size:12px;color:var(--text3);margin-top:8px" id="link-status">Waiting for someone to join... <span id="link-countdown">5:00</span></div>`;
+      document.getElementById("copy-link").addEventListener("click", () => {
+        navigator.clipboard.writeText(url).then(() => {
+          const el = document.getElementById("copy-link");
+          if (el) {
+            el.textContent = "Copied!";
+            setTimeout(() => {
+              if (el) el.textContent = "Copy";
+            }, 2e3);
+          }
+        });
+      });
+      document.getElementById("link-url").addEventListener("click", function() {
+        this.select();
+      });
+      const linkStart = Date.now();
+      if (linkPollTimer) clearInterval(linkPollTimer);
+      linkPollTimer = setInterval(async () => {
+        const elapsed = Date.now() - linkStart;
+        if (elapsed > 5 * 6e4) {
+          clearLinkUI();
+          showStatus("Challenge link expired.", "rgba(218,54,51,0.1)", "var(--red)");
+          return;
+        }
+        const remaining = Math.max(0, 300 - Math.floor(elapsed / 1e3));
+        const cdEl = document.getElementById("link-countdown");
+        if (cdEl) cdEl.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+        try {
+          const r2 = await fetch(`/api/challenge-links/${data.code}`);
+          if (!r2.ok) return;
+          const info = await r2.json();
+          if (info.accepted) {
+            clearLinkUI();
+            showStatus(`${esc(info.acceptedBy || "Someone")} accepted! Starting match...`, "rgba(46,160,67,0.1)", "var(--green)", false);
+          }
+        } catch {
+        }
+      }, 2e3);
+    } catch {
+      linkArea.innerHTML = '<div style="color:var(--red);font-size:13px">Network error.</div>';
+    }
+  }
+  function showStatus(text, bg, color, autoHide = true) {
+    const el = $("challenge-status");
+    el.style.display = "block";
+    el.style.background = bg;
+    el.style.color = color;
+    el.innerHTML = text;
+    if (autoHide) setTimeout(() => {
+      el.style.display = "none";
+    }, 5e3);
   }
   function enableChat() {
     const inp = document.getElementById("chat-input");
@@ -317,8 +433,7 @@
     if (!el) return;
     const div = document.createElement("div");
     div.style.marginBottom = "4px";
-    const nameColor = isMe ? "var(--cyan)" : "var(--orange)";
-    div.innerHTML = `<strong style="color:${nameColor}">${esc(from)}</strong> ${esc(text)}`;
+    div.innerHTML = `<strong style="color:${isMe ? "var(--cyan)" : "var(--orange)"}">${esc(from)}</strong> ${esc(text)}`;
     el.appendChild(div);
     el.scrollTop = el.scrollHeight;
   }
@@ -344,46 +459,36 @@
       dot.style.background = "#2ea043";
       dot.style.boxShadow = "0 0 6px rgba(46,160,67,0.5)";
       text.style.color = "#2ea043";
-      text.textContent = `Connected as ${myNametag || "?"} | ${onlinePlayers.length} online`;
-    } else if (wsOk || lastRestOk) {
-      dot.style.background = "#f97316";
-      dot.style.boxShadow = "0 0 6px rgba(249,115,22,0.5)";
-      text.style.color = "#f97316";
-      text.textContent = wsOk ? "WS OK, REST issues" : "REST OK, WS reconnecting\u2026";
+      text.textContent = `Connected as ${myNametag || "?"}`;
     } else {
       dot.style.background = "#c1121f";
       dot.style.boxShadow = "0 0 6px rgba(193,18,31,0.5)";
       text.style.color = "#c1121f";
-      text.textContent = "Disconnected \u2014 reconnecting\u2026";
+      text.textContent = "Reconnecting\u2026";
     }
   }
-  var origPoll = setInterval(async () => {
-    try {
-      const r = await fetch("/api/online");
-      lastRestOk = r.ok;
-    } catch {
-      lastRestOk = false;
-    }
-    updateNetStatus();
-  }, 3e3);
   updateNetStatus();
-  window.challenge = challenge;
-  window.accept = accept;
-  window.decline = decline;
-  setInterval(async () => {
+  window.challengeBot = challengeBot;
+  window.acceptChallenge = acceptChallenge;
+  window.declineChallenge = declineChallenge;
+  window.createLink = createLink;
+  async function pollOnline() {
     if (!myNametag) return;
     try {
       const r = await fetch("/api/online");
+      lastRestOk = r.ok;
       if (!r.ok) return;
-      const { players } = await r.json();
-      onlinePlayers = players || [];
-      render();
+      const data = await r.json();
+      bots = data.bots || [];
+      humans = data.humans || [];
+      renderBots();
+      $("humans-count").textContent = `${humans.length} online`;
+      updateNetStatus();
     } catch {
+      lastRestOk = false;
+      updateNetStatus();
     }
-  }, 3e3);
-  if (myNametag) fetch("/api/online").then((r) => r.json()).then((d) => {
-    onlinePlayers = d.players || [];
-    render();
-  }).catch(() => {
-  });
+  }
+  setInterval(pollOnline, 3e3);
+  pollOnline();
 })();

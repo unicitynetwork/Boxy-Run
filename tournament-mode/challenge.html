@@ -47,26 +47,16 @@ h1 span{color:var(--cyan)}
 .id-row{display:flex;gap:10px;align-items:center}
 .id-status{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
 .id-status.on{background:var(--green);box-shadow:0 0 6px rgba(46,160,67,0.5)}
-.id-input{flex:1;padding:12px 16px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;outline:none;letter-spacing:.05em}
-.id-input:focus{border-color:var(--cyan)}
-.id-input:disabled{opacity:.6}
 .id-connected{font-family:var(--display);font-size:16px;font-weight:600;color:var(--cyan)}
 .btn{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;padding:12px 20px;border-radius:var(--r);border:none;cursor:pointer;transition:.2s}
 .btn-primary{background:var(--cyan);color:var(--bg)}
 .btn-primary:hover{opacity:.85}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
 .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border-hi)}
 .btn-ghost:hover{color:var(--cyan);border-color:var(--cyan)}
-.btn-wallet{background:var(--orange);color:#fff;padding:12px 24px;font-size:12px}
-.btn-wallet:hover{opacity:.85}
-
-/* Online players */
-.player-btn{font-family:var(--body);font-size:13px;padding:8px 16px;background:rgba(0,229,255,0.06);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--cyan);cursor:pointer;transition:.2s;margin:4px}
-.player-btn:hover{background:rgba(0,229,255,0.15);border-color:var(--cyan)}
-.empty{color:var(--text3);font-size:14px;padding:12px 0}
 
 /* Incoming challenge */
 .challenge-incoming{padding:14px;background:rgba(0,229,255,0.08);border:1px solid var(--border-hi);border-radius:var(--r);margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
-.challenge-incoming strong{color:var(--cyan)}
 
 /* Status */
 .status-msg{margin-top:12px;padding:10px 14px;border-radius:var(--r);font-size:13px;display:none}
@@ -75,6 +65,16 @@ h1 span{color:var(--cyan)}
 .footer{margin-top:auto;padding-top:40px;font-size:12px;color:var(--text3);text-align:center}
 .footer a{color:var(--text2);text-decoration:none;margin:0 8px}
 .footer a:hover{color:var(--cyan)}
+
+/* Mobile */
+#chat-card { display: none !important; }
+@media (min-width: 1025px) {
+  #chat-card { display: block !important; }
+}
+@media (max-width: 1024px) {
+  .nav { flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 24px !important; }
+}
 </style>
 </head>
 <body>
@@ -93,10 +93,10 @@ h1 span{color:var(--cyan)}
     <span id="net-text" style="color:#999">Connecting…</span>
   </div>
 
-  <h1>Challenge a <span>Player</span></h1>
-  <p class="subtitle">Play a 1v1 match against anyone online. Same world, same seed. Highest score wins.</p>
+  <h1>Challenge <span>Mode</span></h1>
+  <p class="subtitle">Play bots instantly or share a link to challenge a friend.</p>
 
-  <!-- Identity (read from localStorage, set on index.html) -->
+  <!-- Identity -->
   <div class="id-section">
     <div class="id-label">Your Identity</div>
     <div id="id-connected" style="display:none" class="id-row">
@@ -104,32 +104,56 @@ h1 span{color:var(--cyan)}
       <span class="id-connected" id="my-name"></span>
     </div>
     <div id="id-disconnected" class="id-row">
-      <span class="id-status" id="ws-dot-off"></span>
+      <span class="id-status"></span>
       <span style="color:var(--text3);font-size:13px">Not connected.</span>
       <a href="index.html" class="btn btn-ghost" style="padding:8px 16px;font-size:10px">Connect on Home</a>
     </div>
   </div>
 
-  <!-- Online Players -->
+  <!-- Incoming challenges -->
+  <div id="incoming-challenges"></div>
+
+  <!-- Match settings -->
+  <div style="margin-bottom:20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <label style="font-size:12px;color:var(--text2)">Wager:</label>
+    <input type="number" id="wager-input" value="0" min="0" step="10" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px;text-align:center">
+    <span style="font-size:12px;color:var(--text3)">UCT</span>
+    <label style="font-size:12px;color:var(--text2);margin-left:8px">Best of:</label>
+    <select id="bestof-input" style="padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px">
+      <option value="1">1</option>
+      <option value="3" selected>3</option>
+      <option value="5">5</option>
+    </select>
+  </div>
+
+  <!-- Play a Bot -->
   <div class="card">
     <div class="card-head">
-      <h2>Online Players</h2>
-      <span style="font-size:12px;color:var(--text3)" id="online-count">0 online</span>
+      <h2>Play a Bot</h2>
     </div>
-    <div class="card-body">
-      <div id="online-list">
-        <div class="empty">Connect to see who's online</div>
-      </div>
-      <div class="status-msg" id="challenge-status"></div>
-      <div id="incoming-challenges"></div>
+    <div class="card-body" id="bot-list">
+      <div style="color:var(--text3);font-size:13px">Loading bots...</div>
     </div>
   </div>
 
-  <!-- Chat -->
+  <!-- Play a Friend -->
   <div class="card">
     <div class="card-head">
-      <h2>Chat</h2>
+      <h2>Play a Friend</h2>
+      <span style="font-size:12px;color:var(--text3)" id="humans-count"></span>
     </div>
+    <div class="card-body">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Generate a link and share it with anyone — they can accept from any browser.</p>
+      <button class="btn btn-primary" onclick="createLink()" style="width:100%;padding:14px;font-size:12px">Create Challenge Link</button>
+      <div id="link-area" style="display:none;margin-top:16px;padding:14px;background:rgba(0,229,255,0.05);border:1px solid var(--border);border-radius:var(--r)"></div>
+    </div>
+  </div>
+
+  <div class="status-msg" id="challenge-status"></div>
+
+  <!-- Chat (desktop only) -->
+  <div id="chat-card" class="card">
+    <div class="card-head"><h2>Chat</h2></div>
     <div class="card-body" style="padding:0">
       <div id="chat-messages" style="height:200px;overflow-y:auto;padding:12px 16px;font-size:13px;line-height:1.6"></div>
       <div style="display:flex;border-top:1px solid var(--border)">
@@ -144,7 +168,6 @@ h1 span{color:var(--cyan)}
   <a href="index.html">Home</a>
   <a href="tournament-v2.html">Tournaments</a>
   <a href="https://discord.gg/PGzNZT5uVp" target="_blank">Discord</a>
-  <div></div>
 </div>
 
 <script type="text/javascript" src="js/challenge-page.js"></script>
