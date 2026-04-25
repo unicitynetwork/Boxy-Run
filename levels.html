@@ -85,6 +85,10 @@ main{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:40px 24px
     <a href="index.html" class="back">&larr; MENU</a>
     <h1>LEVEL <span>SELECT</span></h1>
   </div>
+  <div style="margin-bottom:24px">
+    <div style="font-family:var(--display);font-size:14px;font-weight:700;letter-spacing:.15em;color:var(--cyan);text-shadow:0 0 20px rgba(95,234,255,0.4)">SEASON 1</div>
+    <div style="font-size:13px;color:var(--text3);margin-top:4px">Winter Forest — 10 levels</div>
+  </div>
   <div class="grid" id="levels-grid"></div>
 </main>
 
@@ -99,7 +103,7 @@ const LEVELS = [
   { id:7,  name:'Fogbound',        desc:'Visibility is low. Score 35,000 blind.',                objectives:['Score 35,000'],                                         difficulty:8 },
   { id:8,  name:'Red Rush',        desc:'Dense forest, big trees. Hunt down 3 red coins.',       objectives:['Collect 3 red coins'],                                  difficulty:8 },
   { id:9,  name:'Inferno',         desc:'Maximum density. Burn your way through.',                objectives:['Use flamethrower 5 times'],                             difficulty:9 },
-  { id:10, name:'The Gauntlet',    desc:'Everything at max. Score 100K to survive.',             objectives:['Score 100,000'],                                        difficulty:10 },
+  { id:10, name:'The Gauntlet',    desc:'Everything at max. Score 40K to survive.',              objectives:['Score 40,000'],                                         difficulty:10 },
 ];
 
 function getUnlocked() {

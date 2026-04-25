@@ -27,6 +27,7 @@ export interface ScriptedSpawn {
 
 export interface LevelDef {
 	id: number;
+	season: number;
 	name: string;
 	description: string;
 	seed: number;
@@ -44,9 +45,17 @@ export interface LevelDef {
 	spawns?: ScriptedSpawn[];
 }
 
+export interface Season {
+	id: number;
+	name: string;
+	description: string;
+	levels: LevelDef[];
+}
+
 export const LEVELS: LevelDef[] = [
 	{
 		id: 1,
+		season: 1,
 		name: 'First Run',
 		description: 'Easy forest. Survive and score 20,000.',
 		seed: 1001,
@@ -58,6 +67,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 2,
+		season: 1,
 		name: 'Coin Hunter',
 		description: 'Collect 20 coins while dodging trees.',
 		seed: 2002,
@@ -69,6 +79,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 3,
+		season: 1,
 		name: 'Seeing Red',
 		description: 'Red coins are rare and worth 5,000 points. Find 2.',
 		seed: 3003,
@@ -85,6 +96,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 4,
+		season: 1,
 		name: 'Dense Forest',
 		description: 'Trees pack tight. Survive long enough to score 30,000.',
 		seed: 4004,
@@ -96,6 +108,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 5,
+		season: 1,
 		name: 'Burn It Down',
 		description: 'Collect flamethrowers and clear the path. Use fire 3 times.',
 		seed: 5005,
@@ -113,6 +126,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 6,
+		season: 1,
 		name: 'Blue Streak',
 		description: 'Blue coins hide in tricky spots. Grab 5 of them.',
 		seed: 6006,
@@ -132,6 +146,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 7,
+		season: 1,
 		name: 'Fogbound',
 		description: 'Visibility is low. Score 35,000 blind.',
 		seed: 7007,
@@ -143,6 +158,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 8,
+		season: 1,
 		name: 'Red Rush',
 		description: 'Dense forest, big trees. Hunt down 3 red coins.',
 		seed: 8008,
@@ -160,6 +176,7 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 9,
+		season: 1,
 		name: 'Inferno',
 		description: 'Maximum density. Burn your way through — 5 flamethrowers.',
 		seed: 9009,
@@ -179,12 +196,13 @@ export const LEVELS: LevelDef[] = [
 	},
 	{
 		id: 10,
+		season: 1,
 		name: 'The Gauntlet',
-		description: 'Everything at max. Score 100K to survive.',
+		description: 'Everything at max. Score 40K to survive.',
 		seed: 10010,
 		totalRows: 200,
 		objectives: [
-			{ type: 'score', target: 100000, label: 'Score 100,000' },
+			{ type: 'score', target: 40000, label: 'Score 40,000' },
 		],
 		initial: { treePresenceProb: 0.55, maxTreeSize: 1.25, fogDistance: 15000 },
 		spawns: [
@@ -195,6 +213,20 @@ export const LEVELS: LevelDef[] = [
 		],
 	},
 ];
+
+export const SEASONS: Season[] = [
+	{
+		id: 1,
+		name: 'Season 1: Winter Forest',
+		description: 'Master the frozen trails. 10 levels of increasing difficulty.',
+		levels: LEVELS.filter(l => l.season === 1),
+	},
+];
+
+/** Get the season a level belongs to. */
+export function getSeasonForLevel(levelId: number): Season | undefined {
+	return SEASONS.find(s => s.levels.some(l => l.id === levelId));
+}
 
 /** Check if all objectives are met. */
 export function checkObjectives(level: LevelDef, state: {

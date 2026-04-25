@@ -321,7 +321,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			`ws: <b style="color:${wsColor}">${wsState}</b><br>` +
 			`<span style="font-size:12px;color:#666">poll: ${lastPollInfo}</span>`;
 	}
-	setInterval(updateDebugHud, 500);
+	const debugHudInterval = setInterval(updateDebugHud, 500);
 
 	function setPhase(next: ClientPhase) {
 		if (phase === next) return;
@@ -708,7 +708,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 			`<div style="font-size:32px;font-weight:bold;color:#f97316;margin-top:12px">${remaining}s</div>`,
 		);
 	}
-	setInterval(() => { if (phase === 'waiting' && !seriesResultBanner) updateWaitingOverlay(); }, 500);
+	const waitingInterval = setInterval(() => { if (phase === 'waiting' && !seriesResultBanner) updateWaitingOverlay(); }, 500);
 
 	/** Transition to countdown. Single-entry — second call is always a no-op. */
 	let countdownLastShown = -1;

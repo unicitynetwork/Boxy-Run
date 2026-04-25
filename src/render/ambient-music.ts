@@ -18,7 +18,7 @@ function debugAudio(msg: string): void {
 	console.log('[music] ' + msg);
 }
 
-const GAME_TRACK = '/music/surpass.mp3';
+const GAME_TRACK = '/music/soundtrack.mp3';
 
 let gainNode: GainNode | null = null;
 let sourceNode: AudioBufferSourceNode | null = null;
@@ -99,6 +99,8 @@ export function startAmbientMusic(): void {
 
 let pendingPlay = false;
 
+const CROSSFADE_DURATION = 3; // seconds
+
 function startPlayback(): void {
 	if (!audioBuffer || playing) return;
 	if (!isAudioReady()) return;
@@ -117,16 +119,55 @@ function startPlayback(): void {
 
 	sourceNode = ctx.createBufferSource();
 	sourceNode.buffer = audioBuffer;
-	sourceNode.loop = true;
+	sourceNode.loop = false; // we handle looping manually for crossfade
 	sourceNode.connect(gainNode);
 	sourceNode.start();
 	playing = true;
-	// Start at audible volume immediately — don't wait for slow ramp
+	// Start at audible volume immediately
 	if (!musicMuted) gainNode.gain.value = 0.3;
 	debugAudio('playback started, muted=' + musicMuted + ' gain=' + gainNode.gain.value);
 
-	// Ensure mute is respected
 	if (musicMuted) gainNode.gain.value = 0;
+
+	// Schedule crossfade loop
+	scheduleCrossfade(ctx);
+}
+
+function scheduleCrossfade(ctx: AudioContext): void {
+	if (!audioBuffer) return;
+	const duration = audioBuffer.duration;
+	const fadeStart = (duration - CROSSFADE_DURATION) * 1000;
+	if (fadeStart <= 0) return; // track too short for crossfade
+
+	setTimeout(() => {
+		if (!playing || !audioBuffer || !gainNode) return;
+
+		// Create new source that starts as this one fades out
+		const newGain = ctx.createGain();
+		newGain.gain.setValueAtTime(0, ctx.currentTime);
+		const targetGain = musicMuted ? 0 : gainNode.gain.value;
+		newGain.gain.linearRampToValueAtTime(targetGain, ctx.currentTime + CROSSFADE_DURATION);
+		newGain.connect(ctx.destination);
+
+		const newSource = ctx.createBufferSource();
+		newSource.buffer = audioBuffer;
+		newSource.loop = false;
+		newSource.connect(newGain);
+		newSource.start();
+
+		// Fade out current
+		gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + CROSSFADE_DURATION);
+
+		// After crossfade completes, swap references
+		setTimeout(() => {
+			if (sourceNode) { try { sourceNode.stop(); } catch {} }
+			sourceNode = newSource;
+			gainNode!.disconnect();
+			gainNode = newGain;
+			// Schedule next crossfade
+			scheduleCrossfade(ctx);
+		}, CROSSFADE_DURATION * 1000);
+	}, fadeStart);
 }
 
 // Safari workaround: if decoding finishes outside a gesture, defer

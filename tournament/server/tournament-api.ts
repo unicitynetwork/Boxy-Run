@@ -447,6 +447,13 @@ export async function handleTournamentApi(
 				json(res, 400, { error: 'nametag_required' });
 				return true;
 			}
+			// Validate caller is a participant in this match
+			const { getMatch } = await import('./tournament-db');
+			const match = await getMatch(matchId);
+			if (!match || (match.player_a !== nametag && match.player_b !== nametag)) {
+				json(res, 403, { error: 'not_in_match', message: 'You are not in this match' });
+				return true;
+			}
 			const { handleDone } = await import('./tournament-ws');
 			await handleDone(nametag, matchId);
 			json(res, 200, { status: 'ok' });
