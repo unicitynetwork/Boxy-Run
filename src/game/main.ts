@@ -721,7 +721,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		setPhase('countdown');
 		countdownLastShown = -1;
 		function tick() {
-			if (phase !== 'countdown') return; // phase changed under us — bail
+			if (phase !== 'countdown') { hideOverlay(); return; } // phase changed under us — clean up
 			const ms = countdownStart - Date.now();
 			const currentSec = Math.ceil(ms / 1000);
 			if (ms > 1000) {
@@ -999,9 +999,10 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 					setPhase('done_sent');
 					sendMatchDone();
 					// Safety: if the poll never detects the result (server
-					// down, network issue), stop ticking after 45s.
+					// down, network issue), show error after 2 minutes.
+					const diedAtGame = currentGameNumber;
 					setTimeout(() => {
-						if (phase === 'done_sent') {
+						if (phase === 'done_sent' && currentGameNumber === diedAtGame) {
 							setPhase('series_end');
 							const backBtn = `<a href="${backUrl}" style="${BTN_STYLE}font-size:13px;background:transparent;color:#c8d0dc;border-color:rgba(95,234,255,0.3)">BACK</a>`;
 							showOverlay(

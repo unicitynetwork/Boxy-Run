@@ -210,11 +210,19 @@ async function runEffect(
 						bestOf: state.bestOf,
 					});
 				}
-				// Schedule series advance after delay.
+				// Schedule series advance after delay. Guard against state
+				// being deleted between timeout firing and event applying
+				// (e.g. server restart, match cleanup).
+				const advanceMatchId = state.matchId;
 				setTimeout(() => {
+					const current = states.get(advanceMatchId);
+					if (!current || current.phase === 'resolved') {
+						console.warn(`[machine advance] ${advanceMatchId} already resolved/gone, skipping`);
+						return;
+					}
 					const newSeed = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
 					applyEvent(
-						state.matchId,
+						advanceMatchId,
 						{ type: 'advance_to_next_game', now: now(), newSeed },
 						io,
 					).catch((e) => console.error('[machine advance] error:', e));

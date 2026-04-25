@@ -114,56 +114,50 @@ export function installTouchControls(opts: {
 	onAction: (a: CharacterAction) => void;
 	onStart: () => void;
 	isPlaying: () => boolean;
-}): void {
+}): () => void {
 	let startX = 0;
 	let startY = 0;
 	let startTime = 0;
 
-	// Prevent ALL touch scrolling/pull-to-refresh on the game page.
-	// Without this, swiping near screen edges triggers browser navigation.
-	document.addEventListener(
-		'touchmove',
-		(e) => { e.preventDefault(); },
-		{ passive: false },
-	);
+	const onMove = (e: TouchEvent) => { e.preventDefault(); };
+	const onStart = (e: TouchEvent) => {
+		if (!opts.isPlaying()) {
+			opts.onStart();
+			return;
+		}
+		const touch = e.touches[0];
+		startX = touch.clientX;
+		startY = touch.clientY;
+		startTime = Date.now();
+	};
+	const onEnd = (e: TouchEvent) => {
+		if (!opts.isPlaying()) return;
+		const touch = e.changedTouches[0];
+		const dx = touch.clientX - startX;
+		const dy = touch.clientY - startY;
+		const elapsed = Date.now() - startTime;
+		const absDx = Math.abs(dx);
+		const absDy = Math.abs(dy);
 
-	document.addEventListener(
-		'touchstart',
-		(e) => {
-			if (!opts.isPlaying()) {
-				opts.onStart();
-				return;
-			}
-			const touch = e.touches[0];
-			startX = touch.clientX;
-			startY = touch.clientY;
-			startTime = Date.now();
-		},
-		{ passive: true },
-	);
+		if (absDx < SWIPE_THRESHOLD && absDy < SWIPE_THRESHOLD && elapsed < TAP_THRESHOLD_MS) {
+			opts.onAction('up');
+		} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
+			opts.onAction('up');
+		} else if (absDy > absDx && dy > SWIPE_THRESHOLD) {
+			opts.onAction('fire');
+		} else if (absDx > absDy) {
+			if (dx < -SWIPE_THRESHOLD) opts.onAction('left');
+			else if (dx > SWIPE_THRESHOLD) opts.onAction('right');
+		}
+	};
 
-	document.addEventListener(
-		'touchend',
-		(e) => {
-			if (!opts.isPlaying()) return;
-			const touch = e.changedTouches[0];
-			const dx = touch.clientX - startX;
-			const dy = touch.clientY - startY;
-			const elapsed = Date.now() - startTime;
-			const absDx = Math.abs(dx);
-			const absDy = Math.abs(dy);
+	document.addEventListener('touchmove', onMove, { passive: false } as any);
+	document.addEventListener('touchstart', onStart, { passive: true } as any);
+	document.addEventListener('touchend', onEnd, { passive: true } as any);
 
-			if (absDx < SWIPE_THRESHOLD && absDy < SWIPE_THRESHOLD && elapsed < TAP_THRESHOLD_MS) {
-				opts.onAction('up'); // tap = jump
-			} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
-				opts.onAction('up'); // swipe up = jump
-			} else if (absDy > absDx && dy > SWIPE_THRESHOLD) {
-				opts.onAction('fire'); // swipe down = flamethrower
-			} else if (absDx > absDy) {
-				if (dx < -SWIPE_THRESHOLD) opts.onAction('left');
-				else if (dx > SWIPE_THRESHOLD) opts.onAction('right');
-			}
-		},
-		{ passive: true },
-	);
+	return () => {
+		document.removeEventListener('touchmove', onMove);
+		document.removeEventListener('touchstart', onStart);
+		document.removeEventListener('touchend', onEnd);
+	};
 }

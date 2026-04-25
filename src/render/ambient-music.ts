@@ -133,40 +133,43 @@ function startPlayback(): void {
 	scheduleCrossfade(ctx);
 }
 
+let crossfadeTimer: ReturnType<typeof setTimeout> | null = null;
+
 function scheduleCrossfade(ctx: AudioContext): void {
-	if (!audioBuffer) return;
+	if (!audioBuffer || !gainNode) return;
 	const duration = audioBuffer.duration;
 	const fadeStart = (duration - CROSSFADE_DURATION) * 1000;
-	if (fadeStart <= 0) return; // track too short for crossfade
+	if (fadeStart <= 0) return;
 
-	setTimeout(() => {
+	if (crossfadeTimer) clearTimeout(crossfadeTimer);
+	crossfadeTimer = setTimeout(() => {
+		crossfadeTimer = null;
 		if (!playing || !audioBuffer || !gainNode) return;
 
-		// Create new source that starts as this one fades out
-		const newGain = ctx.createGain();
-		newGain.gain.setValueAtTime(0, ctx.currentTime);
-		const targetGain = musicMuted ? 0 : gainNode.gain.value;
-		newGain.gain.linearRampToValueAtTime(targetGain, ctx.currentTime + CROSSFADE_DURATION);
-		newGain.connect(ctx.destination);
+		const oldSource = sourceNode;
+		const currentGain = gainNode.gain.value;
 
+		// Create new source connected to the SAME gain node
 		const newSource = ctx.createBufferSource();
 		newSource.buffer = audioBuffer;
 		newSource.loop = false;
-		newSource.connect(newGain);
-		newSource.start();
+		newSource.connect(gainNode);
 
-		// Fade out current
-		gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + CROSSFADE_DURATION);
+		// Brief dip and restore for the crossfade effect
+		gainNode.gain.setValueAtTime(currentGain, ctx.currentTime);
+		gainNode.gain.linearRampToValueAtTime(currentGain * 0.3, ctx.currentTime + CROSSFADE_DURATION * 0.5);
+		gainNode.gain.linearRampToValueAtTime(currentGain, ctx.currentTime + CROSSFADE_DURATION);
 
-		// After crossfade completes, swap references
+		newSource.start(0, 0); // start from beginning
+		sourceNode = newSource;
+
+		// Stop old source after crossfade
 		setTimeout(() => {
-			if (sourceNode) { try { sourceNode.stop(); } catch {} }
-			sourceNode = newSource;
-			gainNode!.disconnect();
-			gainNode = newGain;
-			// Schedule next crossfade
-			scheduleCrossfade(ctx);
+			if (oldSource) { try { oldSource.stop(); } catch {} }
 		}, CROSSFADE_DURATION * 1000);
+
+		// Schedule next crossfade
+		scheduleCrossfade(ctx);
 	}, fadeStart);
 }
 

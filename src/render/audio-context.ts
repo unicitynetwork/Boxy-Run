@@ -77,17 +77,22 @@ export function attachUnlockListeners(): void {
 	if (listenersAttached) return;
 	listenersAttached = true;
 
+	let unlockCount = 0;
+	const removeAll = () => {
+		document.removeEventListener('touchend', handler, true);
+		document.removeEventListener('touchstart', handler, true);
+		document.removeEventListener('click', handler, true);
+		document.removeEventListener('keydown', handler, true);
+	};
 	const handler = (e: Event) => {
 		debugAudio('gesture: ' + e.type);
 		unlockAudio();
 		// Trigger deferred music playback if pending (Safari workaround)
 		for (const cb of gestureCallbacks) { try { cb(); } catch {} }
-		// Check if we can remove listeners
-		if (ctx && ctx.state === 'running') {
-			document.removeEventListener('touchend', handler, true);
-			document.removeEventListener('touchstart', handler, true);
-			document.removeEventListener('click', handler, true);
-			document.removeEventListener('keydown', handler, true);
+		unlockCount++;
+		// Remove after context is running, OR after 10 attempts (failsafe)
+		if ((ctx && ctx.state === 'running') || unlockCount >= 10) {
+			removeAll();
 		}
 	};
 
