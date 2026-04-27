@@ -214,9 +214,13 @@
 		let currentPage = 1;
 		const pageSize = 20;
 		
-		// Initialize date picker
+		// Initialize date picker. DAILY rows have a 7-day TTL (backend/src/app.py),
+		// so anything older than 7 days has been auto-purged by DynamoDB.
+		const minDate = new Date();
+		minDate.setDate(minDate.getDate() - 7);
 		document.getElementById('date-picker').value = currentDate;
 		document.getElementById('date-picker').max = currentDate;
+		document.getElementById('date-picker').min = minDate.toISOString().split('T')[0];
 		
 		// Event listeners
 		document.getElementById('date-picker').addEventListener('change', function(e) {
