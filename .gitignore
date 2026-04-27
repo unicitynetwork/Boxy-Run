@@ -1,4 +1,4 @@
 node_modules/
 js/sphere-connect.js
 dist/
-backend/
+aws-backend/
