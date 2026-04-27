@@ -442,19 +442,19 @@ function World() {
 						if ((key == up || key == w) && !paused) {
 							character.onUpKeyPressed();
 							SoundSystem.playJump();
-							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
+							if (gameStartTime && gameplayEvents.length < 5000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
 							}
 						}
 						if ((key == left || key == a) && !paused) {
 							character.onLeftKeyPressed();
-							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
+							if (gameStartTime && gameplayEvents.length < 5000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
 							}
 						}
 						if ((key == right || key == d) && !paused) {
 							character.onRightKeyPressed();
-							if (gameStartTime && gameplayEvents.length < 1000) { // Limit array size
+							if (gameStartTime && gameplayEvents.length < 5000) { // Limit array size
 								gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
 							}
 						}
@@ -591,27 +591,27 @@ function World() {
 					// Tap → jump
 					character.onUpKeyPressed();
 					SoundSystem.playJump();
-					if (gameStartTime && gameplayEvents.length < 1000) {
+					if (gameStartTime && gameplayEvents.length < 5000) {
 						gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
 					}
 				} else if (absDy > absDx && dy < -SWIPE_THRESHOLD) {
 					// Swipe up → jump
 					character.onUpKeyPressed();
 					SoundSystem.playJump();
-					if (gameStartTime && gameplayEvents.length < 1000) {
+					if (gameStartTime && gameplayEvents.length < 5000) {
 						gameplayEvents.push({t: Date.now() - gameStartTime, e: 'jump'});
 					}
 				} else if (absDx > absDy) {
 					if (dx < -SWIPE_THRESHOLD) {
 						// Swipe left
 						character.onLeftKeyPressed();
-						if (gameStartTime && gameplayEvents.length < 1000) {
+						if (gameStartTime && gameplayEvents.length < 5000) {
 							gameplayEvents.push({t: Date.now() - gameStartTime, e: 'left'});
 						}
 					} else if (dx > SWIPE_THRESHOLD) {
 						// Swipe right
 						character.onRightKeyPressed();
-						if (gameStartTime && gameplayEvents.length < 1000) {
+						if (gameStartTime && gameplayEvents.length < 5000) {
 							gameplayEvents.push({t: Date.now() - gameStartTime, e: 'right'});
 						}
 					}
@@ -936,7 +936,7 @@ function World() {
 				if (mobileCoinsEl) mobileCoinsEl.querySelector('strong').innerHTML = coinCount;
 				SoundSystem.playCoin();
 				// Track coin collection event (limit array size)
-				if (gameplayEvents.length < 1000) {
+				if (gameplayEvents.length < 5000) {
 					gameplayEvents.push({t: Date.now() - gameStartTime, e: 'coin'});
 				}
 				// Remove the coin from the array immediately
@@ -1420,11 +1420,9 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
         PlayerData.setHighScore(score, coins);
     }
     
-    // Always submit to backend - the backend will decide if it's a daily high score
-    // Generate gameplay proof with actual events
-    var gameplayHash = generateGameplayHash(score, coins, gameplayEvents || []);
-    
-    // Submit to backend
+    // Submit to backend; the backend decides if it's a daily high score
+    // and runs anti-cheat validation against the event stream.
+    var durationMs = gameStartTime ? Date.now() - gameStartTime : 0;
     fetch('https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod/scores', {
             method: 'POST',
             headers: {
@@ -1434,8 +1432,8 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
                 nickname: nickname,
                 score: score,
                 coins: coins,
-                gameplay_hash: gameplayHash,
-                game_duration: gameStartTime ? Math.floor((Date.now() - gameStartTime) / 1000) : 0
+                game_duration_ms: durationMs,
+                events: gameplayEvents || []
             })
         })
         .then(function(response) {
@@ -1448,51 +1446,6 @@ function submitScore(nickname, score, coins, gameplayEvents, gameStartTime) {
             console.error('Error submitting score:', error);
             // Don't show error to user, game continues normally
         });
-}
-
-/**
- * Generates a simple hash of gameplay to help verify legitimate play
- */
-function generateGameplayHash(score, coins, events) {
-    // Use provided events or empty array
-    events = events || [];
-    
-    // Count different event types
-    var eventCounts = { jump: 0, left: 0, right: 0, coin: 0 };
-    for (var i = 0; i < events.length; i++) {
-        var eventType = events[i].e;
-        if (eventCounts[eventType] !== undefined) {
-            eventCounts[eventType]++;
-        }
-    }
-    
-    // Build hash data with more gameplay information
-    var hashData = [
-        score,
-        coins,
-        events.length,
-        eventCounts.jump,
-        eventCounts.left,
-        eventCounts.right,
-        eventCounts.coin
-    ].join('-');
-    
-    // Add timing data from first and last events
-    if (events.length > 0) {
-        var firstEvent = events[0];
-        var lastEvent = events[events.length - 1];
-        hashData += '-' + Math.floor(firstEvent.t / 1000) + '-' + Math.floor(lastEvent.t / 1000);
-    }
-    
-    // Simple hash function
-    var hash = 0;
-    for (var i = 0; i < hashData.length; i++) {
-        var char = hashData.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
-    }
-    
-    return Math.abs(hash).toString(16);
 }
 
 /**
@@ -1575,10 +1528,16 @@ function hideScoreFeatures() {
  */
 var PlayerData = {
     getNickname: function() {
-        if (window.SphereWallet && window.SphereWallet.identity) {
-            return window.SphereWallet.identity.nametag || null;
-        }
-        return null;
+        // Mirrors normalizeNametag() in @unicitylabs/sphere-sdk so the form
+        // we submit and compare against equals what the server canonicalises.
+        if (!window.SphereWallet || !window.SphereWallet.identity) return null;
+        var tag = window.SphereWallet.identity.nametag;
+        if (!tag) return null;
+        var s = tag.trim();
+        if (s.charAt(0) === '@') s = s.slice(1);
+        s = s.toLowerCase();
+        if (s.endsWith('@unicity')) s = s.slice(0, -'@unicity'.length);
+        return s || null;
     },
     
     getHighScore: function() {

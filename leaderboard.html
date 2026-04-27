@@ -199,6 +199,15 @@
 	<script>
 		// API endpoint
 		const API_BASE = 'https://vj38jxacz3.execute-api.eu-west-1.amazonaws.com/prod';
+
+		// Escape user-supplied strings before interpolating into innerHTML.
+		// Server-side validation restricts new nicknames to a safe charset, but
+		// older entries predate that rule, so escape at render time too.
+		function escapeHtml(s) {
+			return String(s).replace(/[&<>"']/g, function(c) {
+				return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+			});
+		}
 		
 		// State
 		let currentDate = new Date().toISOString().split('T')[0];
@@ -250,7 +259,7 @@
 								${data.leaderboard.map((entry, idx) => `
 									<tr>
 										<td>${idx + 1}</td>
-										<td>${entry.nickname}</td>
+										<td>${escapeHtml(entry.nickname)}</td>
 										<td>${entry.score.toLocaleString()}</td>
 										<td>${new Date(entry.timestamp).toLocaleDateString()}</td>
 									</tr>
@@ -304,7 +313,7 @@
 								${data.leaderboard.map(entry => `
 									<tr>
 										<td>${entry.rank}</td>
-										<td>${entry.nickname}</td>
+										<td>${escapeHtml(entry.nickname)}</td>
 										<td>${entry.score.toLocaleString()}</td>
 										<td>${entry.coins}</td>
 										<td>${new Date(entry.timestamp).toLocaleTimeString()}</td>
