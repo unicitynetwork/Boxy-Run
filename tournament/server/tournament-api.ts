@@ -24,7 +24,12 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'boxyrun-admin-2024';
 // of all player balances + unpaid prize pools MUST equal this wallet's
 // on-chain balance. Any drift is a bug (or fraud) and surfaces via the
 // admin balance-sheet endpoint.
-const ARENA_WALLET = process.env.ARENA_WALLET || '@boxyrunarena';
+//
+// Reads `ARENA_WALLET_NAMETAG` — the SAME env var the arena watcher uses
+// to identify itself and the HTML injector uses to tell the client where
+// to send transfers. One source of truth across the whole system; the
+// older `ARENA_WALLET` is kept as a fallback for back-compat.
+const ARENA_WALLET = process.env.ARENA_WALLET_NAMETAG || process.env.ARENA_WALLET || '@boxyrunarena';
 
 function json(res: ServerResponse, status: number, body: unknown): void {
 	const data = JSON.stringify(body);

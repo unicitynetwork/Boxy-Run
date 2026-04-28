@@ -1,8 +1,13 @@
 node_modules/
 js/sphere-connect.js
 js/game.js
+js/game-babylon.js
 js/challenge-page.js
 dist/
+
+# macOS Finder noise
+.DS_Store
+**/.DS_Store
 
 # Local Netlify folder
 .netlify
@@ -13,5 +18,16 @@ local.db
 arena-wallet.json
 arena-wallet.json.bak
 arena-data/
+arena-staging.json
+arena-staging-data/
+boxyrunstaging.json
+boxyrunarena.json
+boxyrunmaster.json
+arena-test-data/
+arena-master-data/
+
+# Bulk Sphere ID generation tooling — standalone project, kept out of
+# this repo entirely. Output files (mnemonics) MUST never be committed.
+sphere-id-generator/
 test-results/
 playwright-report/

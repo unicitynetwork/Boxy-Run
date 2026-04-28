@@ -8,6 +8,7 @@
 export {
 	createScene,
 	renderFrame,
+	disposeScene,
 	type SceneHandle,
 } from '../render-babylon/scene';
 

@@ -29,8 +29,8 @@ test('admin: valid auth → balance-sheet renders with system totals', async ({ 
 	const server = await startServer();
 	try {
 		// Seed some state so the view has numbers to show
-		await api(server, '/api/deposit', { method: 'POST', body: { nametag: 'alice', amount: 500 } });
-		await api(server, '/api/deposit', { method: 'POST', body: { nametag: 'bob', amount: 300 } });
+		await api(server, '/api/admin/credit', { method: 'POST', body: { nametag: 'alice', amount: 500 }, asAdmin: true });
+		await api(server, '/api/admin/credit', { method: 'POST', body: { nametag: 'bob', amount: 300 }, asAdmin: true });
 		await api(server, '/api/tournaments', {
 			method: 'POST', asAdmin: true,
 			body: { id: 'admin-bs-t', name: 'Admin Test', prizePool: 100, entryFee: 50 },

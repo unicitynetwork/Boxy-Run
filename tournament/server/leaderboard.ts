@@ -20,6 +20,15 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 	res.end(data);
 }
 
+/** Deterministic daily seed from a date string like "2026-04-25". */
+function dailySeedForDate(date: string): number {
+	let hash = 0;
+	for (let i = 0; i < date.length; i++) {
+		hash = ((hash << 5) - hash + date.charCodeAt(i)) | 0;
+	}
+	return hash >>> 0;
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
@@ -33,10 +42,32 @@ const submitScore: Handler = async (req, res) => {
 	await ensureSchema();
 	const db = getDb();
 	const body = JSON.parse(await readBody(req));
-	const { nickname, score, coins } = body as { nickname: string; score: number; coins: number };
+	const { nickname, seed, inputs } = body as {
+		nickname: string;
+		seed: number;
+		inputs: Array<{ tick: number; payload: string }>;
+	};
 
-	if (!nickname || typeof score !== 'number') {
-		json(res, 400, { error: 'invalid_request', message: 'nickname and score required' });
+	if (!nickname || typeof seed !== 'number' || !Array.isArray(inputs)) {
+		json(res, 400, { error: 'invalid_request', message: 'nickname, seed and inputs required' });
+		return;
+	}
+	// Sanity: cap input list size to prevent abuse (long fake input streams)
+	if (inputs.length > 50000) {
+		json(res, 400, { error: 'too_many_inputs', message: 'input list too large' });
+		return;
+	}
+
+	// Server-authoritative replay — derive score+coins from the seed+inputs
+	const { replayScoreAndCoins } = await import('./tournament-logic');
+	let score: number, coins: number;
+	try {
+		const result = replayScoreAndCoins(seed >>> 0, inputs);
+		score = result.score;
+		coins = result.coins;
+	} catch (err) {
+		console.warn('[scores] replay failed', err);
+		json(res, 400, { error: 'replay_failed', message: 'Could not verify gameplay' });
 		return;
 	}
 
@@ -60,7 +91,7 @@ const submitScore: Handler = async (req, res) => {
 	await db.execute({ sql: 'DELETE FROM scores WHERE nickname = ? AND date = ?', args: [nickname, today] });
 	await db.execute({
 		sql: 'INSERT INTO scores (nickname, score, coins, date, timestamp, gameplay_hash, game_duration) VALUES (?, ?, ?, ?, ?, ?, ?)',
-		args: [nickname, score, coins ?? 0, today, timestamp, body.gameplay_hash ?? '', body.game_duration ?? 0],
+		args: [nickname, score, coins, today, timestamp, '', inputs.length],
 	});
 
 	// Update all-time
@@ -68,12 +99,12 @@ const submitScore: Handler = async (req, res) => {
 	if (at.rows.length === 0) {
 		await db.execute({
 			sql: 'INSERT INTO alltime (nickname, score, coins, date, timestamp) VALUES (?, ?, ?, ?, ?)',
-			args: [nickname, score, coins ?? 0, today, timestamp],
+			args: [nickname, score, coins, today, timestamp],
 		});
 	} else if ((at.rows[0].score as number) < score) {
 		await db.execute({
 			sql: 'UPDATE alltime SET score = ?, coins = ?, date = ?, timestamp = ? WHERE nickname = ?',
-			args: [score, coins ?? 0, today, timestamp, nickname],
+			args: [score, coins, today, timestamp, nickname],
 		});
 	}
 
@@ -86,7 +117,7 @@ const submitScore: Handler = async (req, res) => {
 	json(res, 200, {
 		status: 'accepted',
 		message: 'New daily high score recorded',
-		data: { previous_best: existing.rows.length > 0 ? existing.rows[0].score : 0, new_best: score, rank },
+		data: { previous_best: existing.rows.length > 0 ? existing.rows[0].score : 0, new_best: score, coins, rank },
 	});
 };
 
@@ -161,18 +192,27 @@ const historyLeaderboard: Handler = async (_req, res, url) => {
 	});
 };
 
-const recordDeposit: Handler = async (req, res) => {
+/**
+ * Admin-only ledger adjuster. Used by tests for fixture seeding and by
+ * operators for manual reconciliation. NOT exposed to clients — real
+ * deposits land via the Sphere arena watcher (`arena-watcher.ts`), which
+ * mirrors actual on-chain transfers into `player_transactions`.
+ */
+const adminCredit: Handler = async (req, res) => {
+	if (req.headers['x-admin-key'] !== (process.env.ADMIN_KEY || 'boxyrun-admin-2024')) {
+		json(res, 403, { error: 'Unauthorized' });
+		return;
+	}
 	await ensureSchema();
 	const db = getDb();
 	const body = JSON.parse(await readBody(req));
-	const { nametag, amount } = body as { nametag: string; amount: number };
+	const { nametag, amount, type, memo } = body as { nametag: string; amount: number; type?: string; memo?: string };
 
 	if (!nametag || typeof amount !== 'number' || amount === 0) {
 		json(res, 400, { error: 'nametag and amount required' });
 		return;
 	}
 
-	// For deductions, check sufficient balance
 	if (amount < 0) {
 		const cur = await db.execute({
 			sql: 'SELECT COALESCE(SUM(amount), 0) as balance FROM player_transactions WHERE nametag = ?',
@@ -186,11 +226,11 @@ const recordDeposit: Handler = async (req, res) => {
 	}
 
 	const timestamp = new Date().toISOString();
-	const type = amount > 0 ? 'deposit' : 'entry_fee';
-	const memo = amount > 0 ? 'UCT deposit' : 'Game entry fee';
+	const txType = type || (amount > 0 ? 'deposit' : 'entry_fee');
+	const txMemo = memo || (amount > 0 ? 'admin credit' : 'admin debit');
 	await db.execute({
 		sql: 'INSERT INTO player_transactions (nametag, amount, type, memo, timestamp) VALUES (?, ?, ?, ?, ?)',
-		args: [nametag, amount, type, memo, timestamp],
+		args: [nametag, amount, txType, txMemo, timestamp],
 	});
 
 	const bal = await db.execute({
@@ -281,8 +321,11 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			await historyLeaderboard(req, res, url);
 			return true;
 		}
-		if (path === '/api/deposit' && req.method === 'POST') {
-			await recordDeposit(req, res, url);
+		// Admin-only ledger seed/adjust — replaces the old public /api/deposit.
+		// Real deposits flow through the Sphere arena watcher; this endpoint
+		// is for tests and manual reconciliation.
+		if (path === '/api/admin/credit' && req.method === 'POST') {
+			await adminCredit(req, res, url);
 			return true;
 		}
 		if (path === '/api/admin/wipe-leaderboard' && req.method === 'POST') {
@@ -295,6 +338,158 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			await db.execute('DELETE FROM scores');
 			await db.execute('DELETE FROM alltime');
 			json(res, 200, { status: 'ok', message: 'Leaderboard wiped (scores + alltime)' });
+			return true;
+		}
+		// Targeted delete — kill a single player's entries across all
+		// leaderboards. Used to remove cheated scores.
+		if (path === '/api/admin/delete-player' && req.method === 'POST') {
+			if (req.headers['x-admin-key'] !== (process.env.ADMIN_KEY || 'boxyrun-admin-2024')) {
+				json(res, 403, { error: 'Unauthorized' });
+				return true;
+			}
+			await ensureSchema();
+			const db = getDb();
+			const body = JSON.parse(await readBody(req));
+			const nickname = String(body.nickname || '').trim();
+			if (!nickname) {
+				json(res, 400, { error: 'invalid_request', message: 'nickname required' });
+				return true;
+			}
+			const a = await db.execute({ sql: 'DELETE FROM scores WHERE nickname = ?', args: [nickname] });
+			const b = await db.execute({ sql: 'DELETE FROM alltime WHERE nickname = ?', args: [nickname] });
+			const c = await db.execute({ sql: 'DELETE FROM daily_challenge_scores WHERE nickname = ?', args: [nickname] });
+			json(res, 200, {
+				status: 'ok',
+				deleted: { scores: a.rowsAffected, alltime: b.rowsAffected, daily: c.rowsAffected },
+			});
+			return true;
+		}
+		// Inspect: per-player ledger summary (for spotting forgeries)
+		if (path === '/api/admin/ledger-summary' && req.method === 'GET') {
+			if (req.headers['x-admin-key'] !== (process.env.ADMIN_KEY || 'boxyrun-admin-2024')) {
+				json(res, 403, { error: 'Unauthorized' });
+				return true;
+			}
+			await ensureSchema();
+			const db = getDb();
+			const rows = await db.execute(
+				`SELECT nametag,
+					COALESCE(SUM(CASE WHEN type='deposit' THEN amount ELSE 0 END), 0) as deposits,
+					SUM(CASE WHEN type='deposit' THEN 1 ELSE 0 END) as depositCount,
+					MAX(CASE WHEN type='deposit' THEN amount ELSE 0 END) as biggestDeposit,
+					COALESCE(SUM(amount), 0) as balance
+				 FROM player_transactions
+				 GROUP BY nametag
+				 ORDER BY deposits DESC`,
+			);
+			json(res, 200, {
+				players: rows.rows.map(r => ({
+					nametag: r.nametag,
+					deposits: Number(r.deposits),
+					depositCount: Number(r.depositCount),
+					biggestDeposit: Number(r.biggestDeposit),
+					balance: Number(r.balance),
+				})),
+			});
+			return true;
+		}
+		// Wipe the player_transactions ledger entirely (forged credits etc.)
+		if (path === '/api/admin/wipe-transactions' && req.method === 'POST') {
+			if (req.headers['x-admin-key'] !== (process.env.ADMIN_KEY || 'boxyrun-admin-2024')) {
+				json(res, 403, { error: 'Unauthorized' });
+				return true;
+			}
+			await ensureSchema();
+			const db = getDb();
+			await db.execute('DELETE FROM player_transactions');
+			json(res, 200, { status: 'ok', message: 'player_transactions wiped' });
+			return true;
+		}
+		// Targeted: delete a single player's transactions
+		if (path === '/api/admin/delete-transactions' && req.method === 'POST') {
+			if (req.headers['x-admin-key'] !== (process.env.ADMIN_KEY || 'boxyrun-admin-2024')) {
+				json(res, 403, { error: 'Unauthorized' });
+				return true;
+			}
+			await ensureSchema();
+			const db = getDb();
+			const body = JSON.parse(await readBody(req));
+			const nametag = String(body.nametag || '').trim();
+			if (!nametag) {
+				json(res, 400, { error: 'invalid_request', message: 'nametag required' });
+				return true;
+			}
+			const r = await db.execute({ sql: 'DELETE FROM player_transactions WHERE nametag = ?', args: [nametag] });
+			json(res, 200, { status: 'ok', deleted: r.rowsAffected });
+			return true;
+		}
+		// Daily challenge — server-authoritative replay verification
+		if (path === '/api/daily-challenge/scores' && req.method === 'POST') {
+			await ensureSchema();
+			const db = getDb();
+			const body = JSON.parse(await readBody(req));
+			const nickname = String(body.nickname || '').trim();
+			const inputs = Array.isArray(body.inputs) ? body.inputs : null;
+			if (!nickname || !inputs) {
+				json(res, 400, { error: 'invalid_request', message: 'nickname and inputs required' });
+				return true;
+			}
+			if (inputs.length > 50000) {
+				json(res, 400, { error: 'too_many_inputs', message: 'input list too large' });
+				return true;
+			}
+			const today = new Date().toISOString().split('T')[0];
+			const date = String(body.date || today);
+			if (date !== today) {
+				json(res, 400, { error: 'wrong_date', message: 'Can only submit for today' });
+				return true;
+			}
+			// Recompute the seed for today server-side — clients can't lie
+			// about which seed they played (they'd just get score=0 for a
+			// mismatched seed).
+			const seed = dailySeedForDate(today);
+			let score: number, coins: number;
+			try {
+				const { replayScoreAndCoins } = await import('./tournament-logic');
+				const result = replayScoreAndCoins(seed, inputs);
+				score = result.score;
+				coins = result.coins;
+			} catch (err) {
+				console.warn('[daily] replay failed', err);
+				json(res, 400, { error: 'replay_failed', message: 'Could not verify gameplay' });
+				return true;
+			}
+			try {
+				await db.execute({
+					sql: 'INSERT INTO daily_challenge_scores (nickname, score, coins, date, timestamp) VALUES (?, ?, ?, ?, ?)',
+					args: [nickname, score, coins, today, new Date().toISOString()],
+				});
+				json(res, 200, { status: 'ok', date: today, score, coins });
+			} catch (err: any) {
+				if (err.message?.includes('UNIQUE')) {
+					json(res, 409, { error: 'already_played', message: 'You already played today\'s challenge' });
+				} else {
+					throw err;
+				}
+			}
+			return true;
+		}
+		if (path === '/api/daily-challenge/leaderboard' && req.method === 'GET') {
+			await ensureSchema();
+			const db = getDb();
+			const today = new Date().toISOString().split('T')[0];
+			const date = url.searchParams.get('date') || today;
+			const rows = await db.execute({
+				sql: 'SELECT nickname, score, coins, timestamp FROM daily_challenge_scores WHERE date = ? ORDER BY score DESC LIMIT 20',
+				args: [date],
+			});
+			json(res, 200, {
+				date,
+				seed: dailySeedForDate(date),
+				leaderboard: rows.rows.map((r, i) => ({
+					rank: i + 1, nickname: r.nickname, score: r.score, coins: r.coins, timestamp: r.timestamp,
+				})),
+			});
 			return true;
 		}
 		if (path === '/api/log' && req.method === 'POST') {

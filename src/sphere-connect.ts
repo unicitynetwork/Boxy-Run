@@ -19,7 +19,19 @@ const WALLET_URL = 'https://sphere.unicity.network';
 // The arena wallet is the single on-chain source of truth. Every UCT held
 // by a player on the game ledger corresponds to a UCT sitting in this wallet.
 // Distinct from any @boxyrun personal wallet to avoid co-mingling.
-const GAME_WALLET_ADDRESS = '@boxyrunarena';
+//
+// Resolved LAZILY (at deposit-time, not module-load-time) so staging and prod
+// can target different arena wallets: the server injects
+// `window.__BOXY_ARENA_WALLET` into the served HTML based on its own
+// ARENA_WALLET_NAMETAG env var. We must defer the read because this script
+// loads before the inline injection runs, so an eagerly-resolved const would
+// bake in the production fallback even on staging.
+function gameWalletAddress(): string {
+	if (typeof window !== 'undefined' && (window as any).__BOXY_ARENA_WALLET) {
+		return (window as any).__BOXY_ARENA_WALLET as string;
+	}
+	return '@boxyrunarena';
+}
 const ENTRY_FEE = 10;
 const COIN_ID = 'UCT';
 const UCT_COIN_ID_HEX = '455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89';
@@ -247,6 +259,10 @@ async function deposit(amount?: number): Promise<boolean> {
     return false;
   }
 
+  // Refresh balance before pre-flight check — stale cache from connect
+  // time can read 0 even when UCT has since arrived in the wallet.
+  await refreshBalance();
+
   if (state.balance !== null && state.balance < sendAmount) {
     state.error = `Insufficient balance. You need at least ${sendAmount} ${COIN_ID}.`;
     updateUI('connected');
@@ -260,7 +276,7 @@ async function deposit(amount?: number): Promise<boolean> {
       uctDecimals = UCT_DECIMALS;
     }
     await client.intent(INTENT_ACTIONS.SEND, {
-      to: GAME_WALLET_ADDRESS,
+      to: gameWalletAddress(),
       amount: sendAmount,
       coinId: uctCoinId,
       memo: 'Boxy Run entry fee',

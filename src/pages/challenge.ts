@@ -143,6 +143,7 @@ function handleMsg(msg: ServerMessage): void {
 		case 'challenge-start': {
 			clearBotPending();
 			clearLinkUI();
+			redirecting = true;
 			const p = new URLSearchParams({
 				tournament: '1', matchId: msg.matchId, seed: msg.seed,
 				side: msg.youAre, opponent: msg.opponent,
@@ -187,16 +188,11 @@ async function challengeBot(name: string): Promise<void> {
 	pendingBot = name;
 	renderBots();
 
-	const wagerInput = document.getElementById('wager-input') as HTMLInputElement | null;
-	const bestofInput = document.getElementById('bestof-input') as HTMLSelectElement | null;
-	const wager = parseInt(wagerInput?.value || '0', 10);
-	const bestOf = parseInt(bestofInput?.value || '1', 10);
-
 	try {
 		const r = await fetch('/api/challenges', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ from: myNametag, opponent: name, wager: Math.max(0, wager), bestOf }),
+			body: JSON.stringify({ from: myNametag, opponent: name, wager: 0, bestOf: 3 }),
 		});
 		const data = await r.json();
 		if (!r.ok) {
@@ -264,7 +260,8 @@ function renderIncomingChallenges(challenges: any[]): void {
 	}).join('');
 }
 
-setInterval(pollIncomingChallenges, 2000);
+let redirecting = false;
+const incomingPollInterval = setInterval(() => { if (!redirecting) pollIncomingChallenges(); }, 2000);
 if (myNametag) pollIncomingChallenges();
 
 // ─── Accept / Decline ───────────────────────────────────────────────
@@ -283,6 +280,7 @@ async function acceptChallenge(id: string, btn: HTMLElement): Promise<void> {
 			showStatus(data.message || 'Accept failed', 'rgba(218,54,51,0.1)', 'var(--red)');
 			return;
 		}
+		redirecting = true;
 		const p = new URLSearchParams({
 			tournament: '1', matchId: data.matchId, seed: data.seed || '0',
 			side: data.youAre, opponent: data.opponent, name: myNametag!,
@@ -359,6 +357,7 @@ async function showJoinUI(code: string): Promise<void> {
 					$('join-body').innerHTML = `<div style="text-align:center;color:var(--red);font-size:14px">${esc(data.message || 'Failed')}</div>`;
 					return;
 				}
+				redirecting = true;
 				const p = new URLSearchParams({
 					tournament: '1', matchId: data.matchId, seed: data.seed || '0',
 					side: data.youAre, opponent: data.opponent, name: myNametag!,
@@ -534,7 +533,7 @@ async function pollOnline(): Promise<void> {
 		renderBots();
 		$('humans-count').textContent = `${humans.length} online`;
 		updateNetStatus();
-	} catch { lastRestOk = false; updateNetStatus(); }
+	} catch { if (!redirecting) { lastRestOk = false; updateNetStatus(); } }
 }
 setInterval(pollOnline, 3000);
 pollOnline();

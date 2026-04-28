@@ -63,12 +63,34 @@ export async function ensureSchema(): Promise<void> {
 			amount INTEGER NOT NULL,
 			type TEXT NOT NULL,
 			memo TEXT DEFAULT '',
-			timestamp TEXT NOT NULL
+			timestamp TEXT NOT NULL,
+			tx_id TEXT UNIQUE
 		)
 	`);
+	// Migration: add tx_id to existing deployments. UNIQUE here means
+	// duplicate on-chain transfer events from the arena watcher silently
+	// no-op rather than double-crediting. NULL stays allowed for non-deposit
+	// rows (entry_fee, wager_*, tournament_prize) which don't have a chain id.
+	try { await db.execute(`ALTER TABLE player_transactions ADD COLUMN tx_id TEXT`); } catch {}
+	try { await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_player_tx_txid ON player_transactions (tx_id) WHERE tx_id IS NOT NULL`); } catch {}
 	await db.execute(`
 		CREATE INDEX IF NOT EXISTS idx_player_tx_nametag
 		ON player_transactions (nametag)
+	`);
+	await db.execute(`
+		CREATE TABLE IF NOT EXISTS daily_challenge_scores (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			nickname TEXT NOT NULL,
+			score INTEGER NOT NULL,
+			coins INTEGER NOT NULL DEFAULT 0,
+			date TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			UNIQUE(nickname, date)
+		)
+	`);
+	await db.execute(`
+		CREATE INDEX IF NOT EXISTS idx_daily_challenge_date_score
+		ON daily_challenge_scores (date, score DESC)
 	`);
 	schemaReady = true;
 	console.log('[db] schema ready');

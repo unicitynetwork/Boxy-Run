@@ -10,7 +10,40 @@
 let ctx: AudioContext | null = null;
 let unlocked = false;
 let listenersAttached = false;
+let masterGain: GainNode | null = null;
+let recordingDest: MediaStreamAudioDestinationNode | null = null;
 const gestureCallbacks: (() => void)[] = [];
+
+/**
+ * Master gain node — every audio source (music, SFX) should connect to
+ * this rather than ctx.destination directly. The master itself is wired
+ * to both the speakers and (lazily) a MediaStream destination so we can
+ * capture the same mix into a recording.
+ */
+export function getMasterNode(): AudioNode | null {
+	if (!ctx) return null;
+	if (!masterGain) {
+		masterGain = ctx.createGain();
+		masterGain.gain.value = 1;
+		masterGain.connect(ctx.destination);
+	}
+	return masterGain;
+}
+
+/**
+ * Returns a MediaStream of the master mix, suitable for adding to a
+ * MediaRecorder's stream so the recording has audio.
+ */
+export function getAudioRecordingStream(): MediaStream | null {
+	if (!ctx) return null;
+	const master = getMasterNode();
+	if (!master) return null;
+	if (!recordingDest) {
+		recordingDest = ctx.createMediaStreamDestination();
+		master.connect(recordingDest);
+	}
+	return recordingDest.stream;
+}
 
 /** Register a callback to fire on the next user gesture. */
 export function onNextGesture(cb: () => void): void {

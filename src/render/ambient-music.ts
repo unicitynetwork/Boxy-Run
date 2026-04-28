@@ -12,13 +12,13 @@
  * - Idempotent — safe to call repeatedly
  */
 
-import { getSharedAudioContext, isAudioReady, onNextGesture } from './audio-context';
+import { getSharedAudioContext, getMasterNode, isAudioReady, onNextGesture } from './audio-context';
 
 function debugAudio(msg: string): void {
 	console.log('[music] ' + msg);
 }
 
-const GAME_TRACK = '/music/soundtrack.mp3';
+const GAME_TRACKS = ['/music/soundtrack.mp3', '/music/soundtrack2.mp3', '/music/soundtrack3.mp3'];
 
 let gainNode: GainNode | null = null;
 let sourceNode: AudioBufferSourceNode | null = null;
@@ -31,12 +31,18 @@ let currentIntensity = 0;
 // Restore mute preference
 try { musicMuted = localStorage.getItem('boxyrun-music-muted') === '1'; } catch {}
 
-// Preload the mp3 as raw bytes on module load — decoding happens later
-// when AudioContext is available. This eliminates the network delay.
-let preloadedBytes: ArrayBuffer | null = null;
-fetch(GAME_TRACK).then(r => r.ok ? r.arrayBuffer() : null).then(buf => {
-	if (buf) preloadedBytes = buf;
-}).catch(() => {});
+// Preload all tracks as raw bytes on module load — decoding happens later.
+const preloadedTracks: Map<string, ArrayBuffer> = new Map();
+for (const track of GAME_TRACKS) {
+	fetch(track).then(r => r.ok ? r.arrayBuffer() : null).then(buf => {
+		if (buf) preloadedTracks.set(track, buf);
+	}).catch(() => {});
+}
+
+function pickRandomTrack(): string {
+	return GAME_TRACKS[Math.floor(Math.random() * GAME_TRACKS.length)];
+}
+let currentTrack = '';
 
 /**
  * Start background music. Idempotent — safe to call every frame.
@@ -44,9 +50,14 @@ fetch(GAME_TRACK).then(r => r.ok ? r.arrayBuffer() : null).then(buf => {
  * Music starts silent; call setMusicIntensity() to bring it up.
  */
 export function startAmbientMusic(): void {
-	// Already playing — just ensure mute is respected
+	// Already playing — ensure context is alive
 	if (playing) {
 		if (gainNode && musicMuted) gainNode.gain.value = 0;
+		// Safari suspends context when tab is backgrounded. Resume it.
+		const ctx = getSharedAudioContext();
+		if (ctx && ctx.state === 'suspended') {
+			try { ctx.resume(); } catch {}
+		}
 		return;
 	}
 
@@ -65,12 +76,16 @@ export function startAmbientMusic(): void {
 		return;
 	}
 	const ctx = getSharedAudioContext()!;
-	debugAudio('decoding, preloaded=' + !!preloadedBytes);
+
+	// Pick a random track for this game
+	currentTrack = pickRandomTrack();
+	const preloaded = preloadedTracks.get(currentTrack);
+	debugAudio('decoding ' + currentTrack + ', preloaded=' + !!preloaded);
 
 	// Use preloaded bytes if available, otherwise fetch
-	const bytesPromise = preloadedBytes
-		? Promise.resolve(preloadedBytes)
-		: fetch(GAME_TRACK).then(r => {
+	const bytesPromise = preloaded
+		? Promise.resolve(preloaded)
+		: fetch(currentTrack).then(r => {
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return r.arrayBuffer();
 		});
@@ -99,8 +114,6 @@ export function startAmbientMusic(): void {
 
 let pendingPlay = false;
 
-const CROSSFADE_DURATION = 3; // seconds
-
 function startPlayback(): void {
 	if (!audioBuffer || playing) return;
 	if (!isAudioReady()) return;
@@ -109,7 +122,7 @@ function startPlayback(): void {
 	if (!gainNode) {
 		gainNode = ctx.createGain();
 		gainNode.gain.value = 0;
-		gainNode.connect(ctx.destination);
+		gainNode.connect(getMasterNode() || ctx.destination);
 	}
 
 	// Stop any existing source
@@ -119,58 +132,14 @@ function startPlayback(): void {
 
 	sourceNode = ctx.createBufferSource();
 	sourceNode.buffer = audioBuffer;
-	sourceNode.loop = false; // we handle looping manually for crossfade
+	sourceNode.loop = true; // native looping — Safari-safe, never ends
 	sourceNode.connect(gainNode);
 	sourceNode.start();
 	playing = true;
-	// Start at audible volume immediately
 	if (!musicMuted) gainNode.gain.value = 0.3;
-	debugAudio('playback started, muted=' + musicMuted + ' gain=' + gainNode.gain.value);
+	debugAudio('playback started (loop), muted=' + musicMuted);
 
 	if (musicMuted) gainNode.gain.value = 0;
-
-	// Schedule crossfade loop
-	scheduleCrossfade(ctx);
-}
-
-let crossfadeTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleCrossfade(ctx: AudioContext): void {
-	if (!audioBuffer || !gainNode) return;
-	const duration = audioBuffer.duration;
-	const fadeStart = (duration - CROSSFADE_DURATION) * 1000;
-	if (fadeStart <= 0) return;
-
-	if (crossfadeTimer) clearTimeout(crossfadeTimer);
-	crossfadeTimer = setTimeout(() => {
-		crossfadeTimer = null;
-		if (!playing || !audioBuffer || !gainNode) return;
-
-		const oldSource = sourceNode;
-		const currentGain = gainNode.gain.value;
-
-		// Create new source connected to the SAME gain node
-		const newSource = ctx.createBufferSource();
-		newSource.buffer = audioBuffer;
-		newSource.loop = false;
-		newSource.connect(gainNode);
-
-		// Brief dip and restore for the crossfade effect
-		gainNode.gain.setValueAtTime(currentGain, ctx.currentTime);
-		gainNode.gain.linearRampToValueAtTime(currentGain * 0.3, ctx.currentTime + CROSSFADE_DURATION * 0.5);
-		gainNode.gain.linearRampToValueAtTime(currentGain, ctx.currentTime + CROSSFADE_DURATION);
-
-		newSource.start(0, 0); // start from beginning
-		sourceNode = newSource;
-
-		// Stop old source after crossfade
-		setTimeout(() => {
-			if (oldSource) { try { oldSource.stop(); } catch {} }
-		}, CROSSFADE_DURATION * 1000);
-
-		// Schedule next crossfade
-		scheduleCrossfade(ctx);
-	}, fadeStart);
 }
 
 // Safari workaround: if decoding finishes outside a gesture, defer
@@ -200,8 +169,15 @@ export function setMusicIntensity(intensity: number): void {
 	if (gainNode.gain.value < 0.005) gainNode.gain.value = 0;
 }
 
-/** No-op — music persists across games. */
-export function stopAmbientMusic(): void {}
+/** Stop music and reset so next startAmbientMusic picks a new track. */
+export function stopAmbientMusic(): void {
+	if (sourceNode) { try { sourceNode.stop(); } catch {} }
+	sourceNode = null;
+	audioBuffer = null;
+	playing = false;
+	loadAttempts = 0;
+	if (gainNode) { gainNode.gain.value = 0; }
+}
 
 export function pauseAmbientMusic(): void {
 	if (gainNode) gainNode.gain.value = 0;

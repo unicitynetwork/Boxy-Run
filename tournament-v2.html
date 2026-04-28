@@ -768,9 +768,12 @@ async function loadList() {
       const label = t.status === 'registration' ? 'Registration' : t.status === 'active' ? 'Active' : 'Complete';
       const time = new Date(t.starts_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       const prize = t.prize_pool ? `<span style="font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--orange)">${t.prize_pool} UCT</span>` : '';
+      const entry = t.entry_fee > 0
+        ? `<span style="font-family:var(--font-display);font-size:12px;font-weight:600;color:var(--cyan);margin-right:8px">${t.entry_fee} UCT entry</span>`
+        : '<span style="font-family:var(--font-display);font-size:12px;font-weight:600;color:var(--text-dim);margin-right:8px">Free</span>';
       return `<a href="tournament-v2.html?id=${esc(t.id)}" class="tourney-card">
         <div><div class="tourney-name">${esc(t.name)}</div><div class="tourney-meta">Starts: ${time}</div></div>
-        <div class="tourney-right">${prize} <span class="badge ${badge}">${label}</span></div>
+        <div class="tourney-right">${entry}${prize} <span class="badge ${badge}">${label}</span></div>
       </a>`;
     }).join('');
   } catch {
@@ -797,8 +800,11 @@ function renderDetail() {
   const badgeClass = t.status === 'registration' ? 'badge-reg' : t.status === 'active' ? 'badge-active' : 'badge-complete';
   const badgeLabel = t.status === 'registration' ? 'Registration Open' : t.status === 'active' ? `Round ${(t.current_round || 0) + 1}` : 'Complete';
   const prizeHtml = t.prize_pool ? ` <span style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--orange)">${t.prize_pool} UCT Prize</span>` : '';
+  const entryHtml = t.entry_fee > 0
+    ? ` <span style="font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--cyan)">Entry ${t.entry_fee} UCT</span>`
+    : ' <span style="font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--text-dim)">Free entry</span>';
   const boHtml = t.best_of > 1 ? ` <span style="font-size:13px;color:var(--text-dim)">Best of ${t.best_of}</span>` : '';
-  document.getElementById('t-badge').innerHTML = `<span class="badge ${badgeClass}">${badgeLabel}</span>${prizeHtml}${boHtml}`;
+  document.getElementById('t-badge').innerHTML = `<span class="badge ${badgeClass}">${badgeLabel}</span>${entryHtml}${prizeHtml}${boHtml}`;
 
   // Registration section
   document.getElementById('section-reg').style.display = t.status === 'registration' ? 'block' : 'none';

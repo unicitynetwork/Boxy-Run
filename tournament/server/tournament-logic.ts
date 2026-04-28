@@ -288,6 +288,36 @@ export function replayGamePartial(seed: number, inputs: Array<{ tick: number; pa
 	return replaySim(seed, inputs, true);
 }
 
+/**
+ * Replay a sim and return both the score and the coin count.
+ * Used by leaderboard endpoints to authoritatively derive scores from
+ * client-submitted seed+inputs.
+ */
+export function replayScoreAndCoins(
+	seed: number,
+	inputs: Array<{ tick: number; payload: string }>,
+): { score: number; coins: number; ticks: number } {
+	const config = DEFAULT_CONFIG;
+	const state = makeInitialState(seed, config);
+	const TIME_CAP = 36000;
+	const inputsByTick = new Map<number, CharacterAction[]>();
+	for (const inp of inputs) {
+		try {
+			const action = atob(inp.payload) as CharacterAction;
+			if (action === 'up' || action === 'left' || action === 'right' || action === 'fire') {
+				if (!inputsByTick.has(inp.tick)) inputsByTick.set(inp.tick, []);
+				inputsByTick.get(inp.tick)!.push(action);
+			}
+		} catch {}
+	}
+	while (!state.gameOver && state.tick < TIME_CAP) {
+		const actions = inputsByTick.get(state.tick);
+		if (actions) for (const a of actions) state.character.queuedActions.push(a);
+		simTick(state, config);
+	}
+	return { score: state.score, coins: state.coinCount, ticks: state.tick };
+}
+
 function replaySim(seed: number, inputs: Array<{ tick: number; payload: string }>, partialOnly = false): number {
 	const config = DEFAULT_CONFIG;
 	const state = makeInitialState(seed, config);

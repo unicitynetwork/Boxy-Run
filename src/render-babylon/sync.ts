@@ -4,7 +4,13 @@
  */
 
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import type { Scene } from '@babylonjs/core/scene';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import {
 	createCharacterMesh,
@@ -35,7 +41,7 @@ import {
 import { syncFog, type SceneHandle } from './scene';
 import { updateHud } from '../render/hud';
 import { startAmbientMusic, setMusicIntensity, stopAmbientMusic, createMusicToggle, isMusicMuted } from '../render/ambient-music';
-import type { GameConfig, GameState } from '../sim/state';
+import { TICK_SECONDS, type GameConfig, type GameState } from '../sim/state';
 import type { CharacterSkin } from '../render/skins';
 
 export interface RenderState {
@@ -56,8 +62,101 @@ export interface RenderState {
 	prevCoinCount: number;
 	prevFlameTicks: number;
 	musicStarted: boolean;
+	musicStopped: boolean;
 	// Scene handle ref for particles
 	sceneHandle: SceneHandle;
+	// Finish line (level mode only)
+	finishLine: TransformNode | null;
+	finishLineSpawnTick: number | null;
+}
+
+const FINISH_SPAWN_Z = -120000;
+
+function createFinishLine(scene: Scene): TransformNode {
+	const root = new TransformNode('finishLineRoot', scene);
+
+	// Checkered banner across the road
+	const bannerWidth = 4200;
+	const bannerHeight = 280;
+	const banner = MeshBuilder.CreatePlane('finishBanner', { width: bannerWidth, height: bannerHeight }, scene);
+	banner.position.set(0, 380, 0);
+	banner.parent = root;
+	// Make double-sided so it shows from both directions
+	(banner as any).material = null;
+	(banner as Mesh).isPickable = false;
+
+	// Checkered texture
+	const tex = new DynamicTexture('finishTex', { width: 1024, height: 64 }, scene, false);
+	const ctx = tex.getContext() as CanvasRenderingContext2D;
+	const cellW = 64;
+	const cellH = 32;
+	for (let x = 0; x < 1024; x += cellW) {
+		for (let y = 0; y < 64; y += cellH) {
+			const isBlack = ((x / cellW) + (y / cellH)) % 2 === 0;
+			ctx.fillStyle = isBlack ? '#0a0a0a' : '#ffffff';
+			ctx.fillRect(x, y, cellW, cellH);
+		}
+	}
+	tex.update();
+	const mat = new StandardMaterial('finishMat', scene);
+	mat.diffuseTexture = tex;
+	mat.emissiveTexture = tex;
+	mat.specularColor = new Color3(0, 0, 0);
+	mat.backFaceCulling = false;
+	banner.material = mat;
+
+	// "FINISH" label above the banner
+	const labelTex = new DynamicTexture('finishLabel', { width: 1024, height: 256 }, scene, false);
+	const lctx = labelTex.getContext() as CanvasRenderingContext2D;
+	lctx.fillStyle = 'rgba(0,0,0,0)';
+	lctx.fillRect(0, 0, 1024, 256);
+	lctx.font = 'bold 200px Orbitron, monospace';
+	lctx.fillStyle = '#5feaff';
+	lctx.textAlign = 'center';
+	lctx.textBaseline = 'middle';
+	lctx.shadowColor = 'rgba(0,0,0,0.85)';
+	lctx.shadowBlur = 18;
+	lctx.fillText('FINISH', 512, 128);
+	labelTex.update();
+	labelTex.hasAlpha = true;
+	const label = MeshBuilder.CreatePlane('finishLabelPlane', { width: 3000, height: 750 }, scene);
+	label.position.set(0, 880, 0);
+	label.rotation.y = Math.PI; // face the camera in the left-handed scene
+	label.parent = root;
+	const lmat = new StandardMaterial('finishLabelMat', scene);
+	lmat.diffuseTexture = labelTex;
+	lmat.emissiveTexture = labelTex;
+	lmat.opacityTexture = labelTex;
+	lmat.specularColor = new Color3(0, 0, 0);
+	lmat.disableLighting = true;
+	lmat.backFaceCulling = false;
+	label.material = lmat;
+
+	// Two flagpole posts on either side
+	const poleHeight = 1100;
+	for (const side of [-1, 1]) {
+		const pole = MeshBuilder.CreateBox('finishPole', { width: 70, height: poleHeight, depth: 70 }, scene);
+		pole.position.set(side * (bannerWidth / 2 - 35), poleHeight / 2, 0);
+		pole.parent = root;
+		const pmat = new StandardMaterial('finishPoleMat', scene);
+		pmat.diffuseColor = new Color3(0.18, 0.20, 0.24);
+		pmat.emissiveColor = new Color3(0.05, 0.08, 0.10);
+		pole.material = pmat;
+	}
+
+	return root;
+}
+
+function disposeFinishLine(node: TransformNode): void {
+	const meshes = node.getChildMeshes();
+	for (const m of meshes) {
+		if (m.material) {
+			(m.material as StandardMaterial).diffuseTexture?.dispose();
+			m.material.dispose();
+		}
+		m.dispose();
+	}
+	node.dispose();
 }
 
 export function createRenderState(
@@ -81,8 +180,9 @@ export function createRenderState(
 		opponent: null, playerSkin,
 		dustTrail,
 		prevLane: 0, cameraRollTarget: 0, cameraRoll: 0, cameraBobPhase: 0,
-		prevCoinCount: 0, prevFlameTicks: 0, musicStarted: false,
+		prevCoinCount: 0, prevFlameTicks: 0, musicStarted: false, musicStopped: false,
 		sceneHandle: handle,
+		finishLine: null, finishLineSpawnTick: null,
 	};
 }
 
@@ -118,6 +218,30 @@ export function syncRender(
 	syncPowerupMeshes(render.powerups, state.powerups, state.tick);
 	syncFog(handle, state.fogDistance);
 
+	// ── Finish line ─────────────────────────────────────────────
+	// Only shown when caller stashes an explicit z position on state — i.e.,
+	// during replay/recording, where the exact end tick is known. Live
+	// gameplay leaves this null because the finish point isn't determined
+	// in advance (depends on player skill, coin pickups, etc.).
+	const finishZ = (state as any).__finishLineZ as number | undefined;
+	if (typeof finishZ === 'number') {
+		if (!render.finishLine && finishZ < 5000) {
+			render.finishLine = createFinishLine(handle.scene);
+		}
+		if (render.finishLine) {
+			render.finishLine.position.z = finishZ;
+			render.finishLine.position.x = 0;
+			if (finishZ > 5000) {
+				disposeFinishLine(render.finishLine);
+				render.finishLine = null;
+			}
+		}
+	} else if (render.finishLine) {
+		disposeFinishLine(render.finishLine);
+		render.finishLine = null;
+		render.finishLineSpawnTick = null;
+	}
+
 	// ── Sun dims with fog ──────────────────────────────────────
 	// fogDistance 60K = full sun, 8K = very dim
 	const fogNorm = Math.min(1, Math.max(0, (state.fogDistance - 8000) / 52000));
@@ -131,18 +255,22 @@ export function syncRender(
 	updateHud(state);
 
 	// ── Ambient music ──────────────────────────────────────────
-	// Call every frame — startAmbientMusic is idempotent and retries
-	// until the AudioContext is ready and the mp3 is loaded.
-	if (state.tick > 0) {
+	// Music: start when playing, stop when dead/finished.
+	// Replay sets __forceMusic so the soundtrack keeps playing even after
+	// the recorded gameOver/finished tick is reached.
+	const forceMusic = (state as any).__forceMusic === true;
+	if ((state.gameOver || state.finished) && !forceMusic) {
+		if (!render.musicStopped) {
+			render.musicStopped = true;
+			setMusicIntensity(0);
+			stopAmbientMusic();
+		}
+	} else if (state.tick > 0 || forceMusic) {
 		startAmbientMusic();
 		if (!render.musicStarted) {
 			render.musicStarted = true;
 			createMusicToggle();
 		}
-	}
-	if (state.gameOver || state.finished) {
-		setMusicIntensity(0);
-	} else {
 		const intensity = Math.min(state.score / 30000, 1);
 		setMusicIntensity(intensity);
 	}

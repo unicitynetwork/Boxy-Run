@@ -22,8 +22,8 @@ import {
 } from './harness';
 
 async function deposit(server: { port: number }, nametag: string, amount: number) {
-	await api(server, '/api/deposit', {
-		method: 'POST', body: { nametag, amount },
+	await api(server, '/api/admin/credit', {
+		method: 'POST', body: { nametag, amount }, asAdmin: true,
 	});
 }
 

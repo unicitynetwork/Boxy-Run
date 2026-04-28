@@ -1,0 +1,42 @@
+# Staging deployment for Boxy Run.
+# Deploy with: fly deploy -c fly.staging.toml
+# Logs:        fly logs -a boxy-run-staging
+# Secrets:     fly secrets set -a boxy-run-staging KEY=value
+#
+# This is a separate Fly app from production (`boxy-run`). It uses its own
+# persistent volume (`boxyrun_data_staging`), its own secrets, and its own
+# arena wallet. Nothing here touches the production app or its tokens.
+
+app = 'boxy-run-staging'
+primary_region = 'lhr'
+
+[build]
+
+[env]
+  DB_PATH = '/data/boxyrun.db'
+  LOBBY_CAPACITY = '32'
+  MIN_PLAYERS = '2'
+  PORT = '8080'
+  STATIC_DIR = '/app'
+  QUEUE_MIN_PLAYERS = '4'
+  QUEUE_MAX_PLAYERS = '4'
+  QUEUE_COUNTDOWN_MS = '30000'
+  ENVIRONMENT = 'staging'
+
+[[mounts]]
+  source = 'boxyrun_data_staging'
+  destination = '/data'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  # Smaller footprint for staging — let it sleep when idle
+  min_machines_running = 0
+
+[[vm]]
+  # Cheaper than prod's `performance` kind — staging doesn't need the headroom
+  cpu_kind = 'shared'
+  cpus = 1
+  memory = '512mb'

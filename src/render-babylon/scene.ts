@@ -47,7 +47,9 @@ export function createScene(container?: HTMLElement | null): SceneHandle {
 	parent.appendChild(canvas);
 
 	const engine = new Engine(canvas, true, {
-		preserveDrawingBuffer: false,
+		// preserveDrawingBuffer:true so we can drawImage(scene.canvas, ...)
+		// onto a 2D composite canvas for video recording.
+		preserveDrawingBuffer: true,
 		stencil: true,
 		antialias: true,
 	});
@@ -150,7 +152,19 @@ export function createScene(container?: HTMLElement | null): SceneHandle {
 
 	const speedLines: Mesh[] = [];
 
-	window.addEventListener('resize', () => engine.resize());
+	const onResize = () => engine.resize();
+	window.addEventListener('resize', onResize);
+	// iOS Safari collapses/expands the URL bar via visualViewport without
+	// firing a window resize. Listen there too so the canvas backing
+	// buffer stays in sync with the actually-visible area.
+	const vv = (window as any).visualViewport;
+	if (vv) {
+		vv.addEventListener('resize', onResize);
+		vv.addEventListener('scroll', onResize);
+	}
+	// Also catch orientation changes immediately (some Safari versions
+	// delay the resize event)
+	window.addEventListener('orientationchange', () => setTimeout(onResize, 100));
 	scene.preventDefaultOnPointerDown = false;
 
 	return {
@@ -218,6 +232,12 @@ function createGround(scene: Scene, shadowGen: ShadowGenerator): void {
 
 export function renderFrame(handle: SceneHandle): void {
 	handle.scene.render();
+}
+
+/** Dispose the entire Babylon engine and free GPU resources. */
+export function disposeScene(handle: SceneHandle): void {
+	handle.scene.dispose();
+	handle.engine.dispose();
 }
 
 export function syncFog(handle: SceneHandle, fogDistance: number): void {

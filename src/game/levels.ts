@@ -206,10 +206,15 @@ export const LEVELS: LevelDef[] = [
 		],
 		initial: { treePresenceProb: 0.55, maxTreeSize: 1.25, fogDistance: 15000 },
 		spawns: [
-			{ atRow: 30, type: 'coin', lane: 0, tier: 'red' },
+			{ atRow: 5, type: 'powerup', lane: 0 },
+			{ atRow: 15, type: 'powerup', lane: -1 },
+			{ atRow: 15, type: 'powerup', lane: 1 },
+			{ atRow: 25, type: 'coin', lane: 0, tier: 'red' },
 			{ atRow: 70, type: 'coin', lane: -1, tier: 'red' },
+			{ atRow: 100, type: 'powerup', lane: 0 },
 			{ atRow: 110, type: 'coin', lane: 1, tier: 'red' },
 			{ atRow: 130, type: 'coin', lane: 0, tier: 'red' },
+			{ atRow: 140, type: 'powerup', lane: -1 },
 		],
 	},
 ];
@@ -260,7 +265,10 @@ export function getUnlockedLevel(): number {
 export function completeLevel(levelId: number): void {
 	try {
 		const current = getUnlockedLevel();
-		if (levelId >= current && levelId < LEVELS.length) {
+		// Use <=  so the last level (id === LEVELS.length) also gets marked.
+		// Setting unlocked beyond the last level is harmless — UI just sees
+		// "all completed".
+		if (levelId >= current && levelId <= LEVELS.length) {
 			localStorage.setItem('boxyrun-level-unlocked', String(levelId + 1));
 		}
 	} catch {}

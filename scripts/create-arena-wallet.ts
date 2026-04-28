@@ -21,6 +21,19 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { webcrypto } from 'node:crypto';
+
+// Polyfill globals the SDK expects (it was authored for browsers).
+// `crypto` (Web Crypto) is the bigger one — without it, key derivation
+// inside Sphere.create / registerNametag throws "crypto is not defined".
+if (typeof (globalThis as any).crypto === 'undefined') {
+	(globalThis as any).crypto = webcrypto;
+}
+// `WebSocket` lands in Node 22 natively but is missing on 20.
+if (typeof (globalThis as any).WebSocket === 'undefined') {
+	(globalThis as any).WebSocket = require('ws');
+}
+
 import { Sphere, generateMnemonic } from '@unicitylabs/sphere-sdk';
 import { createNodeProviders } from '@unicitylabs/sphere-sdk/impl/nodejs';
 

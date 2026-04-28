@@ -119,8 +119,16 @@ export function installTouchControls(opts: {
 	let startY = 0;
 	let startTime = 0;
 
+	// Don't hijack taps on actual UI controls (MENU, sound toggle, etc.) —
+	// the game-start gesture should only fire when tapping the canvas.
+	const isUiControl = (t: EventTarget | null): boolean => {
+		const el = t as HTMLElement | null;
+		return !!el?.closest?.('button, a, input, select, textarea, [role="button"]');
+	};
+
 	const onMove = (e: TouchEvent) => { e.preventDefault(); };
 	const onStart = (e: TouchEvent) => {
+		if (isUiControl(e.target)) return;
 		if (!opts.isPlaying()) {
 			opts.onStart();
 			return;
@@ -131,6 +139,7 @@ export function installTouchControls(opts: {
 		startTime = Date.now();
 	};
 	const onEnd = (e: TouchEvent) => {
+		if (isUiControl(e.target)) return;
 		if (!opts.isPlaying()) return;
 		const touch = e.changedTouches[0];
 		const dx = touch.clientX - startX;

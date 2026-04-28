@@ -5,9 +5,18 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { createReadStream, existsSync, statSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { extname, join, resolve, dirname } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
+
+// Polyfill global WebSocket — Node 20 lacks it (added in Node 22). The
+// Sphere SDK's L1 module references the global at runtime, so without
+// this the address-discovery scan throws on boot. Setting it here, before
+// any SDK code loads, lets both the SDK and our own ws server use the
+// same `ws` package.
+if (typeof (globalThis as any).WebSocket === 'undefined') {
+	(globalThis as any).WebSocket = WebSocket;
+}
 
 import { handleApi } from './leaderboard';
 import { handleTournamentApi } from './tournament-api';
@@ -122,6 +131,21 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 	}
 	// Let Fly.io's proxy handle gzip — manual gzip can cause
 	// double-compression or partial content issues.
+	// HTML files get a small inline config script injected so the client
+	// knows which arena wallet (and any other env-specific setting) to use.
+	// Avoids per-environment client builds.
+	if (ext === '.html') {
+		const { readFileSync } = require('node:fs');
+		const html = readFileSync(filePath, 'utf8') as string;
+		const arena = process.env.ARENA_WALLET_NAMETAG || '@boxyrunarena';
+		const inject = `<script>window.__BOXY_ARENA_WALLET = ${JSON.stringify(arena)};</script>`;
+		const out = html.includes('</head>')
+			? html.replace('</head>', `${inject}</head>`)
+			: inject + html;
+		res.writeHead(200, headers);
+		res.end(out);
+		return;
+	}
 	res.writeHead(200, headers);
 	createReadStream(filePath).pipe(res);
 });
@@ -229,6 +253,7 @@ wss.on('connection', (ws) => {
 
 	ws.on('close', () => {
 		allSockets.delete(ws);
+		// Get nametag BEFORE unregister deletes the mapping
 		const closedTag = getNametag(ws);
 		unregisterSocket(ws);
 		if (closedTag) {
@@ -303,8 +328,37 @@ setInterval(async () => {
 }, 1_000);
 
 
+// ── Periodic DB backup ──────────────────────────────────────────
+const DB_PATH = process.env.DB_PATH || './boxyrun.db';
+const BACKUP_INTERVAL_MS = 6 * 60 * 60_000; // every 6 hours
+const MAX_BACKUPS = 8; // keep ~2 days of backups
+
+function backupDb(): void {
+	if (!existsSync(DB_PATH)) return;
+	const dir = dirname(DB_PATH);
+	const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+	const dest = join(dir, `boxyrun-backup-${ts}.db`);
+	try {
+		copyFileSync(DB_PATH, dest);
+		console.log(`[backup] saved ${dest}`);
+		// Prune old backups
+		const backups = readdirSync(dir)
+			.filter(f => f.startsWith('boxyrun-backup-') && f.endsWith('.db'))
+			.sort()
+			.reverse();
+		for (const old of backups.slice(MAX_BACKUPS)) {
+			try { unlinkSync(join(dir, old)); console.log(`[backup] pruned ${old}`); } catch {}
+		}
+	} catch (err) {
+		console.error('[backup] failed:', err);
+	}
+}
+
 async function boot() {
 	await ensureTournamentSchema();
+	// Initial backup on boot, then every 6 hours
+	backupDb();
+	setInterval(backupDb, BACKUP_INTERVAL_MS);
 	httpServer.listen(PORT, '::', () => {
 		console.log(`[server] listening on http://0.0.0.0:${PORT}`);
 		console.log(`[server] static files: ${STATIC_DIR}`);
@@ -312,6 +366,18 @@ async function boot() {
 		import('./bots').then(({ spawnBots }) => spawnBots(PORT)).catch(err => {
 			console.error('[bots] failed to spawn:', err);
 		});
+		// Boot the arena watcher — credits player_transactions whenever a
+		// real on-chain transfer arrives at the arena wallet. Non-fatal if
+		// it fails (server keeps running; deposits just won't auto-credit).
+		if (process.env.ARENA_WALLET_FILE) {
+			import('./arena-watcher').then(({ startArenaWatcher }) =>
+				startArenaWatcher(),
+			).catch(err => {
+				console.error('[arena-watcher] failed to boot:', err);
+			});
+		} else {
+			console.log('[arena-watcher] ARENA_WALLET_FILE not set — watcher disabled');
+		}
 	});
 }
 

@@ -707,8 +707,8 @@ runTest('scenario: bot declines wager challenge (wager > 0)', async () => {
 		await sleep(4000);
 
 		// Deposit funds for the human challenger so the API doesn't reject
-		await api(server, '/api/deposit', {
-			method: 'POST', body: { nametag: 'human_player', amount: 100 },
+		await api(server, '/api/admin/credit', {
+			method: 'POST', body: { nametag: 'human_player', amount: 100 }, asAdmin: true,
 		});
 
 		const human = await wsConnect(server.port, 'human_player');

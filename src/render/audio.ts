@@ -4,8 +4,12 @@
  * user interaction (browser autoplay policy).
  */
 
-import { getSharedAudioContext, unlockAudio, isAudioReady, attachUnlockListeners } from './audio-context';
+import { getSharedAudioContext, getMasterNode, unlockAudio, isAudioReady, attachUnlockListeners } from './audio-context';
 import { toggleMusicMute, isMusicMuted } from './ambient-music';
+
+function out(c: AudioContext): AudioNode {
+	return getMasterNode() || out(c);
+}
 
 let muted = false;
 let initialized = false;
@@ -68,7 +72,7 @@ export function playCoinCollect(tier: 'gold' | 'blue' | 'red' = 'gold') {
 		osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + dur * 0.3);
 		gain.gain.setValueAtTime(0.15, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-		osc.connect(gain).connect(c.destination);
+		osc.connect(gain).connect(out(c));
 		osc.start(t);
 		osc.stop(t + dur);
 		// Second harmonic for richer sound
@@ -79,7 +83,7 @@ export function playCoinCollect(tier: 'gold' | 'blue' | 'red' = 'gold') {
 			osc2.frequency.setValueAtTime(freq * 2, t);
 			gain2.gain.setValueAtTime(0.06, t);
 			gain2.gain.exponentialRampToValueAtTime(0.001, t + dur);
-			osc2.connect(gain2).connect(c.destination);
+			osc2.connect(gain2).connect(out(c));
 			osc2.start(t);
 			osc2.stop(t + dur);
 		}
@@ -96,7 +100,7 @@ export function playJump() {
 		osc.frequency.exponentialRampToValueAtTime(600, t + 0.15);
 		gain.gain.setValueAtTime(0.08, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-		osc.connect(gain).connect(c.destination);
+		osc.connect(gain).connect(out(c));
 		osc.start(t);
 		osc.stop(t + 0.2);
 	});
@@ -112,7 +116,7 @@ export function playLaneSwitch() {
 		osc.frequency.exponentialRampToValueAtTime(150, t + 0.08);
 		gain.gain.setValueAtTime(0.04, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-		osc.connect(gain).connect(c.destination);
+		osc.connect(gain).connect(out(c));
 		osc.start(t);
 		osc.stop(t + 0.1);
 	});
@@ -129,7 +133,7 @@ export function playCrash() {
 		osc.frequency.exponentialRampToValueAtTime(40, t + 0.3);
 		gain.gain.setValueAtTime(0.3, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
-		osc.connect(gain).connect(c.destination);
+		osc.connect(gain).connect(out(c));
 		osc.start(t);
 		osc.stop(t + 0.4);
 
@@ -143,7 +147,7 @@ export function playCrash() {
 		const noiseGain = c.createGain();
 		noiseGain.gain.setValueAtTime(0.15, t);
 		noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-		noise.connect(noiseGain).connect(c.destination);
+		noise.connect(noiseGain).connect(out(c));
 		noise.start(t);
 	});
 }
@@ -159,7 +163,7 @@ export function playPowerupCollect() {
 			osc.frequency.setValueAtTime(freq, t + i * 0.08);
 			gain.gain.setValueAtTime(0.12, t + i * 0.08);
 			gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.08 + 0.2);
-			osc.connect(gain).connect(c.destination);
+			osc.connect(gain).connect(out(c));
 			osc.start(t + i * 0.08);
 			osc.stop(t + i * 0.08 + 0.2);
 		});
@@ -184,7 +188,7 @@ export function playFlameActivate() {
 		const gain = c.createGain();
 		gain.gain.setValueAtTime(0.2, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
-		noise.connect(filter).connect(gain).connect(c.destination);
+		noise.connect(filter).connect(gain).connect(out(c));
 		noise.start(t);
 
 		// Low rumble
@@ -194,7 +198,7 @@ export function playFlameActivate() {
 		osc.frequency.setValueAtTime(80, t);
 		oGain.gain.setValueAtTime(0.1, t);
 		oGain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-		osc.connect(oGain).connect(c.destination);
+		osc.connect(oGain).connect(out(c));
 		osc.start(t);
 		osc.stop(t + 0.5);
 	});
@@ -209,7 +213,7 @@ export function playBeep(pitch = 1) {
 		osc.frequency.setValueAtTime(600 * pitch, t);
 		gain.gain.setValueAtTime(0.15, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-		osc.connect(gain).connect(c.destination);
+		osc.connect(gain).connect(out(c));
 		osc.start(t);
 		osc.stop(t + 0.12);
 	});
@@ -226,7 +230,7 @@ export function playGameStart() {
 			osc.frequency.setValueAtTime(freq, t + i * 0.12);
 			gain.gain.setValueAtTime(0.08, t + i * 0.12);
 			gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.25);
-			osc.connect(gain).connect(c.destination);
+			osc.connect(gain).connect(out(c));
 			osc.start(t + i * 0.12);
 			osc.stop(t + i * 0.12 + 0.25);
 		});
@@ -250,7 +254,7 @@ export function playNearMiss() {
 		const gain = c.createGain();
 		gain.gain.setValueAtTime(0.08, t);
 		gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-		noise.connect(filter).connect(gain).connect(c.destination);
+		noise.connect(filter).connect(gain).connect(out(c));
 		noise.start(t);
 	});
 }
@@ -266,7 +270,7 @@ export function playLevelComplete() {
 			osc.frequency.setValueAtTime(freq, t + i * 0.1);
 			gain.gain.setValueAtTime(0.1, t + i * 0.1);
 			gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.4);
-			osc.connect(gain).connect(c.destination);
+			osc.connect(gain).connect(out(c));
 			osc.start(t + i * 0.1);
 			osc.stop(t + i * 0.1 + 0.4);
 		});
