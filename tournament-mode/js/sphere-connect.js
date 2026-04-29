@@ -1026,8 +1026,12 @@ var SphereConnect = (() => {
     state.error = null;
     updateUI("disconnected");
   }
+  var inflightAuthHandshake = null;
   async function ensureAuthSession() {
-    if (!client || !state.identity?.nametag) return null;
+    if (!client || !state.identity?.nametag) {
+      console.warn("[auth] ensureAuthSession: no wallet client/identity yet");
+      return null;
+    }
     const nametag = state.identity.nametag.replace(/^@/, "").toLowerCase();
     if (authSessionId && authedNametag === nametag) return authSessionId;
     const cached = sessionStorage.getItem(AUTH_SESSION_KEY);
@@ -1042,23 +1046,62 @@ var SphereConnect = (() => {
       } catch {
       }
     }
+    if (inflightAuthHandshake) return inflightAuthHandshake;
+    inflightAuthHandshake = doAuthHandshake(nametag).finally(() => {
+      inflightAuthHandshake = null;
+    });
+    return inflightAuthHandshake;
+  }
+  async function doAuthHandshake(nametag) {
+    console.log("[auth] handshake start", { nametag });
     try {
       const challengeRes = await fetch("/api/auth/challenge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nametag })
       });
-      if (!challengeRes.ok) return null;
+      if (!challengeRes.ok) {
+        console.error("[auth] /challenge failed", challengeRes.status, await challengeRes.text());
+        return null;
+      }
       const { challengeId, nonce } = await challengeRes.json();
-      const signature = await client.intent(INTENT_ACTIONS.SIGN_MESSAGE, {
-        message: nonce
-      });
+      console.log("[auth] got challenge", { challengeId, nonceLen: nonce?.length });
+      let raw;
+      try {
+        raw = await client.intent(INTENT_ACTIONS.SIGN_MESSAGE, {
+          message: nonce
+        });
+      } catch (err) {
+        console.error("[auth] SIGN_MESSAGE intent threw", err);
+        return null;
+      }
+      console.log("[auth] SIGN_MESSAGE returned (type=" + typeof raw + ")", raw);
+      let signature;
+      if (typeof raw === "string") {
+        signature = raw;
+      } else if (raw && typeof raw === "object") {
+        const r = raw;
+        const candidate = r.signature ?? r.signedMessage ?? r.result;
+        if (typeof candidate === "string") {
+          signature = candidate;
+        } else {
+          console.error("[auth] SIGN_MESSAGE returned object with no signature field", raw);
+          return null;
+        }
+      } else {
+        console.error("[auth] SIGN_MESSAGE returned unexpected type", typeof raw, raw);
+        return null;
+      }
       const verifyRes = await fetch("/api/auth/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ challengeId, signature })
       });
-      if (!verifyRes.ok) return null;
+      if (!verifyRes.ok) {
+        const body = await verifyRes.text();
+        console.error("[auth] /verify failed", verifyRes.status, body);
+        return null;
+      }
       const { sessionId, expiresAt } = await verifyRes.json();
       authSessionId = sessionId;
       authedNametag = nametag;
@@ -1067,9 +1110,10 @@ var SphereConnect = (() => {
         nametag,
         expiresAt
       }));
+      console.log("[auth] handshake complete", { nametag, expiresAt });
       return sessionId;
     } catch (err) {
-      console.error("[auth] handshake failed:", err);
+      console.error("[auth] handshake threw:", err);
       return null;
     }
   }

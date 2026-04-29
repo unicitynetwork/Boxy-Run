@@ -12,6 +12,7 @@
   var humans = [];
   var wsLastMessageAt = 0;
   var wsWatchdog = null;
+  var wsIntentionalClose = false;
   function esc(s) {
     const d = document.createElement("div");
     d.textContent = s;
@@ -24,36 +25,55 @@
     $("id-disconnected").style.display = "none";
     $("id-connected").style.display = "flex";
     $("my-name").textContent = myNametag;
-    connectWS();
     enableChat();
   }
   setInterval(() => {
     const w = window.SphereWallet;
-    if (!(w && w.isConnected && w.identity?.nametag)) return;
-    const liveTag = w.identity.nametag;
-    if (myNametag === liveTag) return;
-    if (myNametag && myNametag !== liveTag) {
-      if (ws) try {
-        ws.close();
-      } catch {
+    const ready = !!(w && w.isConnected && w.identity?.nametag);
+    if (ready) {
+      const liveTag = w.identity.nametag;
+      if (myNametag !== liveTag) {
+        if (ws) try {
+          ws.close();
+        } catch {
+        }
+        ws = null;
+        myNametag = liveTag;
+        localStorage.setItem("boxyrun-nametag", myNametag);
+        $("id-disconnected").style.display = "none";
+        $("id-connected").style.display = "flex";
+        $("my-name").textContent = myNametag;
+        enableChat();
       }
-      ws = null;
+      if (!ws && w.authSession) {
+        connectWS();
+      }
     }
-    myNametag = liveTag;
-    localStorage.setItem("boxyrun-nametag", myNametag);
-    $("id-disconnected").style.display = "none";
-    $("id-connected").style.display = "flex";
-    $("my-name").textContent = myNametag;
-    connectWS();
-    enableChat();
   }, 500);
   function connectWS() {
     if (!myNametag) return;
     ws = new WebSocket(WS_URL);
     wsLastMessageAt = Date.now();
-    ws.onopen = () => {
+    ws.onopen = async () => {
       wsLastMessageAt = Date.now();
-      const sessionId = window.SphereWallet?.authSession;
+      const wallet = window.SphereWallet;
+      let sessionId = wallet?.authSession ?? null;
+      if (!sessionId && typeof wallet?.ensureAuthSession === "function") {
+        try {
+          sessionId = await wallet.ensureAuthSession();
+        } catch (err) {
+          console.error("[challenge] auth handshake failed", err);
+        }
+      }
+      if (!sessionId) {
+        console.warn("[challenge] no auth session \u2014 closing without register");
+        wsIntentionalClose = true;
+        try {
+          ws.close();
+        } catch {
+        }
+        return;
+      }
       wsSend({ type: "register", identity: { nametag: myNametag }, sessionId });
       $("ws-dot").classList.add("on");
       updateNetStatus();
@@ -74,6 +94,11 @@
       }
       $("ws-dot").classList.remove("on");
       updateNetStatus();
+      if (wsIntentionalClose) {
+        wsIntentionalClose = false;
+        ws = null;
+        return;
+      }
       setTimeout(connectWS, 3e3);
     };
     ws.onerror = () => {
