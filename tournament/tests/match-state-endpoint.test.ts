@@ -14,6 +14,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -39,8 +40,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -66,10 +68,10 @@ runTest('match-state endpoint reports all phases correctly', async () => {
 			body: { id: 'ms-1', name: 'Match-State Test', maxPlayers: 2 },
 		});
 		await api(server, '/api/tournaments/ms-1/register', {
-			method: 'POST', body: { nametag: 'alice' },
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 		});
 		await api(server, '/api/tournaments/ms-1/register', {
-			method: 'POST', body: { nametag: 'bob' },
+			method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob',
 		});
 		await api(server, '/api/tournaments/ms-1/start', {
 			method: 'POST', asAdmin: true,
@@ -152,10 +154,10 @@ runTest('match-state endpoint reports all phases correctly', async () => {
 			body: { id: 'ms-2', name: 'Series', maxPlayers: 2, bestOf: 3 },
 		});
 		await api(server, '/api/tournaments/ms-2/register', {
-			method: 'POST', body: { nametag: 'carol' },
+			method: 'POST', body: { nametag: 'carol' }, asNametag: 'carol',
 		});
 		await api(server, '/api/tournaments/ms-2/register', {
-			method: 'POST', body: { nametag: 'dave' },
+			method: 'POST', body: { nametag: 'dave' }, asNametag: 'dave',
 		});
 		await api(server, '/api/tournaments/ms-2/start', {
 			method: 'POST', asAdmin: true,

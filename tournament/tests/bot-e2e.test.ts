@@ -125,7 +125,13 @@ runTest('bot-e2e: 4-bot Bo3 tournament reaches champion through bracket', async 
 				name: 'Bot E2E Bo3 4p',
 				maxPlayers: 4,
 				bestOf: 3,
-				startsAt: new Date(Date.now() - 1000).toISOString(),
+				// 5s in the future, not the past. Auto-start fires as
+				// soon as count >= 2 AND now() >= startsAt — with a
+				// startsAt in the past the tournament can boot with
+				// only 2 of 4 bots registered (each bot now does an
+				// auth handshake before registering, ~500ms-1s of
+				// added latency that makes this race tip over).
+				startsAt: new Date(Date.now() + 5000).toISOString(),
 				entryFee: 0,
 			},
 		});

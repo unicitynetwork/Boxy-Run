@@ -18,6 +18,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -43,8 +44,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -67,10 +69,10 @@ async function setupMatch(server: { port: number }, tid: string, a: string, b: s
 		body: { id: tid, name: tid, maxPlayers: 2 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a },
+		method: 'POST', body: { nametag: a }, asNametag: a,
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b },
+		method: 'POST', body: { nametag: b }, asNametag: b,
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -120,25 +122,28 @@ runTest('reconcile: ready TTL expires after 30s', async () => {
 	}
 });
 
-runTest('reconcile: offline opponent auto-readied after 5s', async () => {
+runTest('reconcile: offline opponent does NOT auto-ready; tournament holds in ready_wait', async () => {
 	const server = await startServer();
 	try {
-		// Auto-ready of offline opponents now fires synchronously in
-		// applyReady for challenge-prefixed match IDs (not via the reconciler's
-		// 5s grace, which is disabled). Use a challenge-prefixed tournament.
+		// Auto-ready of offline opponents is intentionally disabled
+		// (READY_OFFLINE_GRACE_MS = Infinity in match-machine.ts) — too
+		// many players were being auto-started into matches before
+		// they'd finished navigating to the game page. Force-resolve at
+		// 45s (both offline) and the 5-min no-show forfeit cover absent
+		// players.
 		await setupMatch(server, 'challenge-off5', 'carol', 'dave');
 		const c = await wsConnect(server.port, 'carol');
 		await sleep(100);
 
-		// Dave never connects (offline). Carol readies → sync auto-ready
-		// detects dave is offline and auto-readies him immediately for
-		// challenge-prefixed matches.
 		c.send({ type: 'match-ready', matchId: 'challenge-off5/R0M0' });
 		await sleep(500);
 
-		// Match should have started (both flags set via sync auto-ready)
 		const after = await api(server, '/api/tournaments/challenge-off5/matches/0/0/state');
-		assertEqual(after.phase, 'active', 'match started after auto-ready of offline dave');
+		assertEqual(after.phase, 'ready_wait', 'still ready_wait — no auto-ready of offline dave');
+		const carolSide = after.playerA === 'carol' ? 'A' : 'B';
+		const daveSide = carolSide === 'A' ? 'B' : 'A';
+		assertEqual(after.ready[carolSide], true, 'carol flag set');
+		assertEqual(after.ready[daveSide], false, 'dave flag NOT auto-set');
 
 		c.close();
 	} finally {
@@ -235,10 +240,10 @@ runTest('reconcile: active-branch ready TTL force-readies a no-show opponent', a
 			body: { id: 'ar-ttl', name: 'ar-ttl', maxPlayers: 2 },
 		});
 		await api(server, '/api/tournaments/ar-ttl/register', {
-			method: 'POST', body: { nametag: 'ready_player' },
+			method: 'POST', body: { nametag: 'ready_player' }, asNametag: 'ready_player',
 		});
 		await api(server, '/api/tournaments/ar-ttl/register', {
-			method: 'POST', body: { nametag: 'noshow_player' },
+			method: 'POST', body: { nametag: 'noshow_player' }, asNametag: 'noshow_player',
 		});
 		await api(server, '/api/tournaments/ar-ttl/start', {
 			method: 'POST', asAdmin: true,

@@ -88,7 +88,11 @@ function connectWS(): void {
 	wsLastMessageAt = Date.now();
 	ws.onopen = () => {
 		wsLastMessageAt = Date.now();
-		wsSend({ type: 'register', identity: { nametag: myNametag! } });
+		// Server now requires a Sphere-signed session token alongside
+		// the register message — the SphereWallet module exposes it
+		// after the auth handshake completes.
+		const sessionId = (window as any).SphereWallet?.authSession;
+		wsSend({ type: 'register', identity: { nametag: myNametag! }, sessionId } as any);
 		$('ws-dot').classList.add('on');
 		updateNetStatus();
 	};

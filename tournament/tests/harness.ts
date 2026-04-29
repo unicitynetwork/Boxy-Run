@@ -51,6 +51,12 @@ export async function startServer(
 		PORT: String(port),
 		// Enable test-only endpoints (fake clock etc.)
 		TEST_MODE: '1',
+		// Auth: server now refuses to boot without a real ADMIN_KEY (≥16
+		// chars). Set the test value the harness uses for X-Admin-Key.
+		ADMIN_KEY: TEST_ADMIN_KEY,
+		// Bypass Sphere signature verification — tests can mint sessions
+		// via /api/auth/verify with an empty signature.
+		AUTH_BYPASS: '1',
 	};
 	if (options.capacity !== undefined) {
 		env.LOBBY_CAPACITY = String(options.capacity);
@@ -296,8 +302,12 @@ export function sleep(ms: number): Promise<void> {
 
 // ── REST client helper ──────────────────────────────────────────────
 
-/** Default admin key the server falls back to when ADMIN_KEY env is unset. */
-export const TEST_ADMIN_KEY = 'boxyrun-admin-2024';
+/**
+ * Test admin key — must be at least 16 chars or the server refuses to
+ * boot (admin-key.ts deliberately fails closed; the old `boxyrun-admin-2024`
+ * fallback was the very vulnerability that module fixed).
+ */
+export const TEST_ADMIN_KEY = 'test-admin-key-for-the-test-harness-only';
 
 export interface ApiOptions {
 	method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -305,6 +315,31 @@ export interface ApiOptions {
 	asAdmin?: boolean;
 	/** Expect non-2xx and return body anyway (for error-path tests) */
 	allowError?: boolean;
+	/**
+	 * Bearer session token (from mintSession). Sets the
+	 * `Authorization: Bearer <token>` header so the server knows who the
+	 * caller is — required by every mutating endpoint that names a player.
+	 */
+	session?: string;
+	/**
+	 * Convenience: auto-mint (and cache) a session for this nametag and
+	 * use it as the bearer token. Replaces the old "send body.nametag and
+	 * trust it" pattern that the auth system closes off.
+	 */
+	asNametag?: string;
+}
+
+// Cache of (port, nametag) → sessionId so each test makes one auth handshake
+// per actor instead of one per request. Cleared implicitly when the test's
+// server tears down (next port = different cache key).
+const sessionCache = new Map<string, string>();
+async function getOrMintSession(server: { port: number }, nametag: string): Promise<string> {
+	const key = `${server.port}:${nametag}`;
+	const hit = sessionCache.get(key);
+	if (hit) return hit;
+	const sid = await mintSession(server, nametag);
+	sessionCache.set(key, sid);
+	return sid;
 }
 
 /**
@@ -319,6 +354,11 @@ export async function api<T = any>(
 	const url = `http://127.0.0.1:${server.port}${path}`;
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 	if (opts.asAdmin) headers['X-Admin-Key'] = TEST_ADMIN_KEY;
+	let sessionToken = opts.session;
+	if (!sessionToken && opts.asNametag) {
+		sessionToken = await getOrMintSession(server, opts.asNametag);
+	}
+	if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
 	const init: RequestInit = {
 		method: opts.method || 'GET',
 		headers,
@@ -335,6 +375,43 @@ export async function api<T = any>(
 		);
 	}
 	return data as T;
+}
+
+/**
+ * Mint a session token for `nametag` via the auth handshake. Requires the
+ * server to have AUTH_BYPASS=1 (which startServer() sets by default in
+ * tests) — verifyChallenge then accepts any signature.
+ *
+ * In production this dance is performed by the client SDK after a real
+ * Sphere signature; tests use the bypass to avoid wallet popup machinery.
+ */
+export async function mintSession(server: { port: number }, nametag: string): Promise<string> {
+	const ch = await api<{ challengeId: string; nonce: string }>(server, '/api/auth/challenge', {
+		method: 'POST',
+		body: { nametag },
+	});
+	const v = await api<{ sessionId: string; nametag: string }>(server, '/api/auth/verify', {
+		method: 'POST',
+		body: { challengeId: ch.challengeId, signature: 'BYPASS' },
+	});
+	return v.sessionId;
+}
+
+/**
+ * One-shot helper: open a WS, register with a freshly-minted session, and
+ * wait for the `registered` ack. Replaces the old pattern of sending
+ * `{type:'register', identity:{nametag}}` directly — that path now
+ * requires a sessionId.
+ */
+export async function connectAndRegister(
+	server: { port: number; url: string },
+	nametag: string,
+): Promise<TestClient> {
+	const sessionId = await mintSession(server, nametag);
+	const client = await connectClient(server.url);
+	client.send({ type: 'register', v: 0, identity: { nametag }, sessionId });
+	await client.nextMessage('registered', 5000);
+	return client;
 }
 
 /**

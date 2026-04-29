@@ -28,12 +28,14 @@ async function deposit(server: { port: number }, nametag: string, amount: number
 }
 
 async function balance(server: { port: number }, nametag: string): Promise<number> {
-	const r = await api(server, `/api/balance/${encodeURIComponent(nametag)}`);
+	// Endpoint is now session-gated to "own nametag or admin" — read as
+	// admin so the test isn't shaped by who's authed.
+	const r = await api(server, `/api/balance/${encodeURIComponent(nametag)}`, { asAdmin: true });
 	return r.balance ?? 0;
 }
 
 async function transactions(server: { port: number }, nametag: string): Promise<any[]> {
-	const r = await api(server, `/api/transactions/${encodeURIComponent(nametag)}`);
+	const r = await api(server, `/api/transactions/${encodeURIComponent(nametag)}`, { asAdmin: true });
 	return r.transactions || [];
 }
 
@@ -59,7 +61,7 @@ runTest('entry fee: happy path — balance debited, prize pool grows, ledger ent
 		assertEqual(before, 100);
 
 		const r = await api(server, '/api/tournaments/ef-1/register', {
-			method: 'POST', body: { nametag: 'alice' },
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 		});
 		assertEqual(r.status, 'registered');
 
@@ -89,7 +91,7 @@ runTest('entry fee: insufficient balance → 402, no registration, no charge', a
 		await createTournamentWithFee(server, 'ef-poor', 50);
 
 		const r = await api(server, '/api/tournaments/ef-poor/register', {
-			method: 'POST', body: { nametag: 'poor_bob' }, allowError: true,
+			method: 'POST', body: { nametag: 'poor_bob' }, asNametag: 'poor_bob', allowError: true,
 		});
 		assertEqual(r.error, 'insufficient_balance');
 		assertEqual(r.balance, 10);
@@ -119,7 +121,7 @@ runTest('entry fee: zero fee skips ledger write entirely', async () => {
 		await createTournamentWithFee(server, 'ef-zero', 0);
 
 		const r = await api(server, '/api/tournaments/ef-zero/register', {
-			method: 'POST', body: { nametag: 'freeplay' },
+			method: 'POST', body: { nametag: 'freeplay' }, asNametag: 'freeplay',
 		});
 		assertEqual(r.status, 'registered');
 
@@ -141,11 +143,11 @@ runTest('entry fee: duplicate registration is idempotent — no double charge', 
 		await createTournamentWithFee(server, 'ef-dup', 20);
 
 		await api(server, '/api/tournaments/ef-dup/register', {
-			method: 'POST', body: { nametag: 'carol' },
+			method: 'POST', body: { nametag: 'carol' }, asNametag: 'carol',
 		});
 		// Second register attempt
 		await api(server, '/api/tournaments/ef-dup/register', {
-			method: 'POST', body: { nametag: 'carol' }, allowError: true,
+			method: 'POST', body: { nametag: 'carol' }, asNametag: 'carol', allowError: true,
 		});
 
 		const bal = await balance(server, 'carol');
@@ -172,7 +174,7 @@ runTest('entry fee: multi-player tournament accumulates prize pool', async () =>
 
 		for (const p of players) {
 			await api(server, '/api/tournaments/ef-multi/register', {
-				method: 'POST', body: { nametag: p },
+				method: 'POST', body: { nametag: p }, asNametag: p,
 			});
 		}
 
@@ -202,10 +204,10 @@ runTest('entry fee: combines with seeded prize pool', async () => {
 		});
 
 		await api(server, '/api/tournaments/ef-seed/register', {
-			method: 'POST', body: { nametag: 'alice' },
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 		});
 		await api(server, '/api/tournaments/ef-seed/register', {
-			method: 'POST', body: { nametag: 'bob' },
+			method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob',
 		});
 
 		const tournament = await api(server, '/api/tournaments/ef-seed');
@@ -230,7 +232,7 @@ runTest('entry fee: default is 0 when not specified', async () => {
 
 		// Register without depositing → should succeed (no fee)
 		const r = await api(server, '/api/tournaments/ef-default/register', {
-			method: 'POST', body: { nametag: 'broke_player' },
+			method: 'POST', body: { nametag: 'broke_player' }, asNametag: 'broke_player',
 		});
 		assertEqual(r.status, 'registered');
 	} finally {
@@ -245,7 +247,7 @@ runTest('entry fee: exact balance allowed (balance == fee succeeds)', async () =
 		await createTournamentWithFee(server, 'ef-exact', 50);
 
 		const r = await api(server, '/api/tournaments/ef-exact/register', {
-			method: 'POST', body: { nametag: 'exact' },
+			method: 'POST', body: { nametag: 'exact' }, asNametag: 'exact',
 		});
 		assertEqual(r.status, 'registered');
 		assertEqual(await balance(server, 'exact'), 0, 'balance depleted exactly');
@@ -265,7 +267,7 @@ runTest('entry fee: token conservation — sum of player losses = prize pool gro
 		await createTournamentWithFee(server, 'ef-cons', 30);
 		for (const p of players) {
 			await api(server, '/api/tournaments/ef-cons/register', {
-				method: 'POST', body: { nametag: p },
+				method: 'POST', body: { nametag: p }, asNametag: p,
 			});
 		}
 

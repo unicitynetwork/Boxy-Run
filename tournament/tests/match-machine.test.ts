@@ -288,16 +288,18 @@ runTest('reconcile: 30s TTL clears ready flags + notifies both', async () => {
 	assert(types.includes('broadcast_status'));
 });
 
-runTest('reconcile: 5s offline grace auto-readies opponent → match starts', async () => {
-	// Auto-ready of offline opponents now happens synchronously in applyReady
-	// for challenge-prefixed matches, not via the reconciler's 5s grace
-	// (READY_OFFLINE_GRACE_MS = Infinity disables the reconcile path).
+runTest('ready: offline opponent is NOT auto-readied (auto-ready disabled by design)', async () => {
+	// READY_OFFLINE_GRACE_MS = Infinity intentionally disables the reconciler's
+	// auto-ready of offline players. The product reason: a player who has
+	// just navigated to the lobby (so their WS is briefly down) was getting
+	// auto-started into a match before they'd picked a skin. Force-resolve
+	// at 45s (both offline) and 5-min/90s no-show forfeit handle the
+	// genuinely-absent-player cases instead.
 	let s = seed({ matchId: 'challenge-t/R0M0', tournamentId: 'challenge-t' });
 	const r = apply(s, { type: 'ready', nametag: 'alice', now: 1000, opponentOnline: false });
 	assertEqual(r.state.ready.A, true);
-	assertEqual(r.state.ready.B, true);
-	assertEqual(r.state.phase, 'playing', 'auto-ready flipped phase to playing');
-	assert(effectTypes(r.effects).includes('send_match_start'));
+	assertEqual(r.state.ready.B, false, 'opponent NOT auto-readied');
+	assertEqual(r.state.phase, 'awaiting_ready', 'phase stays awaiting_ready');
 });
 
 runTest('reconcile: online opponent is NOT auto-readied even at 5s', async () => {

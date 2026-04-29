@@ -24,6 +24,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -52,8 +53,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -87,8 +89,8 @@ runTest('series-inputs: game 2 inputs are tagged with currentGame (not overwritt
 			method: 'POST', asAdmin: true,
 			body: { id: tid, name: tid, maxPlayers: 2, bestOf: 5 },
 		});
-		await api(server, `/api/tournaments/${tid}/register`, { method: 'POST', body: { nametag: 'alice' } });
-		await api(server, `/api/tournaments/${tid}/register`, { method: 'POST', body: { nametag: 'bob' } });
+		await api(server, `/api/tournaments/${tid}/register`, { method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice' });
+		await api(server, `/api/tournaments/${tid}/register`, { method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob' });
 		await api(server, `/api/tournaments/${tid}/start`, { method: 'POST', asAdmin: true });
 
 		const alice = await wsConnect(server.port, 'alice');

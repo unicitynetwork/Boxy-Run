@@ -17,8 +17,9 @@ import {
 import { startTournament } from './tournament-logic';
 import { getDb, ensureSchema } from './db';
 import { now } from './clock';
-
-const ADMIN_KEY = process.env.ADMIN_KEY || 'boxyrun-admin-2024';
+import { isAdminRequest } from './admin-key';
+import { getSession } from './auth';
+import { normalizeNametag } from './nametag';
 // On-chain wallet that escrows every UCT represented in the ledger. The
 // internal player_transactions ledger is a *view* on this wallet: the sum
 // of all player balances + unpaid prize pools MUST equal this wallet's
@@ -43,16 +44,87 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 function isAdmin(req: IncomingMessage): boolean {
-	return req.headers['x-admin-key'] === ADMIN_KEY;
+	return isAdminRequest(req);
 }
 
+/**
+ * Send an error response without leaking internal details. Logs the
+ * full err server-side (stack trace, SQL message, etc.) but only
+ * returns a stable code to the client. Replaces the old pattern of
+ * piping `err.message` straight to JSON, which leaked filesystem
+ * paths, SQL fragments, and parser internals to anyone curling the
+ * API.
+ */
+function errResponse(res: ServerResponse, status: number, err: unknown, code = 'internal_error'): void {
+	console.error(`[api] ${code} (${status}):`, err);
+	json(res, status, { error: code });
+}
+
+/**
+ * Bounded request-body reader. Without this cap, an attacker could send a
+ * multi-GB POST and OOM the Fly machine. 1 MiB is generous for every
+ * legitimate tournament-api body (the largest is a register/done payload —
+ * a few hundred bytes).
+ */
+const MAX_BODY_BYTES = 1024 * 1024;
 function readBody(req: IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
-		req.on('data', (c) => chunks.push(c));
+		let total = 0;
+		req.on('data', (c) => {
+			total += (c as Buffer).length;
+			if (total > MAX_BODY_BYTES) {
+				req.destroy();
+				reject(new Error('payload_too_large'));
+				return;
+			}
+			chunks.push(c);
+		});
 		req.on('end', () => resolve(Buffer.concat(chunks).toString()));
 		req.on('error', reject);
 	});
+}
+
+/**
+ * Resolve the authed nametag from the request. Returns null and sends a
+ * 401 if the Authorization: Bearer <session> header is missing or
+ * invalid. Mutating endpoints call this first and bail on null.
+ *
+ * Returns the *normalized* nametag (lowercase, no leading @) so callers
+ * can compare directly against DB rows.
+ */
+function requireSession(req: IncomingMessage, res: ServerResponse): { nametag: string } | null {
+	const auth = String(req.headers.authorization || '');
+	const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+	const session = getSession(token);
+	if (!session) {
+		json(res, 401, { error: 'unauthorized', message: 'Sphere-signed session required' });
+		return null;
+	}
+	return { nametag: normalizeNametag(session.nametag) };
+}
+
+/**
+ * Like requireSession() but also asserts that the session matches a
+ * specific nametag (typically one supplied in the request body or path).
+ * Returns the session on success, null after sending a 403 on mismatch.
+ *
+ * Used to guard endpoints where the *operation itself* names a player
+ * (register, ready, done) — without this, a session for `alice` could
+ * register `bob` for a paid tournament.
+ */
+function requireSessionFor(req: IncomingMessage, res: ServerResponse, claimedNametag: string): { nametag: string } | null {
+	const session = requireSession(req, res);
+	if (!session) return null;
+	const claimed = normalizeNametag(claimedNametag);
+	if (!claimed || claimed !== session.nametag) {
+		json(res, 403, {
+			error: 'session_mismatch',
+			message: 'Session does not match the supplied nametag',
+		});
+		return null;
+	}
+	return session;
 }
 
 /**
@@ -182,7 +254,7 @@ export async function handleTournamentApi(
 			});
 			return true;
 		} catch (err: any) {
-			json(res, 500, { error: err.message });
+			errResponse(res, 500, err, 'internal_error');
 			return true;
 		}
 	}
@@ -206,7 +278,7 @@ export async function handleTournamentApi(
 			json(res, 201, { id, status: 'registration' });
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -235,6 +307,9 @@ export async function handleTournamentApi(
 				json(res, 400, { error: 'from_and_opponent_required' });
 				return true;
 			}
+			// Auth: only the player issuing the challenge (and committing
+			// any wager) can do so under their own name.
+			if (!requireSessionFor(req, res, from)) return true;
 			const { applyChallenge } = await import('./challenge');
 			const r = await applyChallenge(from, opponent, wager, bestOf);
 			if (!r.ok) {
@@ -244,7 +319,7 @@ export async function handleTournamentApi(
 			}
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -255,6 +330,9 @@ export async function handleTournamentApi(
 			const body = JSON.parse(await readBody(req));
 			const acceptor = String(body.by || '').trim();
 			if (!acceptor) { json(res, 400, { error: 'by_required' }); return true; }
+			// Auth: only the named acceptor can accept (locks their funds
+			// for the wager).
+			if (!requireSessionFor(req, res, acceptor)) return true;
 			const { applyChallengeAccept } = await import('./challenge');
 			const r = await applyChallengeAccept(acceptor, challengeAcceptMatch[1]);
 			if (!r.ok) {
@@ -264,7 +342,7 @@ export async function handleTournamentApi(
 			}
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -275,6 +353,7 @@ export async function handleTournamentApi(
 			const body = JSON.parse(await readBody(req));
 			const decliner = String(body.by || '').trim();
 			if (!decliner) { json(res, 400, { error: 'by_required' }); return true; }
+			if (!requireSessionFor(req, res, decliner)) return true;
 			const { applyChallengeDecline } = await import('./challenge');
 			const r = applyChallengeDecline(decliner, challengeDeclineMatch[1]);
 			if (!r.ok) {
@@ -284,7 +363,7 @@ export async function handleTournamentApi(
 			}
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -297,6 +376,7 @@ export async function handleTournamentApi(
 			const body = JSON.parse(await readBody(req));
 			const from = String(body.from || '').trim();
 			if (!from) { json(res, 400, { error: 'from_required' }); return true; }
+			if (!requireSessionFor(req, res, from)) return true;
 			const bestOf = Number(body.bestOf) || 1;
 			const wager = Number(body.wager) || 0;
 			const { createChallengeLink } = await import('./challenge');
@@ -308,7 +388,7 @@ export async function handleTournamentApi(
 			}
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -346,6 +426,7 @@ export async function handleTournamentApi(
 			const body = JSON.parse(await readBody(req));
 			const acceptor = String(body.by || '').trim();
 			if (!acceptor) { json(res, 400, { error: 'by_required' }); return true; }
+			if (!requireSessionFor(req, res, acceptor)) return true;
 			const { getChallengeLinkByCode, applyChallengeAccept } = await import('./challenge');
 			const ch = getChallengeLinkByCode(linkAcceptMatch[1]);
 			if (!ch) {
@@ -360,7 +441,7 @@ export async function handleTournamentApi(
 			}
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -395,7 +476,7 @@ export async function handleTournamentApi(
 			cleanupMatch(matchId);
 			json(res, 200, { status: 'reset', matchId });
 		} catch (err: any) {
-			json(res, 500, { error: err.message });
+			errResponse(res, 500, err, 'internal_error');
 		}
 		return true;
 	}
@@ -419,6 +500,9 @@ export async function handleTournamentApi(
 				json(res, 400, { error: 'nametag_required' });
 				return true;
 			}
+			// Auth: only the player named in the body can mark themselves
+			// ready — alice can't force bob's match to start.
+			if (!requireSessionFor(req, res, nametag)) return true;
 			const { applyReady } = await import('./tournament-ws');
 			const result = await applyReady(nametag, matchId);
 			if (!result.ok) {
@@ -432,7 +516,7 @@ export async function handleTournamentApi(
 			});
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -452,6 +536,8 @@ export async function handleTournamentApi(
 				json(res, 400, { error: 'nametag_required' });
 				return true;
 			}
+			// Auth: caller must own the session matching this nametag.
+			if (!requireSessionFor(req, res, nametag)) return true;
 			// Validate caller is a participant in this match
 			const { getMatch } = await import('./tournament-db');
 			const match = await getMatch(matchId);
@@ -464,7 +550,7 @@ export async function handleTournamentApi(
 			json(res, 200, { status: 'ok' });
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -513,7 +599,7 @@ export async function handleTournamentApi(
 			});
 			return true;
 		} catch (err: any) {
-			json(res, 500, { error: err.message });
+			errResponse(res, 500, err, 'internal_error');
 			return true;
 		}
 	}
@@ -561,7 +647,7 @@ export async function handleTournamentApi(
 			json(res, 200, { status: 'paid', winner, amount: prizePool });
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -584,6 +670,9 @@ export async function handleTournamentApi(
 			const body = JSON.parse(await readBody(req));
 			const nametag = typeof body.nametag === 'string' ? body.nametag.trim() : '';
 			if (!nametag) { json(res, 400, { error: 'nametag required' }); return true; }
+			// Auth: only the player named in the body can register, and
+			// only with their own funds (entry fees debit the same wallet).
+			if (!requireSessionFor(req, res, nametag)) return true;
 
 			const tournament = await getTournament(id);
 			if (!tournament) { json(res, 404, { error: 'Tournament not found' }); return true; }
@@ -639,7 +728,7 @@ export async function handleTournamentApi(
 			json(res, 200, { status: 'registered', playerCount: newCount });
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -684,7 +773,7 @@ export async function handleTournamentApi(
 			json(res, 200, { deleted: id });
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -698,6 +787,7 @@ export async function handleTournamentApi(
 			const body = JSON.parse(await readBody(req));
 			const nametag = body.nametag;
 			if (!nametag) { json(res, 400, { error: 'nametag required' }); return true; }
+			if (!requireSessionFor(req, res, nametag)) return true;
 
 			const tournament = await getTournament(id);
 			if (!tournament) { json(res, 404, { error: 'Tournament not found' }); return true; }
@@ -719,7 +809,7 @@ export async function handleTournamentApi(
 			}
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}
@@ -733,7 +823,7 @@ export async function handleTournamentApi(
 			json(res, 200, { status: 'started' });
 			return true;
 		} catch (err: any) {
-			json(res, 400, { error: err.message });
+			errResponse(res, 400, err, 'invalid_request');
 			return true;
 		}
 	}

@@ -11,6 +11,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -34,8 +35,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -82,7 +84,7 @@ runTest('v2: 4-player tournament — 2 rounds, bracket advancement', async () =>
 		});
 		for (const p of ['alice', 'bob', 'charlie', 'dave']) {
 			await api(server, '/api/tournaments/4p/register', {
-				method: 'POST', body: { nametag: p },
+				method: 'POST', body: { nametag: p }, asNametag: p,
 			});
 		}
 		await api(server, '/api/tournaments/4p/start', { method: 'POST', asAdmin: true });

@@ -21,6 +21,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 import { chaosConnect } from './chaos';
 
@@ -50,8 +51,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -79,10 +81,10 @@ async function setupMatch(server: { port: number }, tid: string, a: string, b: s
 		body: { id: tid, name: tid, maxPlayers: 2 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a },
+		method: 'POST', body: { nametag: a }, asNametag: a,
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b },
+		method: 'POST', body: { nametag: b }, asNametag: b,
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -94,10 +96,12 @@ runTest('zombie: REST ready works when the caller\'s WS goes silent', async () =
 	try {
 		await setupMatch(server, 'z-rest', 'alice', 'bob');
 
-		// Alice connects + registers, then goes zombie (silenced).
+		// Alice connects + registers, then goes zombie (silenced). Mint
+		// the session up front because chaosConnect's onOpen is sync.
+		const aliceSession = await mintSession(server, 'alice');
 		const alice = await chaosConnect({
 			port: server.port, nametag: 'alice',
-			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'alice' } }),
+			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'alice' }, sessionId: aliceSession }),
 		});
 		await sleep(100);
 		alice.setMode('zombie');
@@ -110,7 +114,7 @@ runTest('zombie: REST ready works when the caller\'s WS goes silent', async () =
 
 		// Alice's WS match-ready would silently drop. REST is the escape hatch.
 		const r = await api(server, '/api/tournaments/z-rest/matches/0/0/ready', {
-			method: 'POST', body: { nametag: 'alice' },
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 		});
 		assertEqual(r.status, 'ok');
 		assertEqual(r.phase, 'started', 'match starts when both now ready');
@@ -138,9 +142,10 @@ runTest('zombie: reconciler auto-readies when opponent is offline during ready_w
 		// Actually with zombie (WS still OPEN), server sees carol as ONLINE.
 		// The reconciler's 5s grace only fires for OFFLINE opponents. So in this
 		// pure zombie case, match hangs until 30s TTL clears flags.
+		const carolSession = await mintSession(server, 'carol');
 		const carol = await chaosConnect({
 			port: server.port, nametag: 'carol',
-			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'carol' } }),
+			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'carol' }, sessionId: carolSession }),
 		});
 		await sleep(100);
 		carol.setMode('zombie');
@@ -171,35 +176,57 @@ runTest('zombie: reconciler auto-readies when opponent is offline during ready_w
 	}
 });
 
-runTest('zombie: abrupt TCP close triggers normal reconnect path', async () => {
+runTest('zombie: abrupt TCP close evicts player + survivor reconnects cleanly', async () => {
 	const server = await startServer();
 	try {
 		await setupMatch(server, 'challenge-z-abrupt', 'eve', 'frank');
 
+		const eveSession = await mintSession(server, 'eve');
 		const eve = await chaosConnect({
 			port: server.port, nametag: 'eve',
-			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'eve' } }),
+			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'eve' }, sessionId: eveSession }),
 		});
 		await sleep(100);
 
 		const frank = await wsConnect(server.port, 'frank');
 		await sleep(100);
 
-		// Eve's TCP drops without a close frame — server will eventually notice
-		// via the ping/pong protocol and evict her from players map.
+		// Both online + registered — sanity check.
+		const before = await api(server, '/api/online') as { players: string[] };
+		assert(before.players.includes('eve'), 'eve online before drop');
+		assert(before.players.includes('frank'), 'frank online before drop');
+
+		// Eve's TCP drops without a close frame. Auto-ready of offline
+		// opponents is intentionally disabled (READY_OFFLINE_GRACE_MS =
+		// Infinity) — too many false-positive auto-starts during page
+		// navigation. Match stays in ready_wait until eve actually
+		// reconnects or the 5-min no-show forfeit fires. Frank's READY
+		// just sets his own flag.
 		eve.abruptClose();
 		await sleep(500);
 
-		// Frank readies AFTER eve is offline. For challenge-prefixed matches,
-		// the server auto-readies the offline opponent immediately when
-		// the other player readies.
 		frank.send({ type: 'match-ready', matchId: 'challenge-z-abrupt/R0M0' });
 		await sleep(500);
 
-		const state = await api(server, '/api/tournaments/challenge-z-abrupt/matches/0/0/state');
-		assertEqual(state.phase, 'active', 'match started after offline auto-ready');
+		const mid = await api(server, '/api/tournaments/challenge-z-abrupt/matches/0/0/state');
+		assertEqual(mid.phase, 'ready_wait', 'still ready_wait — no offline auto-ready');
+		const frankSide = mid.playerA === 'frank' ? 'A' : 'B';
+		const eveSide = frankSide === 'A' ? 'B' : 'A';
+		assertEqual(mid.ready[frankSide], true, 'frank flag set');
+		assertEqual(mid.ready[eveSide], false, 'eve NOT auto-readied');
+
+		// Eve reconnects fresh — same nametag, new socket, same session.
+		// She can ready and the match proceeds normally.
+		const eve2 = await wsConnect(server.port, 'eve');
+		await sleep(100);
+		eve2.send({ type: 'match-ready', matchId: 'challenge-z-abrupt/R0M0' });
+		await eve2.waitFor('match-start');
+
+		const after = await api(server, '/api/tournaments/challenge-z-abrupt/matches/0/0/state');
+		assertEqual(after.phase, 'active', 'match started once eve reconnected + readied');
 
 		frank.close();
+		eve2.close();
 	} finally {
 		await stopServer(server.proc);
 	}

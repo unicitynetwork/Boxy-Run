@@ -12,6 +12,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -34,8 +35,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				send(msg: any) { ws.send(JSON.stringify(msg)); },
@@ -71,10 +73,10 @@ runTest('v2: error paths — invalid ready, full tournament, wrong match', async
 				method: 'POST', asAdmin: true, body: { id: 'err-t1', name: 'Err Test' },
 			});
 			await api(server, '/api/tournaments/err-t1/register', {
-				method: 'POST', body: { nametag: 'alice' },
+				method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 			});
 			await api(server, '/api/tournaments/err-t1/register', {
-				method: 'POST', body: { nametag: 'bob' },
+				method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob',
 			});
 			await api(server, '/api/tournaments/err-t1/start', {
 				method: 'POST', asAdmin: true,
@@ -98,13 +100,13 @@ runTest('v2: error paths — invalid ready, full tournament, wrong match', async
 				body: { id: 'full-t', name: 'Full', maxPlayers: 2 },
 			});
 			await api(server, '/api/tournaments/full-t/register', {
-				method: 'POST', body: { nametag: 'p1' },
+				method: 'POST', body: { nametag: 'p1' }, asNametag: 'p1',
 			});
 			await api(server, '/api/tournaments/full-t/register', {
-				method: 'POST', body: { nametag: 'p2' },
+				method: 'POST', body: { nametag: 'p2' }, asNametag: 'p2',
 			});
 			const full = await api(server, '/api/tournaments/full-t/register', {
-				method: 'POST', body: { nametag: 'p3' }, allowError: true,
+				method: 'POST', body: { nametag: 'p3' }, asNametag: 'p3', allowError: true,
 			});
 			assert(full.error, 'should error when full');
 		}
@@ -123,10 +125,10 @@ runTest('v2: error paths — invalid ready, full tournament, wrong match', async
 				method: 'POST', asAdmin: true, body: { id: 'err-t2', name: 'Input Err' },
 			});
 			await api(server, '/api/tournaments/err-t2/register', {
-				method: 'POST', body: { nametag: 'inputA' },
+				method: 'POST', body: { nametag: 'inputA' }, asNametag: 'inputA',
 			});
 			await api(server, '/api/tournaments/err-t2/register', {
-				method: 'POST', body: { nametag: 'inputB' },
+				method: 'POST', body: { nametag: 'inputB' }, asNametag: 'inputB',
 			});
 			await api(server, '/api/tournaments/err-t2/start', {
 				method: 'POST', asAdmin: true,

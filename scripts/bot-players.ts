@@ -128,17 +128,54 @@ const CRYPTO_NAMES = [
 	'mint_sniper', 'airdrop_hunter', 'bridge_maxi', 'zk_believer',
 ];
 
+/**
+ * Mint a server-side session for `nametag` via the auth handshake. The
+ * server requires AUTH_BYPASS=1 (which the test harness sets) for this
+ * to work — verifyChallenge then accepts any signature.
+ *
+ * In production the bots would need real wallets; this script is a
+ * load-test/dev-fixture tool, not a prod-facing client.
+ */
+async function mintSessionFor(nametag: string): Promise<string | null> {
+	try {
+		const ch = await fetch(`${HTTP_BASE}/api/auth/challenge`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ nametag }),
+		}).then(r => r.json()) as any;
+		if (!ch.challengeId) return null;
+		const v = await fetch(`${HTTP_BASE}/api/auth/verify`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ challengeId: ch.challengeId, signature: 'BOT' }),
+		}).then(r => r.json()) as any;
+		return v.sessionId || null;
+	} catch {
+		return null;
+	}
+}
+
 // ── Bot logic ────────────────────────────────────────────────────
 async function runBot(idx: number): Promise<void> {
 	const nametag = CRYPTO_NAMES[idx] || `anon_${idx}`;
 	const skill = skillForIdx(idx);
 	const log = (msg: string) => console.log(`[${nametag} ${skill.label}] ${msg}`);
 
+	// Auth handshake — required before anything mutating works.
+	const sessionId = await mintSessionFor(nametag);
+	if (!sessionId) {
+		log('auth handshake failed — aborting (need AUTH_BYPASS=1 server)');
+		return;
+	}
+
 	// Register for tournament via REST
 	try {
 		const regRes = await fetch(`${HTTP_BASE}/api/tournaments/${tournamentId}/register`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${sessionId}`,
+			},
 			body: JSON.stringify({ nametag }),
 		});
 		const regData: any = await regRes.json();
@@ -223,7 +260,9 @@ async function runBot(idx: number): Promise<void> {
 
 		ws.on('open', () => {
 			lastHeartbeat = Date.now();
-			safeSend({ type: 'register', identity: { nametag } });
+			// Use the session minted up-front for REST registration —
+			// reusable across reconnects until it expires (24h).
+			safeSend({ type: 'register', identity: { nametag }, sessionId });
 		});
 
 		// Server pings every 10s. If we miss two pings (≥25s silence) the

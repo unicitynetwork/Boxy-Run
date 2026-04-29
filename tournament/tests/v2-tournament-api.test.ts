@@ -48,7 +48,7 @@ runTest('v2: tournament API — create, register, start, bracket', async () => {
 		// ── Register players ──
 		for (const name of ['alice', 'bob', 'charlie', 'dave']) {
 			const reg = await api(server, '/api/tournaments/api-test-1/register', {
-				method: 'POST', body: { nametag: name },
+				method: 'POST', body: { nametag: name }, asNametag: name,
 			});
 			assertEqual(reg.status, 'registered');
 		}
@@ -58,7 +58,7 @@ runTest('v2: tournament API — create, register, start, bracket', async () => {
 
 		// ── Duplicate registration → still 4 ──
 		await api(server, '/api/tournaments/api-test-1/register', {
-			method: 'POST', body: { nametag: 'alice' }, allowError: true,
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice', allowError: true,
 		});
 		const afterDup = await api(server, '/api/tournaments/api-test-1');
 		assertEqual(afterDup.playerCount, 4);
@@ -77,7 +77,7 @@ runTest('v2: tournament API — create, register, start, bracket', async () => {
 
 		// ── Register after start → error ──
 		const lateReg = await api(server, '/api/tournaments/api-test-1/register', {
-			method: 'POST', body: { nametag: 'eve' }, allowError: true,
+			method: 'POST', body: { nametag: 'eve' }, asNametag: 'eve', allowError: true,
 		});
 		assert(lateReg.error, 'should error after tournament started');
 

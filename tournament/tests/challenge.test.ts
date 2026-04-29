@@ -15,6 +15,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -40,8 +41,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -67,7 +69,7 @@ runTest('challenge: REST create → WS receives challenge-received', async () =>
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
 		});
 		assert(created.challengeId, 'challengeId returned');
 
@@ -97,7 +99,7 @@ runTest('challenge: self-challenge → 400 self_challenge', async () => {
 
 		const result = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'alice' },
+			body: { from: 'alice', opponent: 'alice' }, asNametag: 'alice',
 			allowError: true,
 		});
 		assertEqual(result.error, 'self_challenge');
@@ -116,7 +118,7 @@ runTest('challenge: offline opponent → 409 opponent_offline', async () => {
 
 		const result = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'ghost_player' },
+			body: { from: 'alice', opponent: 'ghost_player' }, asNametag: 'alice',
 			allowError: true,
 		});
 		assertEqual(result.error, 'opponent_offline');
@@ -135,7 +137,7 @@ runTest('challenge: missing from/opponent → 400', async () => {
 		});
 		assertEqual(r1.error, 'from_and_opponent_required');
 		const r2 = await api(server, '/api/challenges', {
-			method: 'POST', body: { from: 'alice' }, allowError: true,
+			method: 'POST', body: { from: 'alice' }, asNametag: 'alice', allowError: true,
 		});
 		assertEqual(r2.error, 'from_and_opponent_required');
 	} finally {
@@ -151,12 +153,12 @@ runTest('challenge: accept → match starts with both participants', async () =>
 		await sleep(100);
 
 		const created = await api(server, '/api/challenges', {
-			method: 'POST', body: { from: 'alice', opponent: 'bob' },
+			method: 'POST', body: { from: 'alice', opponent: 'bob' }, asNametag: 'alice',
 		});
 		await bob.waitFor('challenge-received');
 
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		assertEqual(accepted.status, 'accepted');
 		assert(accepted.matchId, 'matchId present');
@@ -185,7 +187,7 @@ runTest('challenge: accept invalid ID → 404 invalid_challenge', async () => {
 		const bob = await wsConnect(server.port, 'bob');
 		await sleep(100);
 		const r = await api(server, '/api/challenges/ch-nonexistent/accept', {
-			method: 'POST', body: { by: 'bob' }, allowError: true,
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob', allowError: true,
 		});
 		assertEqual(r.error, 'invalid_challenge');
 		bob.close();
@@ -203,12 +205,12 @@ runTest('challenge: accept by wrong player → 404 invalid_challenge', async () 
 		await sleep(100);
 
 		const created = await api(server, '/api/challenges', {
-			method: 'POST', body: { from: 'alice', opponent: 'bob' },
+			method: 'POST', body: { from: 'alice', opponent: 'bob' }, asNametag: 'alice',
 		});
 
 		// eve tries to accept a challenge addressed to bob
 		const r = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'eve' }, allowError: true,
+			method: 'POST', body: { by: 'eve' }, asNametag: 'eve', allowError: true,
 		});
 		assertEqual(r.error, 'invalid_challenge');
 
@@ -228,12 +230,12 @@ runTest('challenge: decline → challenger notified, idempotent on repeat', asyn
 		await sleep(100);
 
 		const created = await api(server, '/api/challenges', {
-			method: 'POST', body: { from: 'alice', opponent: 'bob' },
+			method: 'POST', body: { from: 'alice', opponent: 'bob' }, asNametag: 'alice',
 		});
 		await bob.waitFor('challenge-received');
 
 		const r1 = await api(server, `/api/challenges/${created.challengeId}/decline`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		assertEqual(r1.declined, true);
 
@@ -243,7 +245,7 @@ runTest('challenge: decline → challenger notified, idempotent on repeat', asyn
 
 		// Second decline is idempotent (challenge already gone)
 		const r2 = await api(server, `/api/challenges/${created.challengeId}/decline`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		assertEqual(r2.status, 'ok');
 		assertEqual(r2.declined, false);
@@ -255,7 +257,7 @@ runTest('challenge: decline → challenger notified, idempotent on repeat', asyn
 	}
 });
 
-runTest('challenge: expires after 30s via reconciler', async () => {
+runTest('challenge: expires after 60s via reconciler', async () => {
 	const server = await startServer();
 	try {
 		const alice = await wsConnect(server.port, 'alice');
@@ -263,12 +265,12 @@ runTest('challenge: expires after 30s via reconciler', async () => {
 		await sleep(100);
 
 		const created = await api(server, '/api/challenges', {
-			method: 'POST', body: { from: 'alice', opponent: 'bob' },
+			method: 'POST', body: { from: 'alice', opponent: 'bob' }, asNametag: 'alice',
 		});
 		await bob.waitFor('challenge-received');
 
-		// Advance past 30s expiry
-		await advanceClock(server, 35_000);
+		// Advance past CHALLENGE_EXPIRY_MS (60s in challenge.ts).
+		await advanceClock(server, 65_000);
 		await sleep(1200); // let the 1s tick observe
 
 		// Alice receives challenge_expired error
@@ -277,7 +279,7 @@ runTest('challenge: expires after 30s via reconciler', async () => {
 
 		// Accepting now fails
 		const r = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' }, allowError: true,
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob', allowError: true,
 		});
 		assertEqual(r.error, 'invalid_challenge');
 
@@ -299,11 +301,11 @@ runTest('challenge: REGRESSION — accepted challenge starts in awaiting_ready, 
 		await sleep(100);
 
 		const created = await api(server, '/api/challenges', {
-			method: 'POST', body: { from: 'alice', opponent: 'bob' },
+			method: 'POST', body: { from: 'alice', opponent: 'bob' }, asNametag: 'alice',
 		});
 		await bob.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		await alice.waitFor('challenge-start');
 		await bob.waitFor('challenge-start');
@@ -343,7 +345,7 @@ runTest('challenge: WS and REST flow both work equivalently', async () => {
 
 		// Bob uses REST to accept
 		const accepted = await api(server, `/api/challenges/${invite.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		assertEqual(accepted.status, 'accepted');
 

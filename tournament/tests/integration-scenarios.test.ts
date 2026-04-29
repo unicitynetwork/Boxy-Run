@@ -20,6 +20,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -50,8 +51,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 10000) {
@@ -92,10 +94,10 @@ async function setupTournament(
 		body: { id: tid, name: tid, maxPlayers: 2, bestOf },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a },
+		method: 'POST', body: { nametag: a }, asNametag: a,
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b },
+		method: 'POST', body: { nametag: b }, asNametag: b,
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -384,11 +386,11 @@ runTest('scenario: challenge no-show — forfeit after 90 seconds', async () => 
 		// Create and accept challenge
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
 		});
 		await b.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		const matchId = accepted.matchId;
 		await a.waitFor('challenge-start');
@@ -563,11 +565,11 @@ runTest('scenario: both request rematch — series-next sent, new game starts', 
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
 		});
 		await b.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		const matchId = accepted.matchId;
 		await a.waitFor('challenge-start');
@@ -608,11 +610,11 @@ runTest('scenario: one requests rematch, other does not — state stays resolved
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
 		});
 		await b.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		const matchId = accepted.matchId;
 		await a.waitFor('challenge-start');
@@ -648,11 +650,11 @@ runTest('scenario: rematch after Bo3 series — wins reset to 0-0, new seed', as
 		// Create a Bo3 challenge
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 3 },
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 3 }, asNametag: 'alice',
 		});
 		await b.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		const matchId = accepted.matchId;
 		await a.waitFor('challenge-start');
@@ -717,7 +719,7 @@ runTest('scenario: bot declines wager challenge (wager > 0)', async () => {
 		// Challenge a known bot with a wager
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'human_player', opponent: 'satoshi_og', wager: 10, bestOf: 1 },
+			body: { from: 'human_player', opponent: 'satoshi_og', wager: 10, bestOf: 1 }, asNametag: 'human_player',
 		});
 		assert(created.challengeId, 'challenge created');
 
@@ -743,7 +745,7 @@ runTest('scenario: bot accepts zero-wager challenge', async () => {
 		// Challenge a known bot with zero wager
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'human_player', opponent: 'satoshi_og', wager: 0, bestOf: 1 },
+			body: { from: 'human_player', opponent: 'satoshi_og', wager: 0, bestOf: 1 }, asNametag: 'human_player',
 		});
 		assert(created.challengeId, 'challenge created');
 

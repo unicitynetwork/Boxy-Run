@@ -20,6 +20,8 @@ if (typeof (globalThis as any).WebSocket === 'undefined') {
 
 import { handleApi } from './leaderboard';
 import { handleTournamentApi } from './tournament-api';
+import { getSession } from './auth';
+import { normalizeNametag } from './nametag';
 import { getDb, ensureSchema } from './db';
 import { ensureTournamentSchema } from './tournament-db';
 import {
@@ -181,17 +183,35 @@ wss.on('connection', (ws) => {
 
 		switch (msg.type) {
 			case 'register':
+				// Sphere-signed session is REQUIRED. Without this, any client
+				// could send {type:'register', identity:{nametag:'alice'}} and
+				// the server would route alice's match-start, prize, and chat
+				// messages to the impersonator. The session token is minted by
+				// /api/auth/verify after the client signs the server's nonce
+				// with its wallet's chain private key.
 				if (msg.identity?.nametag) {
-					registerSocket(ws, msg.identity.nametag);
-					const tag = msg.identity.nametag;
-					const others = getOnlinePlayers().filter(n => n !== tag);
-					sendTo(tag, {
-						type: 'registered', v: 0, nametag: tag, onlinePlayers: others,
+					const claimed = normalizeNametag(msg.identity.nametag);
+					const session = getSession(msg.sessionId);
+					if (!session || normalizeNametag(session.nametag) !== claimed) {
+						try {
+							ws.send(JSON.stringify({
+								type: 'error', v: 0, code: 'unauthorized',
+								message: 'Sphere-signed session required for register',
+							}));
+						} catch {}
+						console.warn(`[ws] register rejected — bad session for ${claimed}`);
+						ws.close(1008, 'unauthorized');
+						break;
+					}
+					registerSocket(ws, claimed);
+					const others = getOnlinePlayers().filter(n => n !== claimed);
+					sendTo(claimed, {
+						type: 'registered', v: 0, nametag: claimed, onlinePlayers: others,
 						protocolVersion: 0,
 					});
 					// Notify everyone that a new player came online
-					broadcastToAll({ type: 'player-online', v: 0, nametag: tag, online: true });
-					console.log(`[ws] ${tag} registered (${getOnlinePlayers().length} online)`);
+					broadcastToAll({ type: 'player-online', v: 0, nametag: claimed, online: true });
+					console.log(`[ws] ${claimed} registered (${getOnlinePlayers().length} online)`);
 				}
 				break;
 

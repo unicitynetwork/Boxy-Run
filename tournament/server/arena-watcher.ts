@@ -46,6 +46,14 @@ type IncomingTransfer = {
 };
 
 let sphere: any = null;
+let transport: any = null;
+
+/** Exposed for the auth module — resolveNametagInfo() lives on the
+ *  TransportProvider returned by createNodeProviders. Returns null until
+ *  the watcher has booted. */
+export function getTransport(): any {
+	return transport;
+}
 
 interface ParsedWallet {
 	mnemonic: string;
@@ -184,6 +192,8 @@ export async function startArenaWatcher(): Promise<void> {
 			relays: network === 'testnet' ? testnetRelays : mainnetRelays,
 		},
 	});
+	// Stash for the auth module's nametag → chainPubkey resolver.
+	transport = providers.transport;
 
 	// Use `import` (not `load`) — we only have the mnemonic + derivation
 	// fields, not a populated storage. Pass through `derivationMode` and

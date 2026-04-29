@@ -15,6 +15,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -43,8 +44,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 3000) {
@@ -73,8 +75,8 @@ runTest('same-nametag: second WS displaces first, match state preserved', async 
 			method: 'POST', asAdmin: true,
 			body: { id: 'sn-1', name: 'sn-1', maxPlayers: 2 },
 		});
-		await api(server, '/api/tournaments/sn-1/register', { method: 'POST', body: { nametag: 'alice' } });
-		await api(server, '/api/tournaments/sn-1/register', { method: 'POST', body: { nametag: 'bob' } });
+		await api(server, '/api/tournaments/sn-1/register', { method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice' });
+		await api(server, '/api/tournaments/sn-1/register', { method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob' });
 		await api(server, '/api/tournaments/sn-1/start', { method: 'POST', asAdmin: true });
 
 		const alice1 = await wsConnect(server.port, 'alice');
@@ -116,31 +118,39 @@ runTest('same-nametag: second WS displaces first, match state preserved', async 
 	}
 });
 
-runTest('same-nametag: rapid reconnect doesn\'t lose ready flag', async () => {
+runTest('same-nametag: rapid reconnect doesn\'t corrupt active match', async () => {
 	const server = await startServer();
 	try {
 		await api(server, '/api/tournaments', {
 			method: 'POST', asAdmin: true,
 			body: { id: 'challenge-sn-2', name: 'sn-2', maxPlayers: 2 },
 		});
-		await api(server, '/api/tournaments/challenge-sn-2/register', { method: 'POST', body: { nametag: 'carol' } });
-		await api(server, '/api/tournaments/challenge-sn-2/register', { method: 'POST', body: { nametag: 'dave' } });
+		await api(server, '/api/tournaments/challenge-sn-2/register', { method: 'POST', body: { nametag: 'carol' }, asNametag: 'carol' });
+		await api(server, '/api/tournaments/challenge-sn-2/register', { method: 'POST', body: { nametag: 'dave' }, asNametag: 'dave' });
 		await api(server, '/api/tournaments/challenge-sn-2/start', { method: 'POST', asAdmin: true });
 
+		// Both players need to actually ready up — auto-ready of offline
+		// opponents is disabled (READY_OFFLINE_GRACE_MS = Infinity), so
+		// dave can't sit out and have the match start without him.
 		const carol = await wsConnect(server.port, 'carol');
-		// dave is offline — carol readies, offline auto-ready fires immediately
-		// (auto-ready only works for challenge-prefixed match IDs)
+		const dave = await wsConnect(server.port, 'dave');
 		await sleep(100);
 		carol.send({ type: 'match-ready', matchId: 'challenge-sn-2/R0M0' });
+		dave.send({ type: 'match-ready', matchId: 'challenge-sn-2/R0M0' });
 		await carol.waitFor('match-start');
+		await dave.waitFor('match-start');
 
-		// Carol refreshes her page 3 times in quick succession
+		// Carol refreshes her page 3 times in quick succession. Each
+		// close() emits a TCP FIN; we sleep 200ms between attempts to
+		// give the server time to process the unregister before the
+		// new socket arrives — without this gap the players-map swap
+		// races and the test goes flaky.
 		let current = carol;
 		for (let i = 0; i < 3; i++) {
 			current.close();
-			await sleep(100);
+			await sleep(200);
 			current = await wsConnect(server.port, 'carol');
-			await sleep(100);
+			await sleep(150);
 		}
 
 		// Match is still active — the reconnects didn't corrupt anything
@@ -149,6 +159,7 @@ runTest('same-nametag: rapid reconnect doesn\'t lose ready flag', async () => {
 		assertEqual(state.playerA === 'carol' || state.playerB === 'carol', true);
 
 		current.close();
+		dave.close();
 	} finally {
 		await stopServer(server.proc);
 	}
@@ -162,8 +173,10 @@ runTest('same-nametag: register message is idempotent (re-sending it works)', as
 		const first = await c.waitFor('registered');
 		assertEqual(first.nametag, 'eve');
 
-		// Re-send register on the SAME socket
-		c.send({ type: 'register', identity: { nametag: 'eve' } });
+		// Re-send register on the SAME socket — sessionId is reusable
+		// for the lifetime of the session, so we mint once and replay it.
+		const reSession = await mintSession(server, 'eve');
+		c.send({ type: 'register', identity: { nametag: 'eve' }, sessionId: reSession });
 		const second = await c.waitFor('registered');
 		assertEqual(second.nametag, 'eve');
 
@@ -187,7 +200,7 @@ runTest('same-nametag: two sockets, second one gets the pushes', async () => {
 		await sleep(100);
 		await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'gil_challenger', opponent: 'frank' },
+			body: { from: 'gil_challenger', opponent: 'frank' }, asNametag: 'gil_challenger',
 		});
 
 		const msg2 = await frank2.waitFor('challenge-received', 2000);

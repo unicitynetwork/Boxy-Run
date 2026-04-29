@@ -19,6 +19,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -47,8 +48,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -77,12 +79,14 @@ async function deposit(server: { port: number }, nametag: string, amount: number
 }
 
 async function balance(server: { port: number }, nametag: string): Promise<number> {
-	const r = await api(server, `/api/balance/${encodeURIComponent(nametag)}`);
+	// Endpoint now requires own-session-or-admin. Read as admin so the
+	// helper works for any nametag.
+	const r = await api(server, `/api/balance/${encodeURIComponent(nametag)}`, { asAdmin: true });
 	return r.balance ?? 0;
 }
 
 async function transactions(server: { port: number }, nametag: string): Promise<any[]> {
-	const r = await api(server, `/api/transactions/${encodeURIComponent(nametag)}`);
+	const r = await api(server, `/api/transactions/${encodeURIComponent(nametag)}`, { asAdmin: true });
 	return r.transactions || [];
 }
 
@@ -98,12 +102,12 @@ runTest('wager: Bo1 challenge settles once — winner +W, loser -W', async () =>
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 20, bestOf: 1 },
+			body: { from: 'alice', opponent: 'bob', wager: 20, bestOf: 1 }, asNametag: 'alice',
 		});
 		await bob.waitFor('challenge-received');
 
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' },
+			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
 		});
 		const matchId = accepted.matchId;
 		await alice.waitFor('challenge-start');
@@ -160,11 +164,11 @@ runTest('wager: Bo3 series settles ONCE at series end, not per game', async () =
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'carol', opponent: 'dave', wager: 15, bestOf: 3 },
+			body: { from: 'carol', opponent: 'dave', wager: 15, bestOf: 3 }, asNametag: 'carol',
 		});
 		await d.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'dave' },
+			method: 'POST', body: { by: 'dave' }, asNametag: 'dave',
 		});
 		const matchId = accepted.matchId;
 		await c.waitFor('challenge-start');
@@ -238,7 +242,7 @@ runTest('wager: challenger with insufficient balance → 403, no challenge creat
 
 		const r = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'poor_alice', opponent: 'bob', wager: 100, bestOf: 1 },
+			body: { from: 'poor_alice', opponent: 'bob', wager: 100, bestOf: 1 }, asNametag: 'poor_alice',
 			allowError: true,
 		});
 		assertEqual(r.error, 'insufficient_balance');
@@ -266,12 +270,12 @@ runTest('wager: acceptor with insufficient balance → 403, challenger notified'
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'poor_bob', wager: 50, bestOf: 1 },
+			body: { from: 'alice', opponent: 'poor_bob', wager: 50, bestOf: 1 }, asNametag: 'alice',
 		});
 		await bob.waitFor('challenge-received');
 
 		const r = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'poor_bob' }, allowError: true,
+			method: 'POST', body: { by: 'poor_bob' }, asNametag: 'poor_bob', allowError: true,
 		});
 		assertEqual(r.error, 'insufficient_balance');
 

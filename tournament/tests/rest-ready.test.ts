@@ -14,6 +14,7 @@ import {
 	sleep,
 	startServer,
 	stopServer,
+	mintSession,
 } from './harness';
 import { chaosConnect } from './chaos';
 
@@ -40,8 +41,9 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', () => {
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
+		ws.on('open', async () => {
+			const sessionId = await mintSession({ port }, nametag);
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -64,10 +66,10 @@ async function setupMatch(server: { port: number }, tid: string, a: string, b: s
 		body: { id: tid, name: tid, maxPlayers: 2 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a },
+		method: 'POST', body: { nametag: a }, asNametag: a,
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b },
+		method: 'POST', body: { nametag: b }, asNametag: b,
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -90,7 +92,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 		const matchIdPath = '/api/tournaments/t-rest1/matches/0/0/ready';
 
 		const r1 = await api(server, matchIdPath, {
-			method: 'POST', body: { nametag: 'alice' },
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 		});
 		assertEqual(r1.status, 'ok');
 		assertEqual(r1.phase, 'waiting', 'alice is first, waiting for bob');
@@ -104,7 +106,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 		// 2. Idempotent — second REST ready doesn't error
 		// ─────────────────────────────────────────────
 		const r1b = await api(server, matchIdPath, {
-			method: 'POST', body: { nametag: 'alice' },
+			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
 		});
 		assertEqual(r1b.status, 'ok', 'duplicate ready is fine');
 
@@ -112,7 +114,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 		// 3. Bob readies → match starts, matchStart returned
 		// ─────────────────────────────────────────────
 		const r2 = await api(server, matchIdPath, {
-			method: 'POST', body: { nametag: 'bob' },
+			method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob',
 		});
 		assertEqual(r2.status, 'ok');
 		assertEqual(r2.phase, 'started');
@@ -131,7 +133,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 		// ─────────────────────────────────────────────
 		await setupMatch(server, 't-rest2', 'carol', 'dave');
 		const intruder = await api(server, '/api/tournaments/t-rest2/matches/0/0/ready', {
-			method: 'POST', body: { nametag: 'eve' }, allowError: true,
+			method: 'POST', body: { nametag: 'eve' }, asNametag: 'eve', allowError: true,
 		});
 		assertEqual(intruder.error, 'not_in_match', 'eve is not in match');
 
@@ -139,7 +141,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 		// 5. Error: 404 nonexistent match
 		// ─────────────────────────────────────────────
 		const nope = await api(server, '/api/tournaments/t-rest2/matches/9/9/ready', {
-			method: 'POST', body: { nametag: 'carol' }, allowError: true,
+			method: 'POST', body: { nametag: 'carol' }, asNametag: 'carol', allowError: true,
 		});
 		assertEqual(nope.error, 'not_found');
 
@@ -163,7 +165,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 		await sleep(100);
 
 		const also = await api(server, '/api/tournaments/t-rest3/matches/0/0/ready', {
-			method: 'POST', body: { nametag: 'fran' },
+			method: 'POST', body: { nametag: 'fran' }, asNametag: 'fran',
 		});
 		assertEqual(also.status, 'ok');
 
@@ -201,7 +203,7 @@ runTest('REST ready endpoint — equivalent to WS ready, idempotent, zombie-safe
 
 		// Hank's WS is zombie — but REST ready works
 		const zResult = await api(server, '/api/tournaments/t-rest4/matches/0/0/ready', {
-			method: 'POST', body: { nametag: 'hank' },
+			method: 'POST', body: { nametag: 'hank' }, asNametag: 'hank',
 		});
 		assertEqual(zResult.status, 'ok');
 		assertEqual(zResult.phase, 'started', 'both now ready, match starts');

@@ -32,7 +32,16 @@ export function connectMatchWS(opts: {
 		lastMessageAt = Date.now();
 		ws.onopen = () => {
 			lastMessageAt = Date.now();
-			ws!.send(JSON.stringify({ type: 'register', identity: { nametag: opts.playerName } }));
+			// Server requires a Sphere-signed session for register —
+			// the SphereWallet module mints it during connect() and
+			// exposes it as `authSession`. Without this we'd get
+			// closed with code 1008 immediately.
+			const sessionId = (window as any).SphereWallet?.authSession;
+			ws!.send(JSON.stringify({
+				type: 'register',
+				identity: { nametag: opts.playerName },
+				sessionId,
+			}));
 			while (pendingSends.length && ws!.readyState === 1) {
 				ws!.send(pendingSends.shift()!);
 			}

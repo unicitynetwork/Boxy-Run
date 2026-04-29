@@ -50,9 +50,16 @@ export interface BracketSlot {
 // Client → Server
 // ═══════════════════════════════════════════════════════════════════
 
-/** Associate the caller's WS with a nametag. First message on every connection. */
+/**
+ * Associate the caller's WS with a nametag. First message on every
+ * connection. The `sessionId` is the token returned by /api/auth/verify
+ * after the client signed the server's challenge nonce — without it the
+ * server rejects the register and closes the socket. Anything less and
+ * any client could impersonate any nametag at the WebSocket layer.
+ */
 export interface RegisterMessage extends MessageBase<'register'> {
 	identity: { nametag: string };
+	sessionId: string;
 }
 
 /** Send a 1v1 challenge to an online player. */
