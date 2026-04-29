@@ -21,7 +21,6 @@ import {
 	sleep,
 	startServer,
 	stopServer,
-	mintSession,
 } from './harness';
 import { chaosConnect } from './chaos';
 
@@ -51,9 +50,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -81,10 +79,10 @@ async function setupMatch(server: { port: number }, tid: string, a: string, b: s
 		body: { id: tid, name: tid, maxPlayers: 2 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a }, asNametag: a,
+		method: 'POST', body: { nametag: a },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b }, asNametag: b,
+		method: 'POST', body: { nametag: b },
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -98,10 +96,9 @@ runTest('zombie: REST ready works when the caller\'s WS goes silent', async () =
 
 		// Alice connects + registers, then goes zombie (silenced). Mint
 		// the session up front because chaosConnect's onOpen is sync.
-		const aliceSession = await mintSession(server, 'alice');
 		const alice = await chaosConnect({
 			port: server.port, nametag: 'alice',
-			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'alice' }, sessionId: aliceSession }),
+			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'alice' } }),
 		});
 		await sleep(100);
 		alice.setMode('zombie');
@@ -114,7 +111,7 @@ runTest('zombie: REST ready works when the caller\'s WS goes silent', async () =
 
 		// Alice's WS match-ready would silently drop. REST is the escape hatch.
 		const r = await api(server, '/api/tournaments/z-rest/matches/0/0/ready', {
-			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
+			method: 'POST', body: { nametag: 'alice' },
 		});
 		assertEqual(r.status, 'ok');
 		assertEqual(r.phase, 'started', 'match starts when both now ready');
@@ -142,10 +139,9 @@ runTest('zombie: reconciler auto-readies when opponent is offline during ready_w
 		// Actually with zombie (WS still OPEN), server sees carol as ONLINE.
 		// The reconciler's 5s grace only fires for OFFLINE opponents. So in this
 		// pure zombie case, match hangs until 30s TTL clears flags.
-		const carolSession = await mintSession(server, 'carol');
 		const carol = await chaosConnect({
 			port: server.port, nametag: 'carol',
-			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'carol' }, sessionId: carolSession }),
+			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'carol' } }),
 		});
 		await sleep(100);
 		carol.setMode('zombie');
@@ -181,10 +177,9 @@ runTest('zombie: abrupt TCP close evicts player + survivor reconnects cleanly', 
 	try {
 		await setupMatch(server, 'challenge-z-abrupt', 'eve', 'frank');
 
-		const eveSession = await mintSession(server, 'eve');
 		const eve = await chaosConnect({
 			port: server.port, nametag: 'eve',
-			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'eve' }, sessionId: eveSession }),
+			onOpen: (c) => c.send({ type: 'register', identity: { nametag: 'eve' } }),
 		});
 		await sleep(100);
 

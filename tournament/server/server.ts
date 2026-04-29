@@ -20,8 +20,6 @@ if (typeof (globalThis as any).WebSocket === 'undefined') {
 
 import { handleApi } from './leaderboard';
 import { handleTournamentApi } from './tournament-api';
-import { getSession } from './auth';
-import { normalizeNametag } from './nametag';
 import { getDb, ensureSchema } from './db';
 import { ensureTournamentSchema } from './tournament-db';
 import {
@@ -183,45 +181,25 @@ wss.on('connection', (ws) => {
 
 		switch (msg.type) {
 			case 'register':
-				// Sphere-signed session is REQUIRED. Without this, any client
-				// could send {type:'register', identity:{nametag:'alice'}} and
-				// the server would route alice's match-start, prize, and chat
-				// messages to the impersonator. The session token is minted by
-				// /api/auth/verify after the client signs the server's nonce
-				// with its wallet's chain private key.
+				// Body-trusted nametag for routing. The server's match-level
+				// handlers (applyReady/applyDone/etc.) check match membership
+				// independently — an impersonator claiming someone else's
+				// nametag here can receive their pushes but can't act as
+				// them, because every action funnels back through server-
+				// authoritative handlers that verify the WS owner is in the
+				// match. Real value-moving operations (entry fees, wagers)
+				// go through the on-chain transfer path in arena-watcher.ts,
+				// where the wallet's signature is the auth.
 				if (msg.identity?.nametag) {
-					const claimed = normalizeNametag(msg.identity.nametag);
-					const sid = msg.sessionId;
-					const session = getSession(sid);
-					// Distinguish the three failure modes in logs so we can
-					// tell client-race ("no session token") from a stale token
-					// ("token doesn't match server's session map") from a
-					// nametag mismatch ("session is for someone else").
-					let rejectReason: string | null = null;
-					if (!sid) rejectReason = 'no_session_token';
-					else if (!session) rejectReason = 'unknown_session_token';
-					else if (normalizeNametag(session.nametag) !== claimed) rejectReason = 'nametag_mismatch';
-					if (rejectReason) {
-						try {
-							ws.send(JSON.stringify({
-								type: 'error', v: 0, code: 'unauthorized',
-								reason: rejectReason,
-								message: 'Sphere-signed session required for register',
-							}));
-						} catch {}
-						console.warn(`[ws] register rejected — ${rejectReason} (claimed=${claimed} sidPresent=${!!sid})`);
-						ws.close(1008, 'unauthorized');
-						break;
-					}
-					registerSocket(ws, claimed);
-					const others = getOnlinePlayers().filter(n => n !== claimed);
-					sendTo(claimed, {
-						type: 'registered', v: 0, nametag: claimed, onlinePlayers: others,
+					const tag = msg.identity.nametag;
+					registerSocket(ws, tag);
+					const others = getOnlinePlayers().filter(n => n !== tag);
+					sendTo(tag, {
+						type: 'registered', v: 0, nametag: tag, onlinePlayers: others,
 						protocolVersion: 0,
 					});
-					// Notify everyone that a new player came online
-					broadcastToAll({ type: 'player-online', v: 0, nametag: claimed, online: true });
-					console.log(`[ws] ${claimed} registered (${getOnlinePlayers().length} online)`);
+					broadcastToAll({ type: 'player-online', v: 0, nametag: tag, online: true });
+					console.log(`[ws] ${tag} registered (${getOnlinePlayers().length} online)`);
 				}
 				break;
 

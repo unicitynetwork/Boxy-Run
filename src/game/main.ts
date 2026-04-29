@@ -120,14 +120,8 @@ function getPlayerNametag(): string | null {
 async function fetchGameBalance(): Promise<number | null> {
 	const tag = getPlayerNametag();
 	if (!tag) return null;
-	// Endpoint now requires the caller's session — players can only read
-	// their own balance. Without the session it 401s.
-	const session = (window as any).SphereWallet?.authSession;
-	if (!session) return null;
 	try {
-		const r = await fetch('/api/balance/' + encodeURIComponent(tag), {
-			headers: { 'Authorization': `Bearer ${session}` },
-		});
+		const r = await fetch('/api/balance/' + encodeURIComponent(tag));
 		const d = await r.json();
 		return typeof d.balance === 'number' ? d.balance : 0;
 	} catch { return null; }
@@ -302,18 +296,10 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	function gameLog(event: string, data?: Record<string, unknown>) {
 		const entry = { event, matchId, player: playerName, phase, ...data };
 		console.log(`[game] ${event}`, data || '');
-		// Endpoint binds nametag to session, so we no longer send it in
-		// the body. Skip the call when there's no session — silently
-		// 401-ing on every game-log call would just spam the network tab.
-		const session = (window as any).SphereWallet?.authSession;
-		if (!session) return;
 		fetch('/api/log', {
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${session}`,
-			},
-			body: JSON.stringify({ event: `game.${event}`, data: entry }),
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ nametag: playerName, event: `game.${event}`, data: entry }),
 		}).catch(() => {});
 	}
 

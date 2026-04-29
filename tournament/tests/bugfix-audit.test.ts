@@ -14,7 +14,6 @@ import {
 	startServer,
 	stopServer,
 	TEST_ADMIN_KEY,
-	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -40,9 +39,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -72,14 +70,14 @@ runTest('S9: match-done rejects non-participant', async () => {
 		// Alice challenges Bob
 		const ch = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
 		});
 		assert(ch.challengeId, 'challenge created');
 
 		// Bob accepts
 		const accept = await api(server, `/api/challenges/${ch.challengeId}/accept`, {
 			method: 'POST',
-			body: { by: 'bob' }, asNametag: 'bob',
+			body: { by: 'bob' },
 		});
 		assert(accept.matchId, 'match started');
 
@@ -90,15 +88,15 @@ runTest('S9: match-done rejects non-participant', async () => {
 
 		// Both ready so match is playing
 		const readyUrl = `/api/tournaments/${encodeURIComponent(tid)}/matches/${round}/${slot}/ready`;
-		await api(server, readyUrl, { method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice' });
-		await api(server, readyUrl, { method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob' });
+		await api(server, readyUrl, { method: 'POST', body: { nametag: 'alice' } });
+		await api(server, readyUrl, { method: 'POST', body: { nametag: 'bob' } });
 		await sleep(500);
 
 		// Eve (not in this match) tries to call match-done
 		try {
 			await api(server, `/api/tournaments/${encodeURIComponent(tid)}/matches/${round}/${slot}/done`, {
 				method: 'POST',
-				body: { nametag: 'eve' }, asNametag: 'eve',
+				body: { nametag: 'eve' },
 			});
 			assert(false, 'should have thrown');
 		} catch (e: any) {
@@ -108,7 +106,7 @@ runTest('S9: match-done rejects non-participant', async () => {
 		// Alice (in the match) should succeed
 		const aliceResult = await api(server, `/api/tournaments/${encodeURIComponent(tid)}/matches/${round}/${slot}/done`, {
 			method: 'POST',
-			body: { nametag: 'alice' }, asNametag: 'alice',
+			body: { nametag: 'alice' },
 		});
 		assertEqual(aliceResult.status, 'ok', 'alice accepted');
 
@@ -170,7 +168,7 @@ runTest('S3: challenge link expires after 5 minutes', async () => {
 		// Create a link
 		const link = await api(server, '/api/challenge-links', {
 			method: 'POST',
-			body: { from: 'alice', bestOf: 1, wager: 0 }, asNametag: 'alice',
+			body: { from: 'alice', bestOf: 1, wager: 0 },
 		});
 		assert(link.code, 'link created');
 
@@ -209,19 +207,19 @@ runTest('Challenge: accepting one cancels all others for both players', async ()
 		// Alice creates a link challenge
 		const link = await api(server, '/api/challenge-links', {
 			method: 'POST',
-			body: { from: 'alice', bestOf: 1, wager: 0 }, asNametag: 'alice',
+			body: { from: 'alice', bestOf: 1, wager: 0 },
 		});
 
 		// Carol sends a live challenge to Alice
 		const ch = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'carol', opponent: 'alice', wager: 0, bestOf: 1 }, asNametag: 'carol',
+			body: { from: 'carol', opponent: 'alice', wager: 0, bestOf: 1 },
 		});
 
 		// Alice accepts Carol's challenge
 		const accept = await api(server, `/api/challenges/${ch.challengeId}/accept`, {
 			method: 'POST',
-			body: { by: 'alice' }, asNametag: 'alice',
+			body: { by: 'alice' },
 		});
 		assert(accept.matchId, 'match started');
 
@@ -251,13 +249,13 @@ runTest('Challenge: self-accept on link rejected', async () => {
 
 		const link = await api(server, '/api/challenge-links', {
 			method: 'POST',
-			body: { from: 'alice', bestOf: 1, wager: 0 }, asNametag: 'alice',
+			body: { from: 'alice', bestOf: 1, wager: 0 },
 		});
 
 		try {
 			await api(server, `/api/challenge-links/${link.code}/accept`, {
 				method: 'POST',
-				body: { by: 'alice' }, asNametag: 'alice',
+				body: { by: 'alice' },
 			});
 			assert(false, 'should have thrown');
 		} catch (e: any) {
@@ -283,11 +281,11 @@ runTest('Challenge: busy opponent rejected', async () => {
 		// Alice challenges Bob — Bob accepts
 		const ch1 = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
 		});
 		await api(server, `/api/challenges/${ch1.challengeId}/accept`, {
 			method: 'POST',
-			body: { by: 'bob' }, asNametag: 'bob',
+			body: { by: 'bob' },
 		});
 
 		// Carol tries to challenge Alice (who is now in a match)
@@ -295,7 +293,7 @@ runTest('Challenge: busy opponent rejected', async () => {
 		// But we can verify the challenge is created
 		const ch2 = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'carol', opponent: 'alice', wager: 0, bestOf: 1 }, asNametag: 'carol',
+			body: { from: 'carol', opponent: 'alice', wager: 0, bestOf: 1 },
 		});
 		assert(ch2.challengeId, 'challenge to busy human still works');
 
@@ -318,7 +316,7 @@ runTest('Challenge: live challenge expires after 60s', async () => {
 
 		const ch = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
 		});
 
 		// Should be pending
@@ -353,11 +351,11 @@ runTest('S4: completed match cannot be resurrected by late events', async () => 
 		// Create and play through a challenge
 		const ch = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 }, asNametag: 'alice',
+			body: { from: 'alice', opponent: 'bob', wager: 0, bestOf: 1 },
 		});
 		const accept = await api(server, `/api/challenges/${ch.challengeId}/accept`, {
 			method: 'POST',
-			body: { by: 'bob' }, asNametag: 'bob',
+			body: { by: 'bob' },
 		});
 
 		const parsed = accept.matchId.match(/^(.+)\/R(\d+)M(\d+)$/);
@@ -367,13 +365,13 @@ runTest('S4: completed match cannot be resurrected by late events', async () => 
 		const doneUrl = `/api/tournaments/${encodeURIComponent(tid)}/matches/${round}/${slot}/done`;
 
 		// Both ready
-		await api(server, readyUrl, { method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice' });
-		await api(server, readyUrl, { method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob' });
+		await api(server, readyUrl, { method: 'POST', body: { nametag: 'alice' } });
+		await api(server, readyUrl, { method: 'POST', body: { nametag: 'bob' } });
 		await sleep(500);
 
 		// Both done
-		await api(server, doneUrl, { method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice' });
-		await api(server, doneUrl, { method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob' });
+		await api(server, doneUrl, { method: 'POST', body: { nametag: 'alice' } });
+		await api(server, doneUrl, { method: 'POST', body: { nametag: 'bob' } });
 		await sleep(1500); // wait for replay
 
 		// Match should be complete
@@ -384,7 +382,7 @@ runTest('S4: completed match cannot be resurrected by late events', async () => 
 		try {
 			await api(server, readyUrl, {
 				method: 'POST',
-				body: { nametag: 'alice' }, asNametag: 'alice',
+				body: { nametag: 'alice' },
 			});
 			assert(false, 'should have thrown');
 		} catch (e: any) {

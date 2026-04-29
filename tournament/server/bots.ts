@@ -11,7 +11,6 @@ import { makeInitialState } from '../../src/sim/init';
 import { tick as simTick } from '../../src/sim/tick';
 import { DEFAULT_CONFIG, TICK_HZ, type CharacterAction, type GameState } from '../../src/sim/state';
 import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage, type DistributiveOmit } from '../protocol/messages';
-import { mintInternalSession } from './auth';
 
 // ── Skill tiers ──────────────────────────────────────────────────
 
@@ -159,10 +158,6 @@ function runBot(port: number, idx: number): void {
 	let simState: GameState | null = null;
 	const readied = new Set<string>();
 	const started = new Set<string>();
-	// Server-issued session token. Minted up-front via mintInternalSession
-	// (bots are trusted in-process code, so they can skip the wallet
-	// signature). Reused across reconnects so REST calls don't lose auth.
-	let botSessionId: string = mintInternalSession(nametag);
 
 	let matchStartedAt = 0;
 	const MATCH_TIMEOUT_MS = 120_000;
@@ -265,7 +260,7 @@ function runBot(port: number, idx: number): void {
 		ws = new WebSocket(`ws://127.0.0.1:${port}`);
 
 		ws.on('open', () => {
-			safeSend({ type: 'register', identity: { nametag }, sessionId: botSessionId });
+			safeSend({ type: 'register', identity: { nametag } });
 		});
 
 		ws.on('ping', () => {});
@@ -332,12 +327,7 @@ function runBot(port: number, idx: number): void {
 				}
 
 				case 'challenge-received': {
-					// All mutating REST endpoints now require the bot's
-					// Sphere-signed (well, internal) session token.
-					const headers = {
-						'Content-Type': 'application/json',
-						'Authorization': `Bearer ${botSessionId}`,
-					};
+					const headers = { 'Content-Type': 'application/json' };
 					if (isInMatch()) {
 						log(`challenge from ${msg.from} — in match, declining`);
 						fetch(`http://127.0.0.1:${port}/api/challenges/${msg.challengeId}/decline`, {

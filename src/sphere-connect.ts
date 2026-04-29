@@ -39,15 +39,6 @@ const UCT_DECIMALS = 18;
 const FAUCET_URL = 'https://faucet.unicity.network/api/v1/faucet/request';
 const SESSION_KEY = 'boxyrun-sphere-session';
 const DEPOSIT_KEY = 'boxyrun-deposit-paid';
-/**
- * Server-side session token (NOT the Sphere wallet session). Issued by
- * /api/auth/verify after the client signs the server's challenge nonce
- * with the wallet's chain key. Stored in sessionStorage so reconnects
- * within the same tab don't trigger a new wallet popup.
- */
-const AUTH_SESSION_KEY = 'boxyrun-auth-session';
-let authSessionId: string | null = null;
-let authedNametag: string | null = null;
 
 // ── State ──────────────────────────────────────────────────────────────────
 interface WalletState {
@@ -191,10 +182,6 @@ async function connect(): Promise<void> {
       return;
     }
 
-    // Establish the server-side session (Sphere-signed nametag auth).
-    // Without this, every mutating REST and WS request will be 401.
-    await ensureAuthSession();
-
     await refreshBalance();
     state.error = null;
 
@@ -226,11 +213,6 @@ async function disconnect(): Promise<void> {
   popupWindow = null;
   sessionStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(DEPOSIT_KEY);
-  // Drop the server-side auth session too — leaving it would let a
-  // fresh wallet keep the previous account's session token.
-  sessionStorage.removeItem(AUTH_SESSION_KEY);
-  authSessionId = null;
-  authedNametag = null;
 
   state.isConnected = false;
   state.isDepositPaid = false;
@@ -238,120 +220,6 @@ async function disconnect(): Promise<void> {
   state.balance = null;
   state.error = null;
   updateUI('disconnected');
-}
-
-/**
- * Establish a server-side session bound to this nametag by signing the
- * server's nonce with the wallet's chain key. After this returns, every
- * REST and WS request is gated by the resulting session token.
- *
- * Cached in sessionStorage so a page navigation within the same tab
- * doesn't require a fresh wallet prompt. Cleared on disconnect.
- */
-// Inflight guard so concurrent callers (every WS reconnect) reuse the
-// same handshake instead of stampeding the wallet popup.
-let inflightAuthHandshake: Promise<string | null> | null = null;
-
-async function ensureAuthSession(): Promise<string | null> {
-  if (!client || !state.identity?.nametag) {
-    console.warn('[auth] ensureAuthSession: no wallet client/identity yet');
-    return null;
-  }
-  const nametag = state.identity.nametag.replace(/^@/, '').toLowerCase();
-  if (authSessionId && authedNametag === nametag) return authSessionId;
-  const cached = sessionStorage.getItem(AUTH_SESSION_KEY);
-  if (cached) {
-    try {
-      const { sessionId, nametag: t, expiresAt } = JSON.parse(cached);
-      if (t === nametag && typeof expiresAt === 'number' && expiresAt > Date.now()) {
-        authSessionId = sessionId;
-        authedNametag = nametag;
-        return sessionId;
-      }
-    } catch { /* fall through */ }
-  }
-  if (inflightAuthHandshake) return inflightAuthHandshake;
-  inflightAuthHandshake = doAuthHandshake(nametag).finally(() => {
-    inflightAuthHandshake = null;
-  });
-  return inflightAuthHandshake;
-}
-
-async function doAuthHandshake(nametag: string): Promise<string | null> {
-  console.log('[auth] handshake start', { nametag });
-  try {
-    // Step 1: ask server for a 32-byte nonce bound to this nametag.
-    const challengeRes = await fetch('/api/auth/challenge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nametag }),
-    });
-    if (!challengeRes.ok) {
-      console.error('[auth] /challenge failed', challengeRes.status, await challengeRes.text());
-      return null;
-    }
-    const { challengeId, nonce } = await challengeRes.json();
-    console.log('[auth] got challenge', { challengeId, nonceLen: nonce?.length });
-
-    // Step 2: ask the wallet to sign. The Sphere SDK relays SIGN_MESSAGE
-    // to sphere.unicity.network, which prompts the user. The return type
-    // is unstable across wallet versions — sometimes a bare hex string,
-    // sometimes an object {signature: '...'}. We log the raw shape so we
-    // can adjust if the wallet ever changes.
-    let raw: unknown;
-    try {
-      raw = await client!.intent(INTENT_ACTIONS.SIGN_MESSAGE, {
-        message: nonce,
-      } as any);
-    } catch (err) {
-      console.error('[auth] SIGN_MESSAGE intent threw', err);
-      return null;
-    }
-    console.log('[auth] SIGN_MESSAGE returned (type=' + typeof raw + ')', raw);
-
-    // Coerce to whatever the verify endpoint wants — the SDK doesn't
-    // document a stable shape, so we accept either a string or
-    // common object wrappers.
-    let signature: string;
-    if (typeof raw === 'string') {
-      signature = raw;
-    } else if (raw && typeof raw === 'object') {
-      const r = raw as Record<string, unknown>;
-      const candidate = r.signature ?? r.signedMessage ?? r.result;
-      if (typeof candidate === 'string') {
-        signature = candidate;
-      } else {
-        console.error('[auth] SIGN_MESSAGE returned object with no signature field', raw);
-        return null;
-      }
-    } else {
-      console.error('[auth] SIGN_MESSAGE returned unexpected type', typeof raw, raw);
-      return null;
-    }
-
-    // Step 3: post the signature back; on success, mint a session.
-    const verifyRes = await fetch('/api/auth/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ challengeId, signature }),
-    });
-    if (!verifyRes.ok) {
-      const body = await verifyRes.text();
-      console.error('[auth] /verify failed', verifyRes.status, body);
-      return null;
-    }
-    const { sessionId, expiresAt } = await verifyRes.json();
-    authSessionId = sessionId;
-    authedNametag = nametag;
-    sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({
-      sessionId, nametag, expiresAt,
-    }));
-    console.log('[auth] handshake complete', { nametag, expiresAt });
-    return sessionId;
-  } catch (err) {
-    console.error('[auth] handshake threw:', err);
-    return null;
-  }
 }
 
 async function refreshBalance(): Promise<void> {
@@ -624,8 +492,6 @@ setInterval(() => {
   get error() { return state.error; },
   get entryFee() { return ENTRY_FEE; },
   get coinId() { return COIN_ID; },
-  /** Server-side session token. Null until ensureAuthSession resolves. */
-  get authSession() { return authSessionId; },
   connect,
   disconnect,
   deposit,
@@ -633,13 +499,6 @@ setInterval(() => {
   requestPayout,
   refreshBalance,
   updateUI,
-  /**
-   * Force-refresh the auth session (usually unnecessary — `connect()`
-   * does this automatically). Useful if the server says the session
-   * has expired and the page wants to re-handshake without forcing a
-   * full reload.
-   */
-  ensureAuthSession,
   resetDeposit() {
     state.isDepositPaid = false;
   },

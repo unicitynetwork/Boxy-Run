@@ -19,7 +19,6 @@ import {
 	sleep,
 	startServer,
 	stopServer,
-	mintSession,
 } from './harness';
 
 /** Switch lane at tick 1 + jump every tick to ensure the player survives
@@ -61,9 +60,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -91,10 +89,10 @@ async function setupBo3Match(server: { port: number }, tid: string, a: string, b
 		body: { id: tid, name: tid, maxPlayers: 2, bestOf: 3 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a }, asNametag: a,
+		method: 'POST', body: { nametag: a },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b }, asNametag: b,
+		method: 'POST', body: { nametag: b },
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -186,10 +184,10 @@ runTest('series: Bo5 sweep — 3-0, seriesEnd on game 3', async () => {
 			body: { id: 'sw-bo5', name: 'bo5', maxPlayers: 2, bestOf: 5 },
 		});
 		await api(server, '/api/tournaments/sw-bo5/register', {
-			method: 'POST', body: { nametag: 'carol' }, asNametag: 'carol',
+			method: 'POST', body: { nametag: 'carol' },
 		});
 		await api(server, '/api/tournaments/sw-bo5/register', {
-			method: 'POST', body: { nametag: 'dave' }, asNametag: 'dave',
+			method: 'POST', body: { nametag: 'dave' },
 		});
 		await api(server, '/api/tournaments/sw-bo5/start', {
 			method: 'POST', asAdmin: true,
@@ -245,10 +243,10 @@ runTest('series: Bo1 produces one match-end, no series-next, no game-result', as
 			body: { id: 'sw-bo1', name: 'bo1', maxPlayers: 2 },
 		});
 		await api(server, '/api/tournaments/sw-bo1/register', {
-			method: 'POST', body: { nametag: 'eve' }, asNametag: 'eve',
+			method: 'POST', body: { nametag: 'eve' },
 		});
 		await api(server, '/api/tournaments/sw-bo1/register', {
-			method: 'POST', body: { nametag: 'frank' }, asNametag: 'frank',
+			method: 'POST', body: { nametag: 'frank' },
 		});
 		await api(server, '/api/tournaments/sw-bo1/start', {
 			method: 'POST', asAdmin: true,

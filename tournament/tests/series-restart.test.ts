@@ -24,7 +24,6 @@ import {
 	sleep,
 	startServer,
 	stopServer,
-	mintSession,
 	TEST_ADMIN_KEY,
 } from './harness';
 
@@ -57,9 +56,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -89,10 +87,9 @@ async function spawnServer(dbPath: string, port: number): Promise<ChildProcess> 
 		DB_PATH: dbPath,
 		TEST_MODE: '1',
 		READY_RATE_LIMIT_MS: '0',
-		// Same auth bypass + admin key the harness sets — the server
-		// refuses to boot without ADMIN_KEY (≥16 chars).
+		// admin-key.ts refuses to boot without ADMIN_KEY (≥16 chars) —
+		// match the harness env so the spawned server boots clean.
 		ADMIN_KEY: TEST_ADMIN_KEY,
-		AUTH_BYPASS: '1',
 	};
 	const proc = spawn('node', [SERVER_BUNDLE], {
 		env,
@@ -141,8 +138,8 @@ runTest('series-restart: Bo3 game-1 win persists across a server restart', async
 			method: 'POST', asAdmin: true,
 			body: { id: 'restart-bo3', name: 'restart-bo3', maxPlayers: 2, bestOf: 3 },
 		});
-		await api(server, '/api/tournaments/restart-bo3/register', { method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice' });
-		await api(server, '/api/tournaments/restart-bo3/register', { method: 'POST', body: { nametag: 'bob' }, asNametag: 'bob' });
+		await api(server, '/api/tournaments/restart-bo3/register', { method: 'POST', body: { nametag: 'alice' } });
+		await api(server, '/api/tournaments/restart-bo3/register', { method: 'POST', body: { nametag: 'bob' } });
 		await api(server, '/api/tournaments/restart-bo3/start', { method: 'POST', asAdmin: true });
 
 		const matchId = 'restart-bo3/R0M0';

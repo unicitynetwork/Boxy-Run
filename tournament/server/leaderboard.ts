@@ -1,48 +1,43 @@
 /**
  * Leaderboard HTTP handlers. Pure request→response functions that
  * the main server routes to based on URL path.
+ *
+ * Identity model — IMPORTANT context:
+ * The server does NOT verify nametag ownership for low-stakes endpoints
+ * like /api/scores or /api/log. Body-trust is fine here because:
+ *   - Score submission is replay-verified server-side: the score is
+ *     derived from (seed, inputs), not what the client sends. An
+ *     impersonator can only put their own real score under someone
+ *     else's nickname, which is a non-attack (it raises the victim's
+ *     daily best, doesn't lower it).
+ *   - /api/log is purely diagnostic; pollution costs nothing.
+ *
+ * Real value-moving operations (entry fees, wager settlement) flow
+ * through `arena-watcher.ts`, which credits the ledger only when an
+ * actual on-chain Sphere transfer arrives. The transfer's senderNametag
+ * is cryptographically bound by the wallet — no client-asserted nametag
+ * touches the money path.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ensureSchema, getDb } from './db';
 import { isAdminRequest } from './admin-key';
-import { issueChallenge, verifyChallenge, getSession } from './auth';
-import { isValidNametag, normalizeNametag } from './nametag';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
-// CORS: keep wide-open for GET (read-only leaderboards are safe for
-// any third-party site to embed); restrict mutating ops to same-origin
-// + an explicit allowlist via env. Browser CSRF protection relies on
-// this — without it, any site the user visits can drive POST/DELETE
-// against this API on their behalf.
-const CORS_READ = {
+// CORS: wide-open. Read endpoints are obviously safe; write endpoints
+// either rely on body validation (replay-verify on /scores) or require
+// X-Admin-Key. Without complex auth there's no per-origin trust to
+// enforce, so wildcard keeps embedding/iframe leaderboards easy.
+const CORS_HEADERS = {
 	'Access-Control-Allow-Origin': '*',
-	'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-	'Access-Control-Allow-Methods': 'GET, OPTIONS',
+	'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key',
+	'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
 };
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://boxy-run.fly.dev,https://boxy-run-staging.fly.dev').split(',').map(s => s.trim()).filter(Boolean);
-function corsForRequest(req: IncomingMessage): Record<string, string> {
-	const origin = String(req.headers.origin || '');
-	const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0] || '';
-	return {
-		'Access-Control-Allow-Origin': allow,
-		'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Key',
-		'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-		'Vary': 'Origin',
-	};
-}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
 	const data = JSON.stringify(body);
-	res.writeHead(status, { ...CORS_READ, 'Content-Type': 'application/json' });
-	res.end(data);
-}
-
-/** json with origin-restricted CORS for state-mutating responses. */
-function jsonRestricted(req: IncomingMessage, res: ServerResponse, status: number, body: unknown): void {
-	const data = JSON.stringify(body);
-	res.writeHead(status, { ...corsForRequest(req), 'Content-Type': 'application/json' });
+	res.writeHead(status, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
 	res.end(data);
 }
 
@@ -56,10 +51,9 @@ function dailySeedForDate(date: string): number {
 }
 
 /**
- * Bounded request-body reader. Previously unbounded — an attacker could
- * send a multi-GB POST and OOM the Fly machine. The cap of 1 MiB is
- * generous: the largest legitimate body (a 50K-input replay) is around
- * 800 KB.
+ * Bounded request-body reader. Without this cap, an attacker could send
+ * a multi-GB POST and OOM the Fly machine. 1 MiB is generous: the
+ * largest legitimate body (a 50K-input replay) is around 800 KB.
  */
 const MAX_BODY_BYTES = 1024 * 1024;
 function readBody(req: IncomingMessage): Promise<string> {
@@ -81,34 +75,14 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 /**
- * Resolve an authenticated nametag from the request. Returns null and
- * sends a 401 if the Authorization: Bearer <session> header is missing
- * or invalid. Mutating endpoints call this first and bail on null.
- */
-function requireSession(req: IncomingMessage, res: ServerResponse): { nametag: string } | null {
-	const auth = String(req.headers.authorization || '');
-	const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-	const session = getSession(token);
-	if (!session) {
-		json(res, 401, { error: 'unauthorized', message: 'Sphere-signed session required' });
-		return null;
-	}
-	return { nametag: session.nametag };
-}
-
-/**
- * Per-IP rate limiter. Used to throttle expensive endpoints (replay
- * verification etc.) so a flood doesn't pin the server CPU.
+ * Per-IP rate limiter for the expensive endpoints (replay verification,
+ * admin operations). Sliding window — N hits in `windowMs` from a single
+ * IP triggers 429.
  *
- * Sliding window — N hits in the last `windowMs` from the same IP
- * triggers a 429.
- *
- * Memory: a long-lived prod server sees many distinct IPs across many
- * rate-limit keys. Without periodic eviction the map grows without
- * bound and eventually OOMs the Fly machine. The sweep below runs
- * every 5 min and drops entries whose newest hit is older than the
- * largest window we use (60s for /scores etc.). Keeping the bound
- * loose so we don't accidentally let a burst slip through.
+ * Memory: a long-lived prod server sees many distinct IPs; without
+ * eviction the map grows without bound. The sweep below runs every 5
+ * min and drops entries whose newest hit is older than the largest
+ * window we use.
  */
 const rateLimits = new Map<string, number[]>();
 const RATE_LIMIT_SWEEP_MAX_AGE_MS = 5 * 60 * 1000;
@@ -134,34 +108,30 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 const submitScore: Handler = async (req, res) => {
-	// Authed callers only — without this, anyone can submit a score under any
-	// nickname and pollute the leaderboard.
-	const session = requireSession(req, res);
-	if (!session) return;
 	if (!rateLimit(req, res, 'scores', 30, 60_000)) return;
 
 	await ensureSchema();
 	const db = getDb();
 	const body = JSON.parse(await readBody(req));
-	const { seed, inputs } = body as {
+	const { nickname, seed, inputs } = body as {
+		nickname: string;
 		seed: number;
 		inputs: Array<{ tick: number; payload: string }>;
 	};
-	// Nickname is bound to the authed session — clients can't submit under
-	// someone else's name. We normalize to match the storage convention.
-	const nickname = normalizeNametag(session.nametag);
 
 	if (!nickname || typeof seed !== 'number' || !Array.isArray(inputs)) {
-		json(res, 400, { error: 'invalid_request', message: 'seed and inputs required' });
+		json(res, 400, { error: 'invalid_request', message: 'nickname, seed and inputs required' });
 		return;
 	}
-	// Sanity: cap input list size to prevent abuse (long fake input streams)
 	if (inputs.length > 50000) {
 		json(res, 400, { error: 'too_many_inputs', message: 'input list too large' });
 		return;
 	}
 
-	// Server-authoritative replay — derive score+coins from the seed+inputs
+	// Server-authoritative replay — the actual score is derived from the
+	// seed+inputs, not what the client claims. This makes nickname spoofing
+	// pointless: an impersonator would need to actually play a winning game
+	// to put a high score under someone else's name.
 	const { replayScoreAndCoins } = await import('./tournament-logic');
 	let score: number, coins: number;
 	try {
@@ -197,7 +167,6 @@ const submitScore: Handler = async (req, res) => {
 		args: [nickname, score, coins, today, timestamp, '', inputs.length],
 	});
 
-	// Update all-time
 	const at = await db.execute({ sql: 'SELECT score FROM alltime WHERE nickname = ?', args: [nickname] });
 	if (at.rows.length === 0) {
 		await db.execute({
@@ -297,9 +266,8 @@ const historyLeaderboard: Handler = async (_req, res, url) => {
 
 /**
  * Admin-only ledger adjuster. Used by tests for fixture seeding and by
- * operators for manual reconciliation. NOT exposed to clients — real
- * deposits land via the Sphere arena watcher (`arena-watcher.ts`), which
- * mirrors actual on-chain transfers into `player_transactions`.
+ * operators for manual reconciliation. Real deposits flow through the
+ * Sphere arena watcher (`arena-watcher.ts`).
  */
 const adminCredit: Handler = async (req, res) => {
 	if (!isAdminRequest(req)) {
@@ -345,48 +313,24 @@ const adminCredit: Handler = async (req, res) => {
 };
 
 const clientLog: Handler = async (req, res) => {
-	// Auth: anyone could previously log under any nametag and pollute
-	// the audit trail. Bind the nametag to the session.
-	const session = requireSession(req, res);
-	if (!session) return;
 	if (!rateLimit(req, res, 'client-log', 60, 60_000)) return;
 	try {
 		const body = JSON.parse(await readBody(req));
-		const { event, data } = body as { event: string; data?: any };
-		console.log(`[client-log] ${session.nametag}: ${event}`, data ? JSON.stringify(data) : '');
+		const { nametag, event, data } = body as { nametag?: string; event: string; data?: any };
+		console.log(`[client-log] ${nametag || 'anon'}: ${event}`, data ? JSON.stringify(data) : '');
 		json(res, 200, { ok: true });
 	} catch {
-		// Don't leak parse-error details — the body shape is well-known to clients.
 		json(res, 400, { error: 'invalid_request' });
 	}
 };
 
-/**
- * Auth check shared by balance + transactions: caller must either own
- * the requested nametag (session-bound) OR be an admin. Without this
- * gate, the endpoints are an open enumeration of every player's UCT
- * holdings and full ledger history.
- */
-function authorizeOwnOrAdmin(req: IncomingMessage, res: ServerResponse, requestedNametag: string): boolean {
-	if (isAdminRequest(req)) return true;
-	const session = requireSession(req, res);
-	if (!session) return false;
-	if (normalizeNametag(session.nametag) !== normalizeNametag(requestedNametag)) {
-		json(res, 403, { error: 'forbidden', message: 'Can only read your own ledger' });
-		return false;
-	}
-	return true;
-}
-
-const getTransactions: Handler = async (req, res, url) => {
+const getTransactions: Handler = async (_req, res, url) => {
+	await ensureSchema();
+	const db = getDb();
 	const parts = url.pathname.split('/');
 	const nametag = parts[parts.length - 1];
 	if (!nametag) { json(res, 400, { error: 'nametag required' }); return; }
 	const decoded = decodeURIComponent(nametag);
-	if (!authorizeOwnOrAdmin(req, res, decoded)) return;
-
-	await ensureSchema();
-	const db = getDb();
 	const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10), 200);
 	const rows = await db.execute({
 		sql: 'SELECT id, amount, type, memo, timestamp FROM player_transactions WHERE nametag = ? ORDER BY id DESC LIMIT ?',
@@ -404,23 +348,19 @@ const getTransactions: Handler = async (req, res, url) => {
 	});
 };
 
-const getBalance: Handler = async (req, res, url) => {
+const getBalance: Handler = async (_req, res, url) => {
+	await ensureSchema();
+	const db = getDb();
 	const nametag = url.pathname.split('/').pop();
 	if (!nametag) {
 		json(res, 400, { error: 'nametag required' });
 		return;
 	}
-	const decoded = decodeURIComponent(nametag);
-	if (!authorizeOwnOrAdmin(req, res, decoded)) return;
-
-	await ensureSchema();
-	const db = getDb();
 	const bal = await db.execute({
 		sql: 'SELECT COALESCE(SUM(amount), 0) as balance FROM player_transactions WHERE nametag = ?',
-		args: [decoded],
+		args: [decodeURIComponent(nametag)],
 	});
-
-	json(res, 200, { nametag: decoded, balance: bal.rows[0].balance });
+	json(res, 200, { nametag: decodeURIComponent(nametag), balance: bal.rows[0].balance });
 };
 
 /** Route an HTTP request to the right handler. Returns true if handled. */
@@ -434,56 +374,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 	}
 
 	try {
-		// ── Auth: challenge/verify ─────────────────────────────────
-		// Two-step Sphere-signed login. The client requests a 32-byte nonce
-		// for its nametag, signs it with the wallet's chain private key,
-		// and posts the signature back. On success, the server mints a
-		// session token bound to the nametag.
-		if (path === '/api/auth/challenge' && req.method === 'POST') {
-			// Rate-limit by IP — challenge issuance touches the Nostr
-			// transport (via verify), and a flood would amplify the load.
-			if (!rateLimit(req, res, 'auth-challenge', 30, 60_000)) return true;
-			try {
-				const body = JSON.parse(await readBody(req));
-				const nametag = normalizeNametag(body.nametag);
-				if (!nametag || !isValidNametag(nametag)) {
-					json(res, 400, { error: 'invalid_nametag' });
-					return true;
-				}
-				const result = issueChallenge(nametag);
-				if ('error' in result) {
-					json(res, 400, { error: result.error });
-					return true;
-				}
-				json(res, 200, result);
-			} catch (err) {
-				console.error('[api] invalid_request:', err);
-				json(res, 400, { error: 'invalid_request' });
-			}
-			return true;
-		}
-		if (path === '/api/auth/verify' && req.method === 'POST') {
-			if (!rateLimit(req, res, 'auth-verify', 30, 60_000)) return true;
-			try {
-				const body = JSON.parse(await readBody(req));
-				const challengeId = String(body.challengeId || '');
-				const signature = String(body.signature || '');
-				if (!challengeId || !signature) {
-					json(res, 400, { error: 'challengeId_and_signature_required' });
-					return true;
-				}
-				const result = await verifyChallenge(challengeId, signature);
-				if ('error' in result) {
-					json(res, 401, { error: result.error });
-					return true;
-				}
-				json(res, 200, result);
-			} catch (err) {
-				console.error('[api] invalid_request:', err);
-				json(res, 400, { error: 'invalid_request' });
-			}
-			return true;
-		}
 		if (path === '/api/scores' && req.method === 'POST') {
 			await submitScore(req, res, url);
 			return true;
@@ -500,9 +390,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			await historyLeaderboard(req, res, url);
 			return true;
 		}
-		// Admin-only ledger seed/adjust — replaces the old public /api/deposit.
-		// Real deposits flow through the Sphere arena watcher; this endpoint
-		// is for tests and manual reconciliation.
 		if (path === '/api/admin/credit' && req.method === 'POST') {
 			await adminCredit(req, res, url);
 			return true;
@@ -519,8 +406,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			json(res, 200, { status: 'ok', message: 'Leaderboard wiped (scores + alltime)' });
 			return true;
 		}
-		// Targeted delete — kill a single player's entries across all
-		// leaderboards. Used to remove cheated scores.
 		if (path === '/api/admin/delete-player' && req.method === 'POST') {
 			if (!isAdminRequest(req)) {
 				json(res, 403, { error: 'Unauthorized' });
@@ -543,7 +428,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			});
 			return true;
 		}
-		// Inspect: per-player ledger summary (for spotting forgeries)
 		if (path === '/api/admin/ledger-summary' && req.method === 'GET') {
 			if (!isAdminRequest(req)) {
 				json(res, 403, { error: 'Unauthorized' });
@@ -572,7 +456,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			});
 			return true;
 		}
-		// Wipe the player_transactions ledger entirely (forged credits etc.)
 		if (path === '/api/admin/wipe-transactions' && req.method === 'POST') {
 			if (!isAdminRequest(req)) {
 				json(res, 403, { error: 'Unauthorized' });
@@ -584,7 +467,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			json(res, 200, { status: 'ok', message: 'player_transactions wiped' });
 			return true;
 		}
-		// Targeted: delete a single player's transactions
 		if (path === '/api/admin/delete-transactions' && req.method === 'POST') {
 			if (!isAdminRequest(req)) {
 				json(res, 403, { error: 'Unauthorized' });
@@ -602,19 +484,18 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			json(res, 200, { status: 'ok', deleted: r.rowsAffected });
 			return true;
 		}
-		// Daily challenge — server-authoritative replay verification
+		// Daily challenge — server-authoritative replay verification (same
+		// shape as /api/scores; nickname is body-trusted but the score is
+		// computed from inputs, so spoofing accomplishes nothing useful).
 		if (path === '/api/daily-challenge/scores' && req.method === 'POST') {
-			const session = requireSession(req, res);
-			if (!session) return true;
 			if (!rateLimit(req, res, 'daily-scores', 10, 60_000)) return true;
 			await ensureSchema();
 			const db = getDb();
 			const body = JSON.parse(await readBody(req));
-			// Nickname is the authed session's nametag — no client-supplied input.
-			const nickname = normalizeNametag(session.nametag);
+			const nickname = String(body.nickname || '').trim();
 			const inputs = Array.isArray(body.inputs) ? body.inputs : null;
 			if (!nickname || !inputs) {
-				json(res, 400, { error: 'invalid_request', message: 'inputs required' });
+				json(res, 400, { error: 'invalid_request', message: 'nickname and inputs required' });
 				return true;
 			}
 			if (inputs.length > 50000) {
@@ -627,9 +508,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 				json(res, 400, { error: 'wrong_date', message: 'Can only submit for today' });
 				return true;
 			}
-			// Recompute the seed for today server-side — clients can't lie
-			// about which seed they played (they'd just get score=0 for a
-			// mismatched seed).
 			const seed = dailySeedForDate(today);
 			let score: number, coins: number;
 			try {

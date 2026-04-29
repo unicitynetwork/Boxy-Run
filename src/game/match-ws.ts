@@ -30,37 +30,9 @@ export function connectMatchWS(opts: {
 	function connect() {
 		ws = new WebSocket(wsUrl);
 		lastMessageAt = Date.now();
-		ws.onopen = async () => {
+		ws.onopen = () => {
 			lastMessageAt = Date.now();
-			// Server requires a Sphere-signed session for register. There's
-			// a race here: the WS can open before sphere-connect.ts has
-			// finished its wallet handshake. If `authSession` is null,
-			// trigger (or wait on) the handshake before sending register.
-			// Without this we'd ship sessionId=null and get hard-closed by
-			// the server, then auto-reconnect into a tight rejection loop.
-			const wallet = (window as any).SphereWallet;
-			let sessionId: string | null = wallet?.authSession ?? null;
-			if (!sessionId && typeof wallet?.ensureAuthSession === 'function') {
-				try {
-					sessionId = await wallet.ensureAuthSession();
-				} catch (err) {
-					console.error('[match-ws] auth handshake failed', err);
-				}
-			}
-			if (!sessionId) {
-				// No session means the user hasn't connected a wallet (or
-				// declined to sign). Stop reconnecting — without this the
-				// client hammers /api/auth/* and the server logs forever.
-				console.warn('[match-ws] no auth session — closing without register; will retry on next user-initiated connect');
-				intentionalClose = true;
-				try { ws!.close(); } catch {}
-				return;
-			}
-			ws!.send(JSON.stringify({
-				type: 'register',
-				identity: { nametag: opts.playerName },
-				sessionId,
-			}));
+			ws!.send(JSON.stringify({ type: 'register', identity: { nametag: opts.playerName } }));
 			while (pendingSends.length && ws!.readyState === 1) {
 				ws!.send(pendingSends.shift()!);
 			}

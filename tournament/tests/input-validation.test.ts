@@ -18,7 +18,6 @@ import {
 	sleep,
 	startServer,
 	stopServer,
-	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -47,9 +46,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 3000) {
@@ -77,10 +75,10 @@ async function setupActiveMatch(server: { port: number }, tid: string, a: string
 		body: { id: tid, name: tid, maxPlayers: 2 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a }, asNametag: a,
+		method: 'POST', body: { nametag: a },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b }, asNametag: b,
+		method: 'POST', body: { nametag: b },
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -171,8 +169,8 @@ runTest('input: before match active is dropped (no crash, no relay)', async () =
 			method: 'POST', asAdmin: true,
 			body: { id: 'iv-4', name: 'iv-4', maxPlayers: 2 },
 		});
-		await api(server, '/api/tournaments/iv-4/register', { method: 'POST', body: { nametag: 'gil' }, asNametag: 'gil' });
-		await api(server, '/api/tournaments/iv-4/register', { method: 'POST', body: { nametag: 'helen' }, asNametag: 'helen' });
+		await api(server, '/api/tournaments/iv-4/register', { method: 'POST', body: { nametag: 'gil' } });
+		await api(server, '/api/tournaments/iv-4/register', { method: 'POST', body: { nametag: 'helen' } });
 		await api(server, '/api/tournaments/iv-4/start', { method: 'POST', asAdmin: true });
 
 		const gil = await wsConnect(server.port, 'gil');

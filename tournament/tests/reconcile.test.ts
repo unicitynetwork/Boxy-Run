@@ -18,7 +18,6 @@ import {
 	sleep,
 	startServer,
 	stopServer,
-	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -44,9 +43,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -69,10 +67,10 @@ async function setupMatch(server: { port: number }, tid: string, a: string, b: s
 		body: { id: tid, name: tid, maxPlayers: 2 },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: a }, asNametag: a,
+		method: 'POST', body: { nametag: a },
 	});
 	await api(server, '/api/tournaments/' + tid + '/register', {
-		method: 'POST', body: { nametag: b }, asNametag: b,
+		method: 'POST', body: { nametag: b },
 	});
 	await api(server, '/api/tournaments/' + tid + '/start', {
 		method: 'POST', asAdmin: true,
@@ -240,10 +238,10 @@ runTest('reconcile: active-branch ready TTL force-readies a no-show opponent', a
 			body: { id: 'ar-ttl', name: 'ar-ttl', maxPlayers: 2 },
 		});
 		await api(server, '/api/tournaments/ar-ttl/register', {
-			method: 'POST', body: { nametag: 'ready_player' }, asNametag: 'ready_player',
+			method: 'POST', body: { nametag: 'ready_player' },
 		});
 		await api(server, '/api/tournaments/ar-ttl/register', {
-			method: 'POST', body: { nametag: 'noshow_player' }, asNametag: 'noshow_player',
+			method: 'POST', body: { nametag: 'noshow_player' },
 		});
 		await api(server, '/api/tournaments/ar-ttl/start', {
 			method: 'POST', asAdmin: true,

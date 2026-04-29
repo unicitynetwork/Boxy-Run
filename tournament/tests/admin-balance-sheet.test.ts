@@ -21,7 +21,6 @@ import {
 	sleep,
 	startServer,
 	stopServer,
-	mintSession,
 } from './harness';
 
 function wsConnect(port: number, nametag: string): Promise<{
@@ -50,9 +49,8 @@ function wsConnect(port: number, nametag: string): Promise<{
 				}
 			}
 		});
-		ws.on('open', async () => {
-			const sessionId = await mintSession({ port }, nametag);
-			ws.send(JSON.stringify({ type: 'register', identity: { nametag }, sessionId }));
+		ws.on('open', () => {
+			ws.send(JSON.stringify({ type: 'register', identity: { nametag } }));
 			resolve({
 				ws, messages,
 				waitFor(type, timeout = 5000) {
@@ -165,10 +163,10 @@ runTest('balance-sheet: conservation — entry fee moves tokens from players to 
 			body: { id: 'bs-conserve', name: 'bs-conserve', maxPlayers: 2, entryFee: 30 },
 		});
 		await api(server, '/api/tournaments/bs-conserve/register', {
-			method: 'POST', body: { nametag: 'p1' }, asNametag: 'p1',
+			method: 'POST', body: { nametag: 'p1' },
 		});
 		await api(server, '/api/tournaments/bs-conserve/register', {
-			method: 'POST', body: { nametag: 'p2' }, asNametag: 'p2',
+			method: 'POST', body: { nametag: 'p2' },
 		});
 
 		const after = await sheet(server);
@@ -201,11 +199,11 @@ runTest('balance-sheet: wager is zero-sum between two players', async () => {
 
 		const created = await api(server, '/api/challenges', {
 			method: 'POST',
-			body: { from: 'alice', opponent: 'bob', wager: 25, bestOf: 1 }, asNametag: 'alice',
+			body: { from: 'alice', opponent: 'bob', wager: 25, bestOf: 1 },
 		});
 		await bob.waitFor('challenge-received');
 		const accepted = await api(server, `/api/challenges/${created.challengeId}/accept`, {
-			method: 'POST', body: { by: 'bob' }, asNametag: 'bob',
+			method: 'POST', body: { by: 'bob' },
 		});
 		await alice.waitFor('challenge-start');
 		await bob.waitFor('challenge-start');
@@ -269,7 +267,7 @@ runTest('balance-sheet: byType breakdown includes all transaction types', async 
 			body: { id: 'bs-types', name: 'types', maxPlayers: 2, entryFee: 10 },
 		});
 		await api(server, '/api/tournaments/bs-types/register', {
-			method: 'POST', body: { nametag: 'alice' }, asNametag: 'alice',
+			method: 'POST', body: { nametag: 'alice' },
 		});
 
 		const s = await sheet(server);
