@@ -871,9 +871,6 @@ var SphereConnect = (() => {
   var FAUCET_URL = "https://faucet.unicity.network/api/v1/faucet/request";
   var SESSION_KEY = "boxyrun-sphere-session";
   var DEPOSIT_KEY = "boxyrun-deposit-paid";
-  var AUTH_SESSION_KEY = "boxyrun-auth-session";
-  var authSessionId = null;
-  var authedNametag = null;
   var client = null;
   var transport = null;
   var popupWindow = null;
@@ -988,7 +985,6 @@ var SphereConnect = (() => {
         updateUI("connected");
         return;
       }
-      await ensureAuthSession();
       await refreshBalance();
       state.error = null;
       if (sessionStorage.getItem(DEPOSIT_KEY)) {
@@ -1016,106 +1012,12 @@ var SphereConnect = (() => {
     popupWindow = null;
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(DEPOSIT_KEY);
-    sessionStorage.removeItem(AUTH_SESSION_KEY);
-    authSessionId = null;
-    authedNametag = null;
     state.isConnected = false;
     state.isDepositPaid = false;
     state.identity = null;
     state.balance = null;
     state.error = null;
     updateUI("disconnected");
-  }
-  var inflightAuthHandshake = null;
-  async function ensureAuthSession() {
-    if (!client || !state.identity?.nametag) {
-      console.warn("[auth] ensureAuthSession: no wallet client/identity yet");
-      return null;
-    }
-    const nametag = state.identity.nametag.replace(/^@/, "").toLowerCase();
-    if (authSessionId && authedNametag === nametag) return authSessionId;
-    const cached = sessionStorage.getItem(AUTH_SESSION_KEY);
-    if (cached) {
-      try {
-        const { sessionId, nametag: t, expiresAt } = JSON.parse(cached);
-        if (t === nametag && typeof expiresAt === "number" && expiresAt > Date.now()) {
-          authSessionId = sessionId;
-          authedNametag = nametag;
-          return sessionId;
-        }
-      } catch {
-      }
-    }
-    if (inflightAuthHandshake) return inflightAuthHandshake;
-    inflightAuthHandshake = doAuthHandshake(nametag).finally(() => {
-      inflightAuthHandshake = null;
-    });
-    return inflightAuthHandshake;
-  }
-  async function doAuthHandshake(nametag) {
-    console.log("[auth] handshake start", { nametag });
-    try {
-      const challengeRes = await fetch("/api/auth/challenge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nametag })
-      });
-      if (!challengeRes.ok) {
-        console.error("[auth] /challenge failed", challengeRes.status, await challengeRes.text());
-        return null;
-      }
-      const { challengeId, nonce } = await challengeRes.json();
-      console.log("[auth] got challenge", { challengeId, nonceLen: nonce?.length });
-      let raw;
-      try {
-        raw = await client.intent(INTENT_ACTIONS.SIGN_MESSAGE, {
-          message: nonce
-        });
-      } catch (err) {
-        console.error("[auth] SIGN_MESSAGE intent threw", err);
-        return null;
-      }
-      console.log("[auth] SIGN_MESSAGE returned (type=" + typeof raw + ")", raw);
-      let signature;
-      if (typeof raw === "string") {
-        signature = raw;
-      } else if (raw && typeof raw === "object") {
-        const r = raw;
-        const candidate = r.signature ?? r.signedMessage ?? r.result;
-        if (typeof candidate === "string") {
-          signature = candidate;
-        } else {
-          console.error("[auth] SIGN_MESSAGE returned object with no signature field", raw);
-          return null;
-        }
-      } else {
-        console.error("[auth] SIGN_MESSAGE returned unexpected type", typeof raw, raw);
-        return null;
-      }
-      const verifyRes = await fetch("/api/auth/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ challengeId, signature })
-      });
-      if (!verifyRes.ok) {
-        const body = await verifyRes.text();
-        console.error("[auth] /verify failed", verifyRes.status, body);
-        return null;
-      }
-      const { sessionId, expiresAt } = await verifyRes.json();
-      authSessionId = sessionId;
-      authedNametag = nametag;
-      sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({
-        sessionId,
-        nametag,
-        expiresAt
-      }));
-      console.log("[auth] handshake complete", { nametag, expiresAt });
-      return sessionId;
-    } catch (err) {
-      console.error("[auth] handshake threw:", err);
-      return null;
-    }
   }
   async function refreshBalance() {
     if (!client) return;
@@ -1354,10 +1256,6 @@ var SphereConnect = (() => {
     get coinId() {
       return COIN_ID;
     },
-    /** Server-side session token. Null until ensureAuthSession resolves. */
-    get authSession() {
-      return authSessionId;
-    },
     connect,
     disconnect,
     deposit,
@@ -1365,13 +1263,6 @@ var SphereConnect = (() => {
     requestPayout,
     refreshBalance,
     updateUI,
-    /**
-     * Force-refresh the auth session (usually unnecessary — `connect()`
-     * does this automatically). Useful if the server says the session
-     * has expired and the page wants to re-handshake without forcing a
-     * full reload.
-     */
-    ensureAuthSession,
     resetDeposit() {
       state.isDepositPaid = false;
     }
