@@ -113,23 +113,11 @@ h1 span{color:var(--cyan)}
   <!-- Incoming challenges -->
   <div id="incoming-challenges"></div>
 
-  <!-- Match settings -->
-  <div style="margin-bottom:20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <label style="font-size:12px;color:var(--text2)">Wager:</label>
-    <input type="number" id="wager-input" value="0" min="0" step="10" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px;text-align:center">
-    <span style="font-size:12px;color:var(--text3)">UCT</span>
-    <label style="font-size:12px;color:var(--text2);margin-left:8px">Best of:</label>
-    <select id="bestof-input" style="padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px">
-      <option value="1">1</option>
-      <option value="3" selected>3</option>
-      <option value="5">5</option>
-    </select>
-  </div>
-
   <!-- Play a Bot -->
   <div class="card">
     <div class="card-head">
       <h2>Play a Bot</h2>
+      <span style="font-size:11px;color:var(--text3)">Best of 3</span>
     </div>
     <div class="card-body" id="bot-list">
       <div style="color:var(--text3);font-size:13px">Loading bots...</div>
@@ -144,6 +132,17 @@ h1 span{color:var(--cyan)}
     </div>
     <div class="card-body">
       <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Generate a link and share it with anyone — they can accept from any browser.</p>
+      <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text2)">Wager:</label>
+        <input type="number" id="wager-input" value="0" min="0" step="10" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px;text-align:center">
+        <span style="font-size:12px;color:var(--text3)">UCT</span>
+        <label style="font-size:12px;color:var(--text2);margin-left:8px">Best of:</label>
+        <select id="bestof-input" style="padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-size:13px">
+          <option value="1">1</option>
+          <option value="3" selected>3</option>
+          <option value="5">5</option>
+        </select>
+      </div>
       <button class="btn btn-primary" onclick="createLink()" style="width:100%;padding:14px;font-size:12px">Create Challenge Link</button>
       <div id="link-area" style="display:none;margin-top:16px;padding:14px;background:rgba(0,229,255,0.05);border:1px solid var(--border);border-radius:var(--r)"></div>
     </div>

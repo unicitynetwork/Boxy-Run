@@ -53,7 +53,8 @@
     wsLastMessageAt = Date.now();
     ws.onopen = () => {
       wsLastMessageAt = Date.now();
-      wsSend({ type: "register", identity: { nametag: myNametag } });
+      const sessionId = window.SphereWallet?.authSession;
+      wsSend({ type: "register", identity: { nametag: myNametag }, sessionId });
       $("ws-dot").classList.add("on");
       updateNetStatus();
     };
@@ -112,6 +113,7 @@
       case "challenge-start": {
         clearBotPending();
         clearLinkUI();
+        redirecting = true;
         const p = new URLSearchParams({
           tournament: "1",
           matchId: msg.matchId,
@@ -154,15 +156,11 @@
     if (!myNametag || pendingBot) return;
     pendingBot = name;
     renderBots();
-    const wagerInput = document.getElementById("wager-input");
-    const bestofInput = document.getElementById("bestof-input");
-    const wager = parseInt(wagerInput?.value || "0", 10);
-    const bestOf = parseInt(bestofInput?.value || "1", 10);
     try {
       const r = await fetch("/api/challenges", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: myNametag, opponent: name, wager: Math.max(0, wager), bestOf })
+        body: JSON.stringify({ from: myNametag, opponent: name, wager: 0, bestOf: 3 })
       });
       const data = await r.json();
       if (!r.ok) {
@@ -219,7 +217,10 @@
 		</div>`;
     }).join("");
   }
-  setInterval(pollIncomingChallenges, 2e3);
+  var redirecting = false;
+  var incomingPollInterval = setInterval(() => {
+    if (!redirecting) pollIncomingChallenges();
+  }, 2e3);
   if (myNametag) pollIncomingChallenges();
   async function acceptChallenge(id, btn) {
     btn.closest(".challenge-incoming")?.remove();
@@ -235,6 +236,7 @@
         showStatus(data.message || "Accept failed", "rgba(218,54,51,0.1)", "var(--red)");
         return;
       }
+      redirecting = true;
       const p = new URLSearchParams({
         tournament: "1",
         matchId: data.matchId,
@@ -311,6 +313,7 @@
             $("join-body").innerHTML = `<div style="text-align:center;color:var(--red);font-size:14px">${esc(data2.message || "Failed")}</div>`;
             return;
           }
+          redirecting = true;
           const p = new URLSearchParams({
             tournament: "1",
             matchId: data2.matchId,
@@ -485,8 +488,10 @@
       $("humans-count").textContent = `${humans.length} online`;
       updateNetStatus();
     } catch {
-      lastRestOk = false;
-      updateNetStatus();
+      if (!redirecting) {
+        lastRestOk = false;
+        updateNetStatus();
+      }
     }
   }
   setInterval(pollOnline, 3e3);

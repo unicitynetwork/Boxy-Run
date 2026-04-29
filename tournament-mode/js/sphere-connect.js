@@ -858,7 +858,12 @@ var SphereConnect = (() => {
 
   // src/sphere-connect.ts
   var WALLET_URL = "https://sphere.unicity.network";
-  var GAME_WALLET_ADDRESS = "@boxyrunarena";
+  function gameWalletAddress() {
+    if (typeof window !== "undefined" && window.__BOXY_ARENA_WALLET) {
+      return window.__BOXY_ARENA_WALLET;
+    }
+    return "@boxyrunarena";
+  }
   var ENTRY_FEE = 10;
   var COIN_ID = "UCT";
   var UCT_COIN_ID_HEX = "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
@@ -866,6 +871,9 @@ var SphereConnect = (() => {
   var FAUCET_URL = "https://faucet.unicity.network/api/v1/faucet/request";
   var SESSION_KEY = "boxyrun-sphere-session";
   var DEPOSIT_KEY = "boxyrun-deposit-paid";
+  var AUTH_SESSION_KEY = "boxyrun-auth-session";
+  var authSessionId = null;
+  var authedNametag = null;
   var client = null;
   var transport = null;
   var popupWindow = null;
@@ -980,6 +988,7 @@ var SphereConnect = (() => {
         updateUI("connected");
         return;
       }
+      await ensureAuthSession();
       await refreshBalance();
       state.error = null;
       if (sessionStorage.getItem(DEPOSIT_KEY)) {
@@ -1007,12 +1016,62 @@ var SphereConnect = (() => {
     popupWindow = null;
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(DEPOSIT_KEY);
+    sessionStorage.removeItem(AUTH_SESSION_KEY);
+    authSessionId = null;
+    authedNametag = null;
     state.isConnected = false;
     state.isDepositPaid = false;
     state.identity = null;
     state.balance = null;
     state.error = null;
     updateUI("disconnected");
+  }
+  async function ensureAuthSession() {
+    if (!client || !state.identity?.nametag) return null;
+    const nametag = state.identity.nametag.replace(/^@/, "").toLowerCase();
+    if (authSessionId && authedNametag === nametag) return authSessionId;
+    const cached = sessionStorage.getItem(AUTH_SESSION_KEY);
+    if (cached) {
+      try {
+        const { sessionId, nametag: t, expiresAt } = JSON.parse(cached);
+        if (t === nametag && typeof expiresAt === "number" && expiresAt > Date.now()) {
+          authSessionId = sessionId;
+          authedNametag = nametag;
+          return sessionId;
+        }
+      } catch {
+      }
+    }
+    try {
+      const challengeRes = await fetch("/api/auth/challenge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nametag })
+      });
+      if (!challengeRes.ok) return null;
+      const { challengeId, nonce } = await challengeRes.json();
+      const signature = await client.intent(INTENT_ACTIONS.SIGN_MESSAGE, {
+        message: nonce
+      });
+      const verifyRes = await fetch("/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challengeId, signature })
+      });
+      if (!verifyRes.ok) return null;
+      const { sessionId, expiresAt } = await verifyRes.json();
+      authSessionId = sessionId;
+      authedNametag = nametag;
+      sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({
+        sessionId,
+        nametag,
+        expiresAt
+      }));
+      return sessionId;
+    } catch (err) {
+      console.error("[auth] handshake failed:", err);
+      return null;
+    }
   }
   async function refreshBalance() {
     if (!client) return;
@@ -1046,6 +1105,7 @@ var SphereConnect = (() => {
       updateUI("connected");
       return false;
     }
+    await refreshBalance();
     if (state.balance !== null && state.balance < sendAmount) {
       state.error = `Insufficient balance. You need at least ${sendAmount} ${COIN_ID}.`;
       updateUI("connected");
@@ -1058,7 +1118,7 @@ var SphereConnect = (() => {
         uctDecimals = UCT_DECIMALS;
       }
       await client.intent(INTENT_ACTIONS.SEND, {
-        to: GAME_WALLET_ADDRESS,
+        to: gameWalletAddress(),
         amount: sendAmount,
         coinId: uctCoinId,
         memo: "Boxy Run entry fee"
@@ -1250,6 +1310,10 @@ var SphereConnect = (() => {
     get coinId() {
       return COIN_ID;
     },
+    /** Server-side session token. Null until ensureAuthSession resolves. */
+    get authSession() {
+      return authSessionId;
+    },
     connect,
     disconnect,
     deposit,
@@ -1257,6 +1321,13 @@ var SphereConnect = (() => {
     requestPayout,
     refreshBalance,
     updateUI,
+    /**
+     * Force-refresh the auth session (usually unnecessary — `connect()`
+     * does this automatically). Useful if the server says the session
+     * has expired and the page wants to re-handshake without forcing a
+     * full reload.
+     */
+    ensureAuthSession,
     resetDeposit() {
       state.isDepositPaid = false;
     }

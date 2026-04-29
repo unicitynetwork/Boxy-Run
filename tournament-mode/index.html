@@ -42,6 +42,10 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
 .hero-title .w3{display:block;font-size:.35em;letter-spacing:.5em;color:var(--text2);margin-top:8px}
 .hero-sub{font-size:18px;color:var(--text2);max-width:550px;margin-bottom:40px;line-height:1.6}
 .hero-actions{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+@media(max-width:600px){
+  .hero-actions{flex-direction:column;align-items:stretch;max-width:320px;margin:0 auto}
+  .hero-actions .btn{width:100%;text-align:center;padding:16px 24px}
+}
 
 /* Buttons */
 .btn{font-family:var(--display);font-size:12px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;text-decoration:none;padding:14px 32px;border-radius:var(--r);border:none;cursor:pointer;transition:.25s;display:inline-block}
@@ -157,10 +161,19 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
     <div class="hero-actions">
       <a href="dev.html" class="btn btn-play">Single Player</a>
       <a href="levels.html" class="btn btn-levels">Levels</a>
-      <a href="challenge.html" class="btn btn-challenge">Challenge</a>
+      <a href="challenge.html" class="btn btn-challenge">PvP</a>
       <a href="tournament-v2.html" class="btn btn-tournament">Tournaments</a>
+      <a href="dev.html?daily=1" class="btn btn-play" style="background:#ff9534;box-shadow:0 0 20px rgba(255,149,52,0.4)">Daily Challenge</a>
     </div>
   </section>
+
+  <!-- Daily Unicity factoid -->
+  <div id="daily-factoid" style="margin-bottom:32px;padding:20px 24px;background:rgba(20,32,56,0.7);border:1px solid rgba(95,234,255,0.15);border-radius:6px;backdrop-filter:blur(10px)">
+    <div style="margin-bottom:10px">
+      <span style="font-family:var(--display);font-size:9px;font-weight:700;letter-spacing:.25em;color:var(--cyan);text-transform:uppercase">Did you know?</span>
+    </div>
+    <div id="factoid-text" style="font-size:13px;color:var(--text2);line-height:1.7"></div>
+  </div>
 
   <section class="section">
     <div class="section-label">Rankings</div>
@@ -176,6 +189,13 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
           <div class="lb-date-picker"><input type="date" id="daily-date"></div>
         </div>
         <div class="card-body" id="daily-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+    </div>
+    <!-- Daily Challenge leaderboard -->
+    <div style="margin-top:24px">
+      <div class="card" style="border-color:rgba(255,149,52,0.3)">
+        <div class="card-head"><h3 style="color:#ff9534">Daily Challenge</h3><span style="font-size:11px;color:var(--text3)" id="daily-challenge-date"></span></div>
+        <div class="card-body" id="daily-challenge-body"><div class="lb-empty">Loading...</div></div>
       </div>
     </div>
   </section>
@@ -505,18 +525,22 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
 
   if(succeeded){
     diag('transfer.succeeded',{txId,via:result});
-    try{
-      const r=await fetch('/api/deposit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nametag:myNametag,amount})});
-      const d=await r.json();
-      diag('transfer.ledger_credit',{txId,status:r.status,response:d});
-    }catch(e){
-      diag('transfer.ledger_err',{txId,err:String(e)});
-    }
-    await fetchGameBalance();
-    updateBalance();
-    if(txVisible)loadTransactions();
-    status.textContent='Transfer complete! +'+amount+' UCT';
+    // No client-side /api/deposit POST any more — the server-side Sphere
+    // watcher (arena-watcher.ts) sees the on-chain transfer arrive at the
+    // arena wallet and credits player_transactions itself. The watcher's
+    // event fires within a few seconds of the on-chain commit, so we poll
+    // the balance briefly to surface the credit in the UI.
+    status.textContent='Transfer complete! +'+amount+' UCT — crediting…';
     status.style.color='var(--cyan)';
+    const expected=(typeof gameBalance==='number'?gameBalance:0)+amount;
+    for(let i=0;i<10;i++){
+      await new Promise(r=>setTimeout(r,1500));
+      await fetchGameBalance();
+      updateBalance();
+      if(txVisible)loadTransactions();
+      if(typeof gameBalance==='number'&&gameBalance>=expected)break;
+    }
+    status.textContent='Transfer complete! +'+amount+' UCT';
   }else if(result==='timeout'){
     diag('transfer.timeout',{txId});
     status.innerHTML='Timed out. If UCT left your wallet, your balance will update on refresh. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Reset wallet</button>';
@@ -551,6 +575,26 @@ document.getElementById('btn-disconnect').addEventListener('click',()=>{
   if(w&&w.disconnect)w.disconnect();
   showDisconnected();
 });
+
+// Daily factoid — one per day, deterministic from date
+(function() {
+  var facts = [
+    'Unicity throws out the shared ledger that every blockchain since Bitcoin has used. Each token is its own off-chain ledger \u2014 the chain only proves nothing has been double-spent.',
+    'Unicity tokens are self-authenticating, like physical cash: you can verify them without connecting to any blockchain. The chain just proves they haven\u2019t been double-spent.',
+    'The Unicity protocol was invented by Vladimir Rogojin while researching how to reduce server load for Somnium Space, a metaverse company building massive online simulations.',
+    'Most of the Unicity core team came from Guardtime \u2014 an Estonian blockchain company founded in 2007 that\u2019s been working on blockchain protocols for nearly 20 years.',
+    'Two of Unicity\u2019s researchers \u2014 M\u00e4rt Saarepera and Ahto Buldas \u2014 evaluated Proof of Work as a digital currency back in 2003, five years before Bitcoin\u2019s whitepaper.',
+    'The Unicity alpha chain launched in June 2024 with around 10 community miners. It spread by word of mouth \u2014 no central authority decided who got coins.',
+    'A transaction on the Unicity Proof Aggregation Layer costs less than $0.00000001 \u2014 the infrastructure just registers a single hash in a sparse Merkle tree.',
+    'Unicity transactions finalise in roughly 2 seconds with an inclusion proof \u2014 but high-frequency-trading mode gives the recipient an instant exclusion proof so they can act immediately.',
+    'Unicity tokens can be sent through email, WhatsApp, NFC, or QR codes \u2014 anywhere you can send a file. They\u2019re self-contained packages, not chain entries.',
+    'Unicity \u2018agents\u2019 are the equivalent of smart contracts \u2014 but they run in parallel off-chain, not on a shared blockchain. You can even run an EVM inside one.',
+  ];
+  var day = Math.floor(Date.now() / 86400000); // days since epoch
+  var idx = day % facts.length;
+  var el = document.getElementById('factoid-text');
+  if (el) el.textContent = facts[idx];
+})();
 
 // Leaderboards
 const API='/api';
@@ -595,7 +639,21 @@ dp.value=new Date().toISOString().split('T')[0];
 dp.max=dp.value;
 dp.addEventListener('change',()=>loadDaily(dp.value));
 
-loadAllTime();loadDaily();
+loadAllTime();loadDaily();loadDailyChallenge();
+
+async function loadDailyChallenge(){
+  try{
+    const r=await fetch(API+'/daily-challenge/leaderboard');
+    const d=await r.json();
+    const el=document.getElementById('daily-challenge-body');
+    const dateEl=document.getElementById('daily-challenge-date');
+    if(dateEl)dateEl.textContent=d.date||'';
+    if(!d.leaderboard||!d.leaderboard.length){el.innerHTML='<div class="lb-empty">No entries yet — be the first!</div>';return}
+    el.innerHTML=buildTable(d.leaderboard);
+  }catch{
+    document.getElementById('daily-challenge-body').innerHTML='<div class="lb-empty">Could not load</div>';
+  }
+}
 setInterval(loadDaily,30000);
 setInterval(loadAllTime,60000);
 </script>
