@@ -45,6 +45,8 @@ const BOT_NAMES = [
 	'vitalik_fan',     // medium
 	'rug_survivor',    // expert
 	'boxy_supreme',    // god
+	'mooning_bull',    // beginner
+	'paper_hands',     // medium
 ];
 
 // ── Action decision ──────────────────────────────────────────────
