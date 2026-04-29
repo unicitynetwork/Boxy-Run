@@ -98,6 +98,7 @@ export function issueChallenge(nametag: string): { challengeId: string; nonce: s
 	const nonce = randomBytes(32).toString('hex');
 	const expiresAt = Date.now() + CHALLENGE_TTL_MS;
 	challenges.set(challengeId, { nametag, nonce, expiresAt });
+	console.log('[auth] challenge issued', { nametag, challengeId });
 	return { challengeId, nonce, expiresAt };
 }
 
@@ -110,9 +111,15 @@ export async function verifyChallenge(
 	signature: string,
 ): Promise<{ sessionId: string; nametag: string; expiresAt: number } | { error: string }> {
 	const ch = challenges.get(challengeId);
-	if (!ch) return { error: 'unknown_challenge' };
+	if (!ch) {
+		console.warn('[auth] verify failed — unknown_challenge', { challengeId });
+		return { error: 'unknown_challenge' };
+	}
 	challenges.delete(challengeId); // single-use, regardless of outcome
-	if (Date.now() > ch.expiresAt) return { error: 'challenge_expired' };
+	if (Date.now() > ch.expiresAt) {
+		console.warn('[auth] verify failed — challenge_expired', { nametag: ch.nametag });
+		return { error: 'challenge_expired' };
+	}
 
 	if (BYPASS) {
 		// Test/dev path — accept any signature, but only for nametags that
@@ -122,7 +129,20 @@ export async function verifyChallenge(
 	}
 
 	const chainPubkey = await getChainPubkey(ch.nametag);
-	if (!chainPubkey) return { error: 'nametag_not_registered' };
+	if (!chainPubkey) {
+		console.warn('[auth] verify failed — nametag_not_registered', { nametag: ch.nametag });
+		return { error: 'nametag_not_registered' };
+	}
+
+	// Log the signature shape we received — clients have been observed
+	// passing back objects, hex without 0x prefix, etc. The shape is the
+	// load-bearing thing the SDK is fussy about.
+	console.log('[auth] verify attempt', {
+		nametag: ch.nametag,
+		sigType: typeof signature,
+		sigLen: typeof signature === 'string' ? signature.length : -1,
+		sigSample: typeof signature === 'string' ? signature.slice(0, 32) : null,
+	});
 
 	let ok = false;
 	try {
@@ -132,9 +152,14 @@ export async function verifyChallenge(
 		console.warn('[auth] verifySignedMessage threw', e);
 		return { error: 'verify_failed' };
 	}
-	if (!ok) return { error: 'bad_signature' };
+	if (!ok) {
+		console.warn('[auth] verify failed — bad_signature', { nametag: ch.nametag });
+		return { error: 'bad_signature' };
+	}
 
-	return mintSession(ch.nametag, chainPubkey);
+	const minted = mintSession(ch.nametag, chainPubkey);
+	console.log('[auth] verify ok — session minted', { nametag: ch.nametag, expiresAt: minted.expiresAt });
+	return minted;
 }
 
 function mintSession(nametag: string, chainPubkey: string): { sessionId: string; nametag: string; expiresAt: number } {

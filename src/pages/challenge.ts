@@ -41,6 +41,11 @@ let bots: { name: string; busy: boolean; skill: string }[] = [];
 let humans: string[] = [];
 let wsLastMessageAt = 0;
 let wsWatchdog: ReturnType<typeof setInterval> | null = null;
+// Set when the WS is closed because the wallet wasn't ready (or the user
+// navigates away). Suppresses the auto-reconnect 3s timer — without this
+// we'd hammer the server every 3s for a user who hasn't connected a
+// wallet yet, and burn a lot of [auth] log lines.
+let wsIntentionalClose = false;
 
 function esc(s: string): string {
 	const d = document.createElement('div');
@@ -54,30 +59,47 @@ function $(id: string): HTMLElement {
 
 // ─── Identity ───────────────────────────────────────────────────────
 
+// Show the connected-identity UI immediately if we know the nametag from
+// a prior session — but DON'T open the WS yet. The server now requires a
+// Sphere-signed session for register, which we can only mint once the
+// wallet actually finishes its handshake. Opening the WS too early means
+// the auth bail-out fires and the reconnect loop spams the server.
 if (myNametag) {
 	$('id-disconnected').style.display = 'none';
 	$('id-connected').style.display = 'flex';
 	$('my-name').textContent = myNametag;
-	connectWS();
 	enableChat();
 }
 
+// Once per 500ms: if the wallet has finished connecting, ensure the WS
+// is open. This unifies the "page loaded with cached nametag" case and
+// the "user just clicked connect" case.
 setInterval(() => {
 	const w = window.SphereWallet;
-	if (!(w && w.isConnected && w.identity?.nametag)) return;
-	const liveTag = w.identity.nametag;
-	if (myNametag === liveTag) return;
-	if (myNametag && myNametag !== liveTag) {
-		if (ws) try { ws.close(); } catch {}
-		ws = null;
+	const ready = !!(w && w.isConnected && w.identity?.nametag);
+
+	if (ready) {
+		const liveTag = w!.identity!.nametag!;
+		if (myNametag !== liveTag) {
+			// Identity changed (or arrived for the first time)
+			if (ws) try { ws.close(); } catch {}
+			ws = null;
+			myNametag = liveTag;
+			localStorage.setItem('boxyrun-nametag', myNametag);
+			$('id-disconnected').style.display = 'none';
+			$('id-connected').style.display = 'flex';
+			$('my-name').textContent = myNametag;
+			enableChat();
+		}
+		// Open the WS only when an auth session is already in hand —
+		// gating on `ensureAuthSession` (the function) is too eager: if
+		// minting fails (popup rejected, wallet bug) we'd loop forever.
+		// Once the session is minted by a wallet event, this poller
+		// picks it up and opens the WS exactly once.
+		if (!ws && w!.authSession) {
+			connectWS();
+		}
 	}
-	myNametag = liveTag;
-	localStorage.setItem('boxyrun-nametag', myNametag);
-	$('id-disconnected').style.display = 'none';
-	$('id-connected').style.display = 'flex';
-	$('my-name').textContent = myNametag;
-	connectWS();
-	enableChat();
 }, 500);
 
 // ─── WebSocket ──────────────────────────────────────────────────────
@@ -86,12 +108,28 @@ function connectWS(): void {
 	if (!myNametag) return;
 	ws = new WebSocket(WS_URL);
 	wsLastMessageAt = Date.now();
-	ws.onopen = () => {
+	ws.onopen = async () => {
 		wsLastMessageAt = Date.now();
 		// Server now requires a Sphere-signed session token alongside
-		// the register message — the SphereWallet module exposes it
-		// after the auth handshake completes.
-		const sessionId = (window as any).SphereWallet?.authSession;
+		// the register message — the SphereWallet module mints it
+		// during its wallet handshake. The WS can open before that
+		// finishes, so wait on it; without this we ship sessionId=null
+		// and get hard-rejected, then auto-reconnect into a loop.
+		const wallet = (window as any).SphereWallet;
+		let sessionId: string | null = wallet?.authSession ?? null;
+		if (!sessionId && typeof wallet?.ensureAuthSession === 'function') {
+			try {
+				sessionId = await wallet.ensureAuthSession();
+			} catch (err) {
+				console.error('[challenge] auth handshake failed', err);
+			}
+		}
+		if (!sessionId) {
+			console.warn('[challenge] no auth session — closing without register');
+			wsIntentionalClose = true;
+			try { ws!.close(); } catch {}
+			return;
+		}
 		wsSend({ type: 'register', identity: { nametag: myNametag! }, sessionId } as any);
 		$('ws-dot').classList.add('on');
 		updateNetStatus();
@@ -108,6 +146,14 @@ function connectWS(): void {
 		if (wsWatchdog) { clearInterval(wsWatchdog); wsWatchdog = null; }
 		$('ws-dot').classList.remove('on');
 		updateNetStatus();
+		// Skip the auto-reconnect when the close was intentional —
+		// otherwise a wallet-not-ready bail-out reconnects every 3s and
+		// burns bandwidth + log lines until the user closes the tab.
+		if (wsIntentionalClose) {
+			wsIntentionalClose = false;
+			ws = null;
+			return;
+		}
 		setTimeout(connectWS, 3000);
 	};
 	ws.onerror = () => {};

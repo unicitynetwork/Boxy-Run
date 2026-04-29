@@ -191,15 +191,25 @@ wss.on('connection', (ws) => {
 				// with its wallet's chain private key.
 				if (msg.identity?.nametag) {
 					const claimed = normalizeNametag(msg.identity.nametag);
-					const session = getSession(msg.sessionId);
-					if (!session || normalizeNametag(session.nametag) !== claimed) {
+					const sid = msg.sessionId;
+					const session = getSession(sid);
+					// Distinguish the three failure modes in logs so we can
+					// tell client-race ("no session token") from a stale token
+					// ("token doesn't match server's session map") from a
+					// nametag mismatch ("session is for someone else").
+					let rejectReason: string | null = null;
+					if (!sid) rejectReason = 'no_session_token';
+					else if (!session) rejectReason = 'unknown_session_token';
+					else if (normalizeNametag(session.nametag) !== claimed) rejectReason = 'nametag_mismatch';
+					if (rejectReason) {
 						try {
 							ws.send(JSON.stringify({
 								type: 'error', v: 0, code: 'unauthorized',
+								reason: rejectReason,
 								message: 'Sphere-signed session required for register',
 							}));
 						} catch {}
-						console.warn(`[ws] register rejected — bad session for ${claimed}`);
+						console.warn(`[ws] register rejected — ${rejectReason} (claimed=${claimed} sidPresent=${!!sid})`);
 						ws.close(1008, 'unauthorized');
 						break;
 					}
