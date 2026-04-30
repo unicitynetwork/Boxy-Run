@@ -2377,6 +2377,24 @@ async function startDailyChallenge(skin: CharacterSkin) {
 	const today = todayStr();
 	const played = localStorage.getItem('boxyrun-daily-date');
 
+	// Require a connected wallet — otherwise anyone can play as
+	// 'anonymous', then connect a wallet, and play again under their
+	// real nametag. The server's UNIQUE(nickname, date) only blocks
+	// repeat plays under the SAME name, so the only durable defence is
+	// to refuse the unconnected case here.
+	const tag = getPlayerNametag();
+	const wallet = getWallet();
+	const walletConnected = !!(wallet && wallet.identity?.nametag);
+	if (!walletConnected || !tag) {
+		showOverlay(
+			`<div style="font-size:11px;letter-spacing:0.3em;color:#ff9534;margin-bottom:8px">DAILY CHALLENGE</div>` +
+			`<div style="font-size:20px;font-weight:bold;margin-bottom:12px">Connect a wallet to play</div>` +
+			`<div style="font-size:13px;color:#94a3b8;margin-bottom:16px;max-width:340px;margin-left:auto;margin-right:auto">Daily scores count toward the 7-day Cup season. Connect your Sphere wallet on the home page so your run is recorded under your name.</div>` +
+			`<a href="index.html" style="display:inline-block;white-space:nowrap;font-family:monospace;font-size:13px;padding:10px 24px;background:#5feaff;color:#060a12;border-radius:6px;text-decoration:none;letter-spacing:0.1em;font-weight:700">CONNECT &amp; PLAY</a>`,
+		);
+		return;
+	}
+
 	if (played === today) {
 		showOverlay(
 			`<div style="font-size:11px;letter-spacing:0.3em;color:#ff9534;margin-bottom:8px">DAILY CHALLENGE</div>` +
@@ -2489,20 +2507,31 @@ async function startDailyChallenge(skin: CharacterSkin) {
 					playCrash();
 					render.character.root.visible = false;
 
-					// Mark as played
-					localStorage.setItem('boxyrun-daily-date', today);
+					// Submit score — server replays the inputs to verify the score.
+					// We require a real wallet nametag here; the unconnected
+					// case is gated at startDailyChallenge, so reaching this
+					// point without one means something deeper went wrong
+					// (race with disconnect mid-game). Don't fall back to
+					// 'anonymous' — that pollutes the leaderboard and lets a
+					// player double-dip via wallet-connect after the run.
+					const nickname = getPlayerNametag();
+					if (nickname) {
+						// Mark as played BEFORE submission so a network failure
+						// still blocks an immediate retry.
+						localStorage.setItem('boxyrun-daily-date', today);
 
-					// Submit score — server replays the inputs to verify the score
-					const nickname = getPlayerNametag() || 'anonymous';
-					const wireInputs = recordedInputs.map(i => ({ tick: i.tick, payload: btoa(i.action) }));
-					fetch('/api/daily-challenge/scores', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ nickname, inputs: wireInputs, date: today }),
-					}).catch(() => {});
+						const wireInputs = recordedInputs.map(i => ({ tick: i.tick, payload: btoa(i.action) }));
+						fetch('/api/daily-challenge/scores', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ nickname, inputs: wireInputs, date: today }),
+						}).catch(() => {});
 
-					// Also submit to regular leaderboard
-					submitScore(nickname, seed, recordedInputs);
+						// Also submit to regular leaderboard
+						submitScore(nickname, seed, recordedInputs);
+					} else {
+						console.warn('[daily] no nametag at submit time — score discarded');
+					}
 
 					showOverlay(
 						`<div style="font-size:11px;letter-spacing:0.3em;color:#ff9534;margin-bottom:8px">DAILY CHALLENGE</div>` +

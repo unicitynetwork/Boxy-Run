@@ -506,6 +506,14 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 				json(res, 400, { error: 'invalid_request', message: 'nickname and inputs required' });
 				return true;
 			}
+			// Reject the literal 'anonymous' (and case variants) — the old
+			// client used to default to that string when no wallet was
+			// connected, which let one person play twice in a day (once
+			// as 'anonymous', then again under their wallet name).
+			if (/^anonymous$/i.test(nickname)) {
+				json(res, 400, { error: 'wallet_required', message: 'Daily challenge requires a connected wallet' });
+				return true;
+			}
 			if (inputs.length > 50000) {
 				json(res, 400, { error: 'too_many_inputs', message: 'input list too large' });
 				return true;
