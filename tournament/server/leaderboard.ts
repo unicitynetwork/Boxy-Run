@@ -401,9 +401,17 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			}
 			await ensureSchema();
 			const db = getDb();
+			// Clear every leaderboard surface — used to reset for a new
+			// Daily Cup season on launch. Player wallets / ledger are
+			// untouched (separate /api/admin/wipe-transactions for that).
 			await db.execute('DELETE FROM scores');
 			await db.execute('DELETE FROM alltime');
-			json(res, 200, { status: 'ok', message: 'Leaderboard wiped (scores + alltime)' });
+			await db.execute('DELETE FROM daily_challenge_scores');
+			await db.execute('DELETE FROM season_points');
+			json(res, 200, {
+				status: 'ok',
+				message: 'Leaderboard wiped (scores, alltime, daily_challenge_scores, season_points)',
+			});
 			return true;
 		}
 		if (path === '/api/admin/delete-player' && req.method === 'POST') {
