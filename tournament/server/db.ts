@@ -92,6 +92,32 @@ export async function ensureSchema(): Promise<void> {
 		CREATE INDEX IF NOT EXISTS idx_daily_challenge_date_score
 		ON daily_challenge_scores (date, score DESC)
 	`);
+	// Season points: settled output of the daily challenge.
+	// One row per (nametag, date) — top 5 each day get 10/6/4/2/1.
+	// "Season" = rolling 7-day window summed at query time. The
+	// settlement job (run-once-per-day at UTC 00:01) writes these
+	// rows from yesterday's daily_challenge_scores. UNIQUE makes
+	// the job idempotent — if it runs twice in a day the second
+	// run is a no-op.
+	await db.execute(`
+		CREATE TABLE IF NOT EXISTS season_points (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			nametag TEXT NOT NULL,
+			date TEXT NOT NULL,
+			rank INTEGER NOT NULL,
+			points INTEGER NOT NULL,
+			score INTEGER NOT NULL,
+			UNIQUE(nametag, date)
+		)
+	`);
+	await db.execute(`
+		CREATE INDEX IF NOT EXISTS idx_season_points_date
+		ON season_points (date)
+	`);
+	await db.execute(`
+		CREATE INDEX IF NOT EXISTS idx_season_points_nametag
+		ON season_points (nametag)
+	`);
 	schemaReady = true;
 	console.log('[db] schema ready');
 }

@@ -289,6 +289,16 @@ async function acceptChallenge(id: string, btn: HTMLElement): Promise<void> {
 			showStatus(data.message || 'Accept failed', 'rgba(218,54,51,0.1)', 'var(--red)');
 			return;
 		}
+		// Diagnose missing fields that would explode URLSearchParams.
+		// Server's accept returns matchId/seed/tournamentId/youAre/opponent/bestOf —
+		// if any is undefined, URLSearchParams converts to literal string
+		// "undefined" and the redirect succeeds but the game page can't
+		// initialise. Better to surface the bad response loudly.
+		if (!data.matchId || !data.tournamentId || !data.youAre || !data.opponent) {
+			console.error('[acceptChallenge] response missing fields:', data);
+			showStatus(`Bad accept response: ${JSON.stringify(data).slice(0, 200)}`, 'rgba(218,54,51,0.1)', 'var(--red)');
+			return;
+		}
 		redirecting = true;
 		const p = new URLSearchParams({
 			tournament: '1', matchId: data.matchId, seed: data.seed || '0',
@@ -297,8 +307,10 @@ async function acceptChallenge(id: string, btn: HTMLElement): Promise<void> {
 			startsAt: String(Date.now() + 3000),
 		});
 		location.href = 'dev.html?' + p;
-	} catch {
-		showStatus('Network error', 'rgba(218,54,51,0.1)', 'var(--red)');
+	} catch (err) {
+		console.error('[acceptChallenge] threw:', err);
+		const msg = (err as Error)?.message || String(err);
+		showStatus(`Accept error: ${msg}`, 'rgba(218,54,51,0.1)', 'var(--red)');
 	}
 }
 

@@ -64,7 +64,7 @@ import {
 	playLevelComplete,
 	playPowerupCollect,
 } from '../render/audio';
-import { stopAmbientMusic } from '../render/ambient-music';
+import { stopAmbientMusic, pauseAmbientMusic, resumeAmbientMusic } from '../render/ambient-music';
 import { getAudioRecordingStream, getSharedAudioContext } from '../render/audio-context';
 import * as Mp4Muxer from 'mp4-muxer';
 
@@ -78,6 +78,34 @@ window.addEventListener('pagehide', () => {
 		activeScene = null;
 	}
 });
+
+/**
+ * Replace the active scene, disposing the previous one. Without this,
+ * starting a new game (PLAY AGAIN, post-match restart, tournament
+ * navigation) leaks the old Engine — and worse, particle systems on
+ * the dying engine still hold references to textures from the new
+ * engine's WebGL context, producing the
+ *   "INVALID_OPERATION: bindTexture: object does not belong to this context"
+ * console spam after each restart.
+ */
+let sceneSeq = 0;
+function setActiveScene(scene: SceneHandle): void {
+	const newId = ++sceneSeq;
+	(scene as any)._id = newId;
+	if (activeScene) {
+		const oldId = (activeScene as any)._id ?? '?';
+		console.log(`[scene] disposing #${oldId} → installing #${newId}`);
+		try {
+			disposeScene(activeScene);
+			console.log(`[scene] dispose #${oldId} ok`);
+		} catch (e) {
+			console.warn(`[scene] dispose #${oldId} failed`, e);
+		}
+	} else {
+		console.log(`[scene] installing #${newId} (first scene)`);
+	}
+	activeScene = scene;
+}
 
 // ── Sphere wallet bridge ─────────────────────────────────────────
 // sphere-connect.ts (loaded before this script) exposes
@@ -247,7 +275,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
-	activeScene = scene;
+	setActiveScene(scene);
 	const render = createRenderState(scene, skin, true);
 	// No ghost — opponent status shown via server-confirmed data only.
 	let oppStatusEl: HTMLElement | null = null;
@@ -1082,7 +1110,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 function startLevel(level: LevelDef, skin: CharacterSkin) {
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
-	activeScene = scene;
+	setActiveScene(scene);
 	const render = createRenderState(scene, skin);
 	const state = makeInitialState(level.seed, config);
 
@@ -2363,7 +2391,7 @@ async function startDailyChallenge(skin: CharacterSkin) {
 	const config = DEFAULT_CONFIG;
 	let state = makeInitialState(seed, config);
 	const scene = createScene();
-	activeScene = scene;
+	setActiveScene(scene);
 	const render = createRenderState(scene, skin);
 
 	let phase: 'ready' | 'playing' | 'dead' = 'ready';
@@ -2532,7 +2560,7 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
-	activeScene = scene;
+	setActiveScene(scene);
 	const render = createRenderState(scene, skin);
 	const state = makeInitialState(seed, config);
 	let paused = true;
@@ -2569,20 +2597,27 @@ async function startSinglePlayer(params: URLSearchParams, skin: CharacterSkin) {
 		if (keysAllowed[key] === false) return;
 		keysAllowed[key] = false;
 
+		// "Press any key to resume" — including P. Without this branch
+		// catching P first, P would fall through into the toggle path
+		// below and re-pause the game, which from the user's POV looks
+		// like "music never comes back".
 		if (paused && key > 18) {
 			if (entryPaid) {
 				paused = false;
 				lastFrameTime = performance.now();
 				tickAccumulator = 0;
 				hideOverlay();
+				resumeAmbientMusic();
 				return;
 			}
 			return;
 		}
 		if (key === KEY_P) {
-			paused = !paused;
-			if (!paused) lastFrameTime = performance.now();
-			else showOverlay('Paused. Press any key to resume.');
+			// Reaches here only when not paused (paused-branch above wins
+			// otherwise). So this is always a pause action.
+			paused = true;
+			showOverlay('Paused. Press any key to resume.');
+			pauseAmbientMusic();
 			return;
 		}
 		if (paused) return;

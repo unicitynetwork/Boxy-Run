@@ -271,7 +271,12 @@ export function syncRender(
 			render.musicStarted = true;
 			createMusicToggle();
 		}
-		const intensity = Math.min(state.score / 30000, 1);
+		// Floor at 0.2 so the soundtrack stays audible from tick 1.
+		// Without it, score=0 maps to intensity=0 which the gain
+		// fader in setMusicIntensity treats as "off", silencing the
+		// track within ~12 frames of game start. Score still drives
+		// the upper end (0.2 → 1.0).
+		const intensity = Math.max(0.2, Math.min(state.score / 30000, 1));
 		setMusicIntensity(intensity);
 	}
 

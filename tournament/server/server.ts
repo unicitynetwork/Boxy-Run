@@ -301,6 +301,10 @@ function handleChallengeDecline(decliner: string, challengeId: string) {
 // ── Periodic reconciliation (every 1s) ──────────────────────────
 setInterval(async () => {
 	try {
+		// Daily Cup settlement — runs once per UTC day, no-op the rest
+		// of the time. Cheap to call every tick (one cached date check).
+		const { maybeRunDailySettlement } = await import('./season');
+		maybeRunDailySettlement().catch(() => {});
 		// Expire stale challenge invitations
 		reconcileChallenges();
 		const tournaments = await listTournaments();

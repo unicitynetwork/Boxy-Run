@@ -535,6 +535,54 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			}
 			return true;
 		}
+		// ── Daily Cup (7-day rolling season) ───────────────────────
+		// Standings: top 30 by 7-day points sum. Used by the home page.
+		if (path === '/api/season/standings' && req.method === 'GET') {
+			const { getSeasonStandings } = await import('./season');
+			const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '30', 10), 100);
+			const standings = await getSeasonStandings(limit);
+			json(res, 200, { standings, windowDays: 7 });
+			return true;
+		}
+		// Yesterday's settled top-5 + their points awarded.
+		if (path === '/api/season/yesterday' && req.method === 'GET') {
+			const { getYesterdayResults } = await import('./season');
+			json(res, 200, await getYesterdayResults());
+			return true;
+		}
+		// Live: today's leader + total plays so far.
+		if (path === '/api/season/today' && req.method === 'GET') {
+			const { getTodayLeader } = await import('./season');
+			json(res, 200, await getTodayLeader());
+			return true;
+		}
+		// A specific player's standing — null if outside the season.
+		if (path.startsWith('/api/season/player/') && req.method === 'GET') {
+			const { getPlayerSeasonStanding } = await import('./season');
+			const tag = decodeURIComponent(path.slice('/api/season/player/'.length));
+			if (!tag) { json(res, 400, { error: 'nametag required' }); return true; }
+			json(res, 200, { nametag: tag, standing: await getPlayerSeasonStanding(tag) });
+			return true;
+		}
+		// Admin: force-settle a date. Useful for backfills + tests.
+		if (path === '/api/admin/season/settle' && req.method === 'POST') {
+			if (!isAdminRequest(req)) { json(res, 403, { error: 'Unauthorized' }); return true; }
+			try {
+				const body = JSON.parse(await readBody(req));
+				const date = String(body.date || '').trim();
+				if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+					json(res, 400, { error: 'date must be YYYY-MM-DD' });
+					return true;
+				}
+				const { settleDay } = await import('./season');
+				const inserted = await settleDay(date);
+				json(res, 200, { date, inserted });
+			} catch (err) {
+				console.error('[api] season settle:', err);
+				json(res, 500, { error: 'internal_error' });
+			}
+			return true;
+		}
 		if (path === '/api/daily-challenge/leaderboard' && req.method === 'GET') {
 			await ensureSchema();
 			const db = getDb();
