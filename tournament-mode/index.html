@@ -110,6 +110,40 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
 .balance-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border-hi);border-radius:var(--r);padding:20px 28px;margin-bottom:32px;text-align:center;max-width:400px;width:100%}
 .balance-amount{font-family:var(--display);font-size:clamp(28px,5vw,42px);font-weight:900;color:var(--cyan);text-shadow:0 0 30px var(--cyan-glow);line-height:1.2}
 .balance-label{font-family:var(--display);font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+
+/* Daily Cup — hero today card */
+.daily-cup{margin-top:24px}
+.cup-today{background:linear-gradient(135deg,rgba(255,149,52,0.12) 0%,rgba(255,149,52,0.04) 60%,rgba(20,32,56,0.7) 100%);border:1px solid rgba(255,149,52,0.4);border-radius:var(--r);padding:28px 32px;backdrop-filter:blur(14px);box-shadow:0 0 40px rgba(255,149,52,0.08)}
+.cup-today-header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap;margin-bottom:18px}
+.cup-today-label{font-family:var(--display);font-size:10px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;color:#ff9534;margin-bottom:8px}
+.cup-today-leader-row{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap}
+.cup-today-leader-label{font-size:13px;color:var(--text3)}
+.cup-today-leader{font-family:var(--display);font-size:clamp(22px,4vw,32px);font-weight:700;color:var(--cyan);letter-spacing:.02em;text-shadow:0 0 20px var(--cyan-glow)}
+.cup-today-score{font-family:var(--display);font-size:18px;font-weight:600;color:var(--text2)}
+.cup-today-plays{font-size:12px;color:var(--text3);margin-top:4px}
+.cup-today-countdown{text-align:right;flex-shrink:0}
+.cup-today-countdown-num{font-family:var(--display);font-size:clamp(20px,3.4vw,30px);font-weight:700;color:#ff9534;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.cup-today-countdown-label{font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:var(--text3);margin-top:2px}
+.cup-today-points{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;padding:14px 0;border-top:1px solid rgba(255,149,52,0.18);border-bottom:1px solid rgba(255,149,52,0.18)}
+.cup-points-pill{font-family:var(--display);font-size:11px;font-weight:600;letter-spacing:.05em;padding:6px 12px;border-radius:99px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.1);color:var(--text2)}
+.cup-points-pill.cup-points-1{background:linear-gradient(135deg,#ffd700 0%,#ffa500 100%);color:#1a1a1a;border-color:#ffd700;box-shadow:0 0 12px rgba(255,215,0,0.4)}
+.cup-points-pill.cup-points-2{background:linear-gradient(135deg,#c0c0c0 0%,#a8a8a8 100%);color:#1a1a1a;border-color:#c0c0c0}
+.cup-points-pill.cup-points-3{background:linear-gradient(135deg,#cd7f32 0%,#a36527 100%);color:#fff;border-color:#cd7f32}
+.cup-today-btn{display:inline-block;font-family:var(--display);font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;padding:14px 36px;border-radius:var(--r);background:#ff9534;color:#fff;text-decoration:none;border:none;cursor:pointer;transition:.2s;box-shadow:0 0 24px rgba(255,149,52,0.4)}
+.cup-today-btn:hover{transform:translateY(-1px);box-shadow:0 0 32px rgba(255,149,52,0.6);opacity:.95}
+.cup-card .card-body{padding:0}
+.cup-row{display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px}
+.cup-row:last-child{border-bottom:none}
+.cup-row.you{background:rgba(0,229,255,0.07);border-left:2px solid var(--cyan)}
+.cup-rank{font-family:var(--display);font-weight:700;font-size:14px;text-align:center;color:var(--text3)}
+.cup-rank.r1{color:#ffd700;text-shadow:0 0 8px rgba(255,215,0,0.5)}
+.cup-rank.r2{color:#c0c0c0}
+.cup-rank.r3{color:#cd7f32}
+.cup-name{font-family:var(--display);font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cup-name-meta{font-size:10px;color:var(--text3);font-weight:400;margin-left:6px;letter-spacing:.05em}
+.cup-points{font-family:var(--display);font-weight:700;color:#ff9534;font-size:14px;text-align:right;font-variant-numeric:tabular-nums}
+.cup-points-sub{font-size:10px;color:var(--text3);font-weight:400;display:block;letter-spacing:.05em}
+.cup-empty{padding:40px 20px;text-align:center;color:var(--text3);font-size:13px}
 </style>
 </head>
 <body>
@@ -175,9 +209,61 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
     <div id="factoid-text" style="font-size:13px;color:var(--text2);line-height:1.7"></div>
   </div>
 
+  <!-- ════════ DAILY CUP — the main attraction ════════ -->
+  <section class="section daily-cup">
+    <div class="section-label" style="color:#ff9534">Daily Cup · 7-day Season</div>
+    <div class="section-title">Today's Run</div>
+
+    <!-- Today's daily — hero card -->
+    <div class="cup-today" id="cup-today">
+      <div class="cup-today-header">
+        <div>
+          <div class="cup-today-label">Today · <span id="cup-today-date">--</span></div>
+          <div class="cup-today-leader-row">
+            <span class="cup-today-leader-label">Leader:</span>
+            <span class="cup-today-leader" id="cup-today-leader">—</span>
+            <span class="cup-today-score" id="cup-today-score"></span>
+          </div>
+          <div class="cup-today-plays" id="cup-today-plays"></div>
+        </div>
+        <div class="cup-today-countdown">
+          <div class="cup-today-countdown-num" id="cup-today-countdown">--:--:--</div>
+          <div class="cup-today-countdown-label">until reset</div>
+        </div>
+      </div>
+      <div class="cup-today-points">
+        <span class="cup-points-pill cup-points-1">1st&nbsp;·&nbsp;10pts</span>
+        <span class="cup-points-pill cup-points-2">2nd&nbsp;·&nbsp;6pts</span>
+        <span class="cup-points-pill cup-points-3">3rd&nbsp;·&nbsp;4pts</span>
+        <span class="cup-points-pill cup-points-4">4th&nbsp;·&nbsp;2pts</span>
+        <span class="cup-points-pill cup-points-5">5th&nbsp;·&nbsp;1pt</span>
+      </div>
+      <a href="dev.html?daily=1" class="cup-today-btn">▶ Play Today's Run</a>
+    </div>
+
+    <!-- Two-up: season standings + yesterday's results -->
+    <div class="lb-grid" style="margin-top:24px">
+      <div class="card cup-card">
+        <div class="card-head">
+          <h3>Season Standings</h3>
+          <span style="font-size:11px;color:var(--text3)">Last 7 days</span>
+        </div>
+        <div class="card-body" id="season-standings-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+      <div class="card cup-card">
+        <div class="card-head">
+          <h3>Yesterday's Winners</h3>
+          <span style="font-size:11px;color:var(--text3)" id="yesterday-date"></span>
+        </div>
+        <div class="card-body" id="yesterday-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- All-time + raw daily score leaderboards (kept but secondary) -->
   <section class="section">
-    <div class="section-label">Rankings</div>
-    <div class="section-title">Leaderboards</div>
+    <div class="section-label">More Rankings</div>
+    <div class="section-title">All-Time &amp; Daily Scores</div>
     <div class="lb-grid">
       <div class="card">
         <div class="card-head"><h3>All-Time</h3><span style="font-size:11px;color:var(--text3)">Hall of Fame</span></div>
@@ -191,10 +277,9 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
         <div class="card-body" id="daily-body"><div class="lb-empty">Loading...</div></div>
       </div>
     </div>
-    <!-- Daily Challenge leaderboard -->
     <div style="margin-top:24px">
       <div class="card" style="border-color:rgba(255,149,52,0.3)">
-        <div class="card-head"><h3 style="color:#ff9534">Daily Challenge</h3><span style="font-size:11px;color:var(--text3)" id="daily-challenge-date"></span></div>
+        <div class="card-head"><h3 style="color:#ff9534">Daily Challenge Today</h3><span style="font-size:11px;color:var(--text3)" id="daily-challenge-date"></span></div>
         <div class="card-body" id="daily-challenge-body"><div class="lb-empty">Loading...</div></div>
       </div>
     </div>
@@ -656,6 +741,95 @@ async function loadDailyChallenge(){
 }
 setInterval(loadDaily,30000);
 setInterval(loadAllTime,60000);
+
+// ════════ Daily Cup ════════
+function escHtml(s){const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function fmtScore(n){return Number(n).toLocaleString()}
+
+async function loadCupToday(){
+  try{
+    const r=await fetch(API+'/season/today');
+    const d=await r.json();
+    const dateEl=document.getElementById('cup-today-date');
+    if(dateEl)dateEl.textContent=d.date||'';
+    const leaderEl=document.getElementById('cup-today-leader');
+    const scoreEl=document.getElementById('cup-today-score');
+    const playsEl=document.getElementById('cup-today-plays');
+    if(d.leader){
+      leaderEl.textContent='@'+d.leader.nametag;
+      scoreEl.textContent=fmtScore(d.leader.score);
+    }else{
+      leaderEl.textContent='Be the first';
+      scoreEl.textContent='';
+    }
+    playsEl.textContent=d.plays?`${d.plays} ${d.plays===1?'run':'runs'} so far today`:'No one has played yet';
+  }catch{/* keep placeholder */}
+}
+
+function updateCupCountdown(){
+  const el=document.getElementById('cup-today-countdown');
+  if(!el)return;
+  // Daily reset at UTC 00:00.
+  const now=new Date();
+  const next=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1,0,0,0));
+  let s=Math.max(0,Math.floor((next-now)/1000));
+  const h=Math.floor(s/3600);s-=h*3600;
+  const m=Math.floor(s/60);s-=m*60;
+  el.textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function renderCupRow(rank,nametag,points,sub,isYou){
+  const cls='cup-row'+(isYou?' you':'');
+  const rcls='cup-rank'+(rank<=3?' r'+rank:'');
+  return `<div class="${cls}">
+    <div class="${rcls}">${rank}</div>
+    <div class="cup-name">@${escHtml(nametag)}${sub?`<span class="cup-name-meta">${escHtml(sub)}</span>`:''}</div>
+    <div class="cup-points">${points}<span class="cup-points-sub">pts</span></div>
+  </div>`;
+}
+
+async function loadSeasonStandings(){
+  const el=document.getElementById('season-standings-body');
+  try{
+    const r=await fetch(API+'/season/standings?limit=10');
+    const d=await r.json();
+    if(!d.standings||!d.standings.length){
+      el.innerHTML='<div class="cup-empty">No points awarded yet this season.<br>Be the first to take the daily!</div>';
+      return;
+    }
+    const me=(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)||localStorage.getItem('boxyrun-nametag')||'';
+    el.innerHTML=d.standings.map(s=>{
+      const meta=s.wins>0?`${s.wins} win${s.wins>1?'s':''}`:`best #${s.bestRank}`;
+      return renderCupRow(s.rank,s.nametag,s.points,meta,me&&me.toLowerCase()===s.nametag.toLowerCase());
+    }).join('');
+  }catch{el.innerHTML='<div class="cup-empty">Could not load standings</div>'}
+}
+
+async function loadYesterdayResults(){
+  const el=document.getElementById('yesterday-body');
+  const dateEl=document.getElementById('yesterday-date');
+  try{
+    const r=await fetch(API+'/season/yesterday');
+    const d=await r.json();
+    if(dateEl)dateEl.textContent=d.date||'';
+    if(!d.results||!d.results.length){
+      el.innerHTML='<div class="cup-empty">No one scored yesterday.</div>';
+      return;
+    }
+    const me=(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)||localStorage.getItem('boxyrun-nametag')||'';
+    el.innerHTML=d.results.map(r=>{
+      return renderCupRow(r.rank,r.nametag,r.points,fmtScore(r.score)+' pts game',me&&me.toLowerCase()===r.nametag.toLowerCase());
+    }).join('');
+  }catch{el.innerHTML='<div class="cup-empty">Could not load</div>'}
+}
+
+loadCupToday();
+loadSeasonStandings();
+loadYesterdayResults();
+updateCupCountdown();setInterval(updateCupCountdown,1000);
+setInterval(loadCupToday,30000);
+setInterval(loadSeasonStandings,60000);
+setInterval(loadYesterdayResults,5*60*1000);
 </script>
 </body>
 </html>

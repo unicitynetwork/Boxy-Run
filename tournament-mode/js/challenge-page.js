@@ -242,6 +242,11 @@
         showStatus(data.message || "Accept failed", "rgba(218,54,51,0.1)", "var(--red)");
         return;
       }
+      if (!data.matchId || !data.tournamentId || !data.youAre || !data.opponent) {
+        console.error("[acceptChallenge] response missing fields:", data);
+        showStatus(`Bad accept response: ${JSON.stringify(data).slice(0, 200)}`, "rgba(218,54,51,0.1)", "var(--red)");
+        return;
+      }
       redirecting = true;
       const p = new URLSearchParams({
         tournament: "1",
@@ -255,8 +260,10 @@
         startsAt: String(Date.now() + 3e3)
       });
       location.href = "dev.html?" + p;
-    } catch {
-      showStatus("Network error", "rgba(218,54,51,0.1)", "var(--red)");
+    } catch (err) {
+      console.error("[acceptChallenge] threw:", err);
+      const msg = err?.message || String(err);
+      showStatus(`Accept error: ${msg}`, "rgba(218,54,51,0.1)", "var(--red)");
     }
   }
   async function declineChallenge(id, btn) {
