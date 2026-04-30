@@ -2382,7 +2382,11 @@ async function startDailyChallenge(skin: CharacterSkin) {
 			`<div style="font-size:11px;letter-spacing:0.3em;color:#ff9534;margin-bottom:8px">DAILY CHALLENGE</div>` +
 			`<div style="font-size:20px;font-weight:bold;margin-bottom:12px">Already played today!</div>` +
 			`<div style="font-size:13px;color:#94a3b8;margin-bottom:16px">Come back tomorrow for a new challenge.</div>` +
-			`<a href="index.html" style="font-family:monospace;font-size:13px;padding:10px 24px;background:transparent;color:#5feaff;border:1px solid rgba(95,234,255,0.4);border-radius:6px;text-decoration:none;letter-spacing:0.1em">BACK TO MENU</a>`,
+			// inline-block + nowrap — without these the link wraps on
+			// narrow screens (mobile Safari) and draws the border on
+			// each line, making "BACK TO MENU" look like overlapping
+			// glyphs across two boxes.
+			`<a href="index.html" style="display:inline-block;white-space:nowrap;font-family:monospace;font-size:13px;padding:10px 24px;background:transparent;color:#5feaff;border:1px solid rgba(95,234,255,0.4);border-radius:6px;text-decoration:none;letter-spacing:0.1em">BACK TO MENU</a>`,
 		);
 		return;
 	}
