@@ -410,8 +410,18 @@ function showDisconnected(){
 }
 function setIdentity(tag){
   myNametag=tag;
+  // Mirror onto window so the cup-card script (separate <script>
+  // block, no shared closure with `let myNametag`) can read it.
+  window.myNametag=tag;
   localStorage.setItem(STORAGE_KEY,tag);
   showConnected(tag);
+  // Wallet identity just landed — reload anything keyed off the
+  // player's nametag. Without this the cup card sits on its first
+  // (anonymous) load until the 30s poll catches up. Guarded because
+  // the cup loaders are defined in the second <script> block below
+  // and may not yet exist on first init.
+  if(typeof loadPlayerStatus==='function')loadPlayerStatus();
+  if(typeof loadSeasonStandings==='function')loadSeasonStandings();
 }
 
 let gameBalance=null;
@@ -927,7 +937,13 @@ async function loadYesterdayResults(){
 // Renders the inline "you" line in the cup card and the pinned row at
 // the bottom of the season standings card.
 function getMyTag(){
-  const t=(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)
+  // Order matters: window.myNametag is the page's authoritative copy
+  // (set in setIdentity() once the wallet handshake completes), and
+  // it's the same value the daily-challenge submit code uses, so
+  // querying with it guarantees a hit when the player has played.
+  // Fall back to wallet identity then localStorage for first paint.
+  const t=(window.myNametag)
+        ||(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)
         ||localStorage.getItem('boxyrun-nametag')||'';
   return t.replace(/^@/,'');
 }
