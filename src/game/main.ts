@@ -2377,15 +2377,19 @@ async function startDailyChallenge(skin: CharacterSkin) {
 	const today = todayStr();
 	const played = localStorage.getItem('boxyrun-daily-date');
 
-	// Require a connected wallet — otherwise anyone can play as
-	// 'anonymous', then connect a wallet, and play again under their
-	// real nametag. The server's UNIQUE(nickname, date) only blocks
-	// repeat plays under the SAME name, so the only durable defence is
-	// to refuse the unconnected case here.
+	// Require a real nametag (from the wallet OR cached from a prior
+	// home-page handshake). The original exploit was the *literal*
+	// string 'anonymous' as a fallback nickname — that's been removed
+	// from the submit path AND the server now 400s on it explicitly,
+	// so any nametag we have here is real.
+	//
+	// Note: dev.html doesn't load sphere-connect.js, so
+	// window.SphereWallet is undefined here even when the user
+	// genuinely has a wallet connected (state lives in the home-page
+	// tab/iframe). Don't gate on the live wallet object — gate on
+	// having a nametag string at all.
 	const tag = getPlayerNametag();
-	const wallet = getWallet();
-	const walletConnected = !!(wallet && wallet.identity?.nametag);
-	if (!walletConnected || !tag) {
+	if (!tag) {
 		showOverlay(
 			`<div style="font-size:11px;letter-spacing:0.3em;color:#ff9534;margin-bottom:8px">DAILY CHALLENGE</div>` +
 			`<div style="font-size:20px;font-weight:bold;margin-bottom:12px">Connect a wallet to play</div>` +
