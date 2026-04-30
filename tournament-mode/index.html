@@ -144,6 +144,50 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
 .cup-points{font-family:var(--display);font-weight:700;color:#ff9534;font-size:14px;text-align:right;font-variant-numeric:tabular-nums}
 .cup-points-sub{font-size:10px;color:var(--text3);font-weight:400;display:block;letter-spacing:.05em}
 .cup-empty{padding:40px 20px;text-align:center;color:var(--text3);font-size:13px}
+
+/* Compact top bar — replaces the old huge hero */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0 12px;border-bottom:1px solid rgba(95,234,255,0.08);margin-bottom:24px;flex-wrap:wrap}
+.topbar-brand{display:flex;align-items:center;gap:12px}
+.topbar-brand img{width:40px;height:40px;border-radius:8px;filter:drop-shadow(0 0 12px var(--cyan-glow))}
+.topbar-brand h1{font-family:var(--display);font-size:18px;font-weight:800;letter-spacing:.05em;line-height:1}
+.topbar-brand h1 .w1{color:var(--text)}
+.topbar-brand h1 .w2{color:var(--cyan);text-shadow:0 0 12px var(--cyan-glow)}
+.topbar-brand h1 .w3{font-size:9px;font-weight:700;letter-spacing:.4em;color:var(--text3);display:block;margin-top:2px}
+.topbar-id{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.topbar-id .dot{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.topbar-id .dot.on{background:#2ea043;box-shadow:0 0 6px rgba(46,160,67,0.5)}
+.topbar-id .tag{font-family:var(--display);font-size:13px;font-weight:600;color:var(--cyan)}
+.topbar-id button.btn-wallet{padding:8px 16px;font-size:10px}
+.topbar-id button.btn-disconnect{font-size:10px;padding:5px 10px}
+.topbar-balance-toggle{font-family:var(--display);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:6px 12px;border-radius:var(--r);border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer}
+.topbar-balance-toggle:hover{color:var(--cyan);border-color:var(--cyan)}
+.topbar-balance-toggle .amt{color:var(--cyan);font-weight:700;margin-left:4px}
+
+/* Mode tiles — each gets its own color identity. The home page above
+   them already has the orange Daily Cup as the headline; these are the
+   "alternate ways to play" so they read as a cohesive set but each
+   mode is instantly recognisable. */
+.mode-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:32px 0 16px}
+.mode-tile{position:relative;background:linear-gradient(160deg,rgba(20,32,56,0.85) 0%,rgba(10,18,32,0.95) 100%);border:1px solid var(--border-hi);border-radius:10px;padding:22px 16px 20px;text-align:center;text-decoration:none;color:var(--text);font-family:var(--display);font-size:12px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;transition:transform .2s,box-shadow .2s,border-color .2s;backdrop-filter:blur(8px);overflow:hidden;isolation:isolate}
+.mode-tile::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,var(--tile-glow,rgba(95,234,255,0.18)) 0%,transparent 60%);opacity:.65;z-index:-1;transition:opacity .25s}
+.mode-tile::after{content:'';position:absolute;left:14%;right:14%;bottom:-1px;height:2px;background:var(--tile-accent,var(--cyan));opacity:.55;border-radius:2px;box-shadow:0 0 12px var(--tile-accent,var(--cyan));transition:opacity .25s,box-shadow .25s}
+.mode-tile:hover{transform:translateY(-3px);border-color:var(--tile-accent,var(--cyan));box-shadow:0 12px 32px -12px var(--tile-accent,var(--cyan-glow))}
+.mode-tile:hover::before{opacity:1}
+.mode-tile:hover::after{opacity:1;box-shadow:0 0 24px var(--tile-accent,var(--cyan))}
+.mode-tile-icon{font-size:30px;line-height:1;display:block;margin-bottom:10px;color:var(--tile-accent,var(--cyan));text-shadow:0 0 18px var(--tile-accent,var(--cyan));transition:transform .2s}
+.mode-tile:hover .mode-tile-icon{transform:scale(1.1)}
+.mode-tile-sub{display:block;font-family:var(--body);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none;color:var(--text3);margin-top:6px;line-height:1.3}
+/* Per-tile colors via CSS vars set on the element */
+.mode-tile.tile-play{--tile-accent:#5feaff;--tile-glow:rgba(95,234,255,0.22)}
+.mode-tile.tile-levels{--tile-accent:#a78bfa;--tile-glow:rgba(167,139,250,0.22)}
+.mode-tile.tile-pvp{--tile-accent:#ff5e87;--tile-glow:rgba(255,94,135,0.22)}
+.mode-tile.tile-tournament{--tile-accent:#fbbf24;--tile-glow:rgba(251,191,36,0.22)}
+@media(max-width:600px){.mode-tiles{grid-template-columns:repeat(2,1fr);gap:10px}.mode-tile{padding:18px 12px}.mode-tile-icon{font-size:24px}}
+
+/* Pull cup section to top — no big top padding */
+.daily-cup.daily-cup-hero{padding:0 0 32px;margin-top:0}
+.daily-cup.daily-cup-hero .section-label{margin-bottom:6px}
+.daily-cup.daily-cup-hero .section-title{margin-bottom:18px;font-size:clamp(22px,3.4vw,30px)}
 </style>
 </head>
 <body>
@@ -151,66 +195,53 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
 <canvas id="particles"></canvas>
 
 <main>
-  <section class="hero">
-    <img src="logo.png" alt="Boxy Run" class="hero-logo">
-    <h1 class="hero-title">
-      <span class="w1">BOXY</span> <span class="w2">RUN</span>
-      <span class="w3">ARENA</span>
-    </h1>
-    <p class="hero-sub">Play single player, challenge other players or participate in prize money tournaments.</p>
-
-    <!-- Identity -->
-    <div class="id-bar" id="id-detecting" style="display:none">
-      <span class="dot"></span>
-      <span style="color:var(--text3);font-size:12px">Detecting wallet...</span>
-    </div>
-    <div class="id-bar" id="id-disconnected" style="display:none">
-      <span class="dot" id="id-dot"></span>
-      <button class="btn-wallet" id="btn-wallet">Connect Sphere Wallet</button>
-    </div>
-    <div class="id-bar" id="id-connected" style="display:none">
-      <span class="dot on"></span>
-      <span class="tag" id="id-name"></span>
-      <button class="btn-disconnect" id="btn-disconnect">Disconnect</button>
-    </div>
-    <div class="balance-card" id="balance-card" style="display:none">
-      <div class="balance-label">Your Balance</div>
-      <div class="balance-amount" id="balance-amount">--</div>
-      <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:14px">
-        <input type="number" style="width:80px;padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;text-align:center;outline:none" id="transfer-amount" value="10" min="1" step="1">
-        <button class="btn btn-play" id="btn-transfer" style="font-size:10px;padding:8px 20px">Transfer</button>
+  <!-- Compact top bar: brand left, identity right -->
+  <header class="topbar">
+    <a href="/" class="topbar-brand" style="text-decoration:none">
+      <img src="logo.png" alt="Boxy Run">
+      <h1>
+        <span class="w1">BOXY</span> <span class="w2">RUN</span>
+        <span class="w3">ARENA</span>
+      </h1>
+    </a>
+    <div class="topbar-id">
+      <div id="id-detecting" style="display:none;color:var(--text3);font-size:11px">Detecting wallet…</div>
+      <div id="id-disconnected" style="display:none">
+        <button class="btn-wallet" id="btn-wallet">Connect Wallet</button>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px;min-height:16px" id="transfer-status"></div>
-      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-        <button id="btn-toggle-tx" style="background:transparent;border:none;color:var(--text2);font-family:var(--body);font-size:11px;cursor:pointer;text-transform:uppercase;letter-spacing:.1em">Show Transactions ▾</button>
-        <div id="tx-list" style="display:none;margin-top:10px;max-height:240px;overflow-y:auto;font-size:12px;text-align:left"></div>
+      <div id="id-connected" style="display:none;align-items:center;gap:10px">
+        <span class="dot on"></span>
+        <span class="tag" id="id-name"></span>
+        <button class="topbar-balance-toggle" id="btn-balance-toggle">
+          Wallet<span class="amt" id="balance-amount-mini">--</span>
+        </button>
+        <button class="btn-disconnect" id="btn-disconnect">Disconnect</button>
       </div>
-      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-        <button id="btn-toggle-diag" style="background:transparent;border:none;color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;letter-spacing:.1em">Show Diagnostics ▾</button>
-        <button onclick="window.__forceReset()" style="background:transparent;border:1px solid var(--text3);color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;padding:2px 10px;border-radius:4px">Reset Wallet</button>
-      </div>
-      <div id="diag-panel" style="display:none;margin-top:8px;max-height:260px;overflow-y:auto;background:rgba(0,0,0,0.5);padding:8px;border-radius:4px;text-align:left"></div>
     </div>
+  </header>
 
-    <div class="hero-actions">
-      <a href="dev.html" class="btn btn-play">Single Player</a>
-      <a href="levels.html" class="btn btn-levels">Levels</a>
-      <a href="challenge.html" class="btn btn-challenge">PvP</a>
-      <a href="tournament-v2.html" class="btn btn-tournament">Tournaments</a>
-      <a href="dev.html?daily=1" class="btn btn-play" style="background:#ff9534;box-shadow:0 0 20px rgba(255,149,52,0.4)">Daily Challenge</a>
+  <!-- Wallet panel — collapsed by default, opens via topbar button -->
+  <div class="balance-card" id="balance-card" style="display:none;margin:0 auto 24px">
+    <div class="balance-label">Your Balance</div>
+    <div class="balance-amount" id="balance-amount">--</div>
+    <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:14px">
+      <input type="number" style="width:80px;padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;text-align:center;outline:none" id="transfer-amount" value="10" min="1" step="1">
+      <button class="btn btn-play" id="btn-transfer" style="font-size:10px;padding:8px 20px">Transfer</button>
     </div>
-  </section>
-
-  <!-- Daily Unicity factoid -->
-  <div id="daily-factoid" style="margin-bottom:32px;padding:20px 24px;background:rgba(20,32,56,0.7);border:1px solid rgba(95,234,255,0.15);border-radius:6px;backdrop-filter:blur(10px)">
-    <div style="margin-bottom:10px">
-      <span style="font-family:var(--display);font-size:9px;font-weight:700;letter-spacing:.25em;color:var(--cyan);text-transform:uppercase">Did you know?</span>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px;min-height:16px" id="transfer-status"></div>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+      <button id="btn-toggle-tx" style="background:transparent;border:none;color:var(--text2);font-family:var(--body);font-size:11px;cursor:pointer;text-transform:uppercase;letter-spacing:.1em">Show Transactions ▾</button>
+      <div id="tx-list" style="display:none;margin-top:10px;max-height:240px;overflow-y:auto;font-size:12px;text-align:left"></div>
     </div>
-    <div id="factoid-text" style="font-size:13px;color:var(--text2);line-height:1.7"></div>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button id="btn-toggle-diag" style="background:transparent;border:none;color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;letter-spacing:.1em">Show Diagnostics ▾</button>
+      <button onclick="window.__forceReset()" style="background:transparent;border:1px solid var(--text3);color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;padding:2px 10px;border-radius:4px">Reset Wallet</button>
+    </div>
+    <div id="diag-panel" style="display:none;margin-top:8px;max-height:260px;overflow-y:auto;background:rgba(0,0,0,0.5);padding:8px;border-radius:4px;text-align:left"></div>
   </div>
 
-  <!-- ════════ DAILY CUP — the main attraction ════════ -->
-  <section class="section daily-cup">
+  <!-- ════════ DAILY CUP — the main attraction, above the fold ════════ -->
+  <section class="section daily-cup daily-cup-hero">
     <div class="section-label" style="color:#ff9534">Daily Cup · 7-day Season</div>
     <div class="section-title">Today's Run</div>
 
@@ -258,6 +289,28 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
         <div class="card-body" id="yesterday-body"><div class="lb-empty">Loading...</div></div>
       </div>
     </div>
+
+    <!-- Mode tiles — each color-coded so the row reads as a deck of options
+         rather than a row of identical buttons. Daily Challenge omitted;
+         the orange cup card above is the canonical entry point for it. -->
+    <nav class="mode-tiles" aria-label="Other modes">
+      <a href="dev.html" class="mode-tile tile-play">
+        <span class="mode-tile-icon">▶</span>Single Player
+        <span class="mode-tile-sub">Endless run · solo</span>
+      </a>
+      <a href="levels.html" class="mode-tile tile-levels">
+        <span class="mode-tile-icon">◆</span>Levels
+        <span class="mode-tile-sub">10 hand-tuned stages</span>
+      </a>
+      <a href="challenge.html" class="mode-tile tile-pvp">
+        <span class="mode-tile-icon">⚔</span>PvP
+        <span class="mode-tile-sub">Bots &amp; live opponents</span>
+      </a>
+      <a href="tournament-v2.html" class="mode-tile tile-tournament">
+        <span class="mode-tile-icon">★</span>Tournaments
+        <span class="mode-tile-sub">Bracket play, prizes</span>
+      </a>
+    </nav>
   </section>
 
   <!-- All-time + raw daily score leaderboards (kept but secondary) -->
@@ -284,6 +337,14 @@ main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
       </div>
     </div>
   </section>
+
+  <!-- Did-you-know factoid — moved below the fold, decorative -->
+  <div id="daily-factoid" style="margin:48px 0 32px;padding:20px 24px;background:rgba(20,32,56,0.7);border:1px solid rgba(95,234,255,0.15);border-radius:6px;backdrop-filter:blur(10px)">
+    <div style="margin-bottom:10px">
+      <span style="font-family:var(--display);font-size:9px;font-weight:700;letter-spacing:.25em;color:var(--cyan);text-transform:uppercase">Did you know?</span>
+    </div>
+    <div id="factoid-text" style="font-size:13px;color:var(--text2);line-height:1.7"></div>
+  </div>
 
   <footer class="footer">
     <div></div>
@@ -342,14 +403,30 @@ async function fetchGameBalance(){
 function updateBalance(){
   const card=document.getElementById('balance-card');
   const amountEl=document.getElementById('balance-amount');
-  if(!myNametag){card.style.display='none';return}
-  card.style.display='block';
-  if(gameBalance!==null){
-    amountEl.textContent=Number(gameBalance).toLocaleString()+' UCT';
-  }else{
-    amountEl.textContent='Loading...';
+  const miniEl=document.getElementById('balance-amount-mini');
+  if(!myNametag){
+    if(card)card.style.display='none';
+    return;
   }
+  // The card is hidden by default and only shown when the user clicks
+  // the topbar Wallet button — don't auto-show it here.
+  const text=gameBalance!==null
+    ? Number(gameBalance).toLocaleString()+' UCT'
+    : 'Loading...';
+  if(amountEl)amountEl.textContent=text;
+  if(miniEl)miniEl.textContent=gameBalance!==null
+    ? ' '+Number(gameBalance).toLocaleString()
+    : ' --';
 }
+
+// Wire the topbar Wallet button to toggle the balance card panel.
+document.addEventListener('click',(e)=>{
+  const t=e.target;
+  if(t&&t.closest&&t.closest('#btn-balance-toggle')){
+    const card=document.getElementById('balance-card');
+    if(card)card.style.display=(card.style.display==='block')?'none':'block';
+  }
+},true);
 
 // ── Transaction history ──
 let txVisible=false;
