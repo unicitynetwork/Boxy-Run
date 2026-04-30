@@ -216,6 +216,59 @@ export async function getTodayLeader(): Promise<{
 }
 
 /**
+ * A player's score + rank in TODAY's daily challenge, if they've
+ * played. Powers the inline "you: N (rank #X)" line in the cup card.
+ */
+export async function getPlayerTodayResult(nametag: string): Promise<{
+	score: number;
+	rank: number;
+	totalPlayers: number;
+} | null> {
+	await ensureSchema();
+	const db = getDb();
+	const today = todayUtc();
+	const own = await db.execute({
+		sql: `SELECT score FROM daily_challenge_scores
+		      WHERE nickname = ? AND date = ?`,
+		args: [nametag, today],
+	});
+	if (own.rows.length === 0) return null;
+	const score = Number(own.rows[0].score);
+
+	const above = await db.execute({
+		sql: `SELECT COUNT(*) AS n FROM daily_challenge_scores
+		      WHERE date = ? AND score > ?`,
+		args: [today, score],
+	});
+	const total = await db.execute({
+		sql: `SELECT COUNT(*) AS n FROM daily_challenge_scores WHERE date = ?`,
+		args: [today],
+	});
+	return {
+		score,
+		rank: Number(above.rows[0]?.n ?? 0) + 1,
+		totalPlayers: Number(total.rows[0]?.n ?? 0),
+	};
+}
+
+/**
+ * Unified "personal status" — combines today's run + season standing.
+ * The home page uses this to render the "your position" widgets in
+ * one round-trip.
+ */
+export async function getPlayerStatus(nametag: string): Promise<{
+	nametag: string;
+	today: { score: number; rank: number; totalPlayers: number } | null;
+	season: { points: number; wins: number; daysScored: number; rank: number | null } | null;
+}> {
+	const [today, season] = await Promise.all([
+		getPlayerTodayResult(nametag),
+		getPlayerSeasonStanding(nametag),
+	]);
+	return { nametag, today, season };
+}
+
+/**
  * A specific player's standing in the current season — used for the
  * "your standing" pinned row on the home page when the user is
  * outside the visible top 10.

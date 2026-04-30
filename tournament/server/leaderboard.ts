@@ -572,6 +572,15 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 			json(res, 200, { nametag: tag, standing: await getPlayerSeasonStanding(tag) });
 			return true;
 		}
+		// Combined "personal status" — today's run + season standing in one
+		// shot. Home page uses this so it doesn't need two round-trips.
+		if (path.startsWith('/api/season/status/') && req.method === 'GET') {
+			const { getPlayerStatus } = await import('./season');
+			const tag = decodeURIComponent(path.slice('/api/season/status/'.length));
+			if (!tag) { json(res, 400, { error: 'nametag required' }); return true; }
+			json(res, 200, await getPlayerStatus(tag));
+			return true;
+		}
 		// Admin: force-settle a date. Useful for backfills + tests.
 		if (path === '/api/admin/season/settle' && req.method === 'POST') {
 			if (!isAdminRequest(req)) { json(res, 403, { error: 'Unauthorized' }); return true; }
