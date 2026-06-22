@@ -49,7 +49,9 @@ function parseArg(name: string, fallback: string): string {
 
 async function main() {
 	const nametag = parseArg('nametag', 'boxyrunarena');
-	const network = parseArg('network', 'mainnet') as NetworkType;
+	// Default to testnet (→ testnet2, networkId 4) — the v2 network. Override
+	// with --network=mainnet once mainnet's gateway is cut over to the v2 engine.
+	const network = parseArg('network', 'testnet') as NetworkType;
 	const dataDir = resolve(parseArg('data-dir', './arena-data'));
 	const outFile = resolve(parseArg('out', './arena-wallet.json'));
 	const confirm = process.env.CONFIRM === 'yes';
@@ -126,8 +128,11 @@ async function main() {
 		createdAt: new Date().toISOString(),
 		network,
 		nametag: `@${nametag}`,
-		l1Address: identity.l1Address,
-		chainPubkey: (identity as any).chainPubkey ?? null,
+		// SDK 0.10 dropped the L1 layer from Identity; the L3 DIRECT address is
+		// the on-chain address now. Informational only — the watcher re-derives
+		// identity from the mnemonic, it never reads this field back.
+		directAddress: identity.directAddress ?? null,
+		chainPubkey: identity.chainPubkey,
 		// The secret: anyone with this mnemonic controls every token in @BoxyRunArena.
 		mnemonic,
 	};
@@ -138,9 +143,9 @@ async function main() {
 	console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 	console.log('  ✓ Wallet created');
 	console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-	console.log(`  Nametag:    @${nametag}`);
-	console.log(`  L1 address: ${identity.l1Address}`);
-	console.log(`  Saved to:   ${outFile}`);
+	console.log(`  Nametag:        @${nametag}`);
+	console.log(`  Direct address: ${identity.directAddress ?? '(none)'}`);
+	console.log(`  Saved to:       ${outFile}`);
 	console.log('');
 	console.log('IMPORTANT — NEXT STEPS:');
 	console.log(`  1. Open ${outFile}, copy the mnemonic to a password manager / hardware`);

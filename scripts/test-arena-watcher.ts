@@ -56,7 +56,8 @@ async function main() {
 	console.log(`  basePath:       ${parsed.wallet?.descriptorPath || '(none)'}`);
 	console.log('');
 
-	const network = (process.env.SPHERE_NETWORK || 'mainnet') as 'mainnet' | 'testnet' | 'dev';
+	// testnet → testnet2 (networkId 4), the v2 gateway network under SDK 0.10.
+	const network = (process.env.SPHERE_NETWORK || 'testnet') as 'mainnet' | 'testnet' | 'dev';
 	console.log(`→ Initializing Node providers (network=${network})…`);
 	const providers = createNodeProviders({
 		network,
@@ -80,13 +81,13 @@ async function main() {
 	const id = sphere.identity;
 	console.log('');
 	console.log('✓ Sphere ready');
-	console.log(`  nametag:    ${id?.nametag ? '@' + id.nametag : '(none)'}`);
-	console.log(`  l1Address:  ${id?.l1Address || '(none)'}`);
-	console.log(`  pubkey:     ${(id as any)?.chainPubkey || (id as any)?.pubkey || '(none)'}`);
+	console.log(`  nametag:       ${id?.nametag ? '@' + id.nametag : '(none)'}`);
+	console.log(`  directAddress: ${id?.directAddress || '(none)'}`);
+	console.log(`  pubkey:        ${(id as any)?.chainPubkey || (id as any)?.pubkey || '(none)'}`);
 	console.log('');
 
 	// Now that the transport is connected, ask the network: who owns @boxyrunstaging?
-	// If the answer's pubkey/l1Address matches ours, we've derived the same
+	// If the answer's pubkey/directAddress matches ours, we've derived the same
 	// identity but the binding lookup just isn't being applied. If it differs,
 	// our derivation is wrong — the wallet UI used a different path / mode.
 	console.log('→ Resolving @boxyrunstaging on the network (post-connect)…');
@@ -96,12 +97,11 @@ async function main() {
 		if (info) {
 			console.log('  network says @boxyrunstaging =');
 			console.log(`    chainPubkey:     ${info.chainPubkey}`);
-			console.log(`    l1Address:       ${info.l1Address}`);
 			console.log(`    directAddress:   ${info.directAddress}`);
 			console.log(`    transportPubkey: ${info.transportPubkey}`);
 			const ourPubkey = (id as any)?.chainPubkey;
-			console.log(`  match? chainPubkey: ${info.chainPubkey === ourPubkey ? 'YES' : 'NO'}`);
-			console.log(`  match? l1Address:   ${info.l1Address === id?.l1Address ? 'YES' : 'NO'}`);
+			console.log(`  match? chainPubkey:   ${info.chainPubkey === ourPubkey ? 'YES' : 'NO'}`);
+			console.log(`  match? directAddress: ${info.directAddress === id?.directAddress ? 'YES' : 'NO'}`);
 		} else {
 			console.log('  (not found on the network — nametag may not be registered)');
 		}
@@ -111,7 +111,7 @@ async function main() {
 	console.log('');
 
 	// If no nametag is bound, run address discovery — this scans the
-	// transport (Nostr) and L1 for HD addresses owned by this wallet,
+	// transport (Nostr) for HD addresses owned by this wallet,
 	// including any nametag bindings.
 	if (!id?.nametag) {
 		console.log('  ⚠ No nametag bound after import. Running discoverAddresses()…');
@@ -123,7 +123,7 @@ async function main() {
 		});
 		console.log(`  → scanned ${result.scannedCount} indices, found ${result.addresses?.length || 0} addresses`);
 		for (const addr of result.addresses || []) {
-			console.log(`    [${addr.index}] ${addr.l1Address}  nametag=${addr.nametag || '(none)'}  l1Balance=${addr.l1Balance}`);
+			console.log(`    [${addr.index}] ${addr.directAddress}  nametag=${addr.nametag || '(none)'}  chainPubkey=${addr.chainPubkey}`);
 		}
 		const id2 = sphere.identity;
 		console.log(`  identity after discovery → nametag=${id2?.nametag ? '@' + id2.nametag : '(none)'}`);

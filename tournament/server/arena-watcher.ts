@@ -167,7 +167,11 @@ export async function startArenaWatcher(): Promise<void> {
 	if (sphere) return;
 
 	const wallet = readWalletFile();
-	const network = (process.env.SPHERE_NETWORK || 'mainnet') as 'mainnet' | 'testnet' | 'dev';
+	// Default to testnet (→ testnet2, networkId 4) — the v2 gateway network with
+	// a working trust base under SDK 0.10. mainnet/dev gateways are not cut over
+	// to the v2 engine yet and make Sphere.import throw INVALID_CONFIG on boot.
+	// Override via the SPHERE_NETWORK env once those gateways are v2-ready.
+	const network = (process.env.SPHERE_NETWORK || 'testnet') as 'mainnet' | 'testnet' | 'dev';
 	const dataDir = process.env.SPHERE_DATA_DIR || '/data/arena-sphere';
 	if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
@@ -210,7 +214,7 @@ export async function startArenaWatcher(): Promise<void> {
 	const id = sphere.identity;
 	console.log(
 		`[arena-watcher] Sphere ready — nametag=${id?.nametag ? '@' + id.nametag : '(none)'} ` +
-		`l1Address=${id?.l1Address || '?'}`,
+		`directAddress=${id?.directAddress || '?'}`,
 	);
 
 	// Subscribe to incoming transfers. The SDK emits this event after the

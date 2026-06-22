@@ -4,6 +4,7 @@ import {
   HOST_READY_TIMEOUT,
   INTENT_ACTIONS,
   PERMISSION_SCOPES,
+  SPHERE_NETWORKS,
 } from '@unicitylabs/sphere-sdk/connect';
 import {
   PostMessageTransport,
@@ -165,9 +166,14 @@ async function connect(): Promise<void> {
       resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? undefined;
     }
 
-    // Connect via the resolved transport
+    // Connect via the resolved transport.
+    // SDK 0.10 Connect protocol 2.0 added a network handshake gate: the wallet
+    // host rejects with INCOMPATIBLE_NETWORK (4008) unless the dApp declares a
+    // `network` whose id matches the wallet's active networkId. testnet2
+    // (networkId 4) is the v2 gateway network the arena wallet runs on.
     client = new ConnectClient({
       transport, dapp: dappMeta, permissions: [...dappPermissions], resumeSessionId,
+      network: SPHERE_NETWORKS.testnet2,
     });
     const result = await client.connect();
     state.isConnected = true;
