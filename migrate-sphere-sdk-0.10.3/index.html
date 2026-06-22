@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxy Run Arena</title>
+<link rel="icon" type="image/png" href="logo.png">
+<script type="text/javascript" src="js/sphere-connect.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a12;--surface:rgba(20,32,56,0.85);
+  --cyan:#5feaff;--cyan-dim:rgba(95,234,255,0.2);--cyan-glow:rgba(95,234,255,0.5);
+  --orange:#ff9534;--gold:#FFD700;--silver:#C0C0C0;--bronze:#CD7F32;
+  --red:#ef4444;
+  --text:#f8fafc;--text2:#cbd5e1;--text3:#94a3b8;
+  --border:rgba(95,234,255,0.25);--border-hi:rgba(95,234,255,0.4);
+  --r:6px;
+  --display:'Orbitron',monospace;--body:'IBM Plex Mono','SF Mono',monospace;
+}
+body{font-family:var(--body);background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
+
+/* Grid bg */
+.grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,229,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.02) 1px,transparent 1px);
+  background-size:60px 60px;mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,black 20%,transparent 70%)}
+
+/* Particles */
+#particles{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+main{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 24px}
+
+/* Hero */
+.hero{min-height:85vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 0}
+.hero-logo{width:120px;height:120px;border-radius:20px;margin-bottom:32px;animation:float 6s ease-in-out infinite;filter:drop-shadow(0 0 30px var(--cyan-glow))}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.hero-title{font-family:var(--display);font-size:clamp(42px,8vw,96px);font-weight:900;line-height:1;margin-bottom:20px}
+.hero-title .w1{color:var(--text)}
+.hero-title .w2{color:var(--cyan);text-shadow:0 0 40px var(--cyan-glow)}
+.hero-title .w3{display:block;font-size:.35em;letter-spacing:.5em;color:var(--text2);margin-top:8px}
+.hero-sub{font-size:18px;color:var(--text2);max-width:550px;margin-bottom:40px;line-height:1.6}
+.hero-actions{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+@media(max-width:600px){
+  .hero-actions{flex-direction:column;align-items:stretch;max-width:320px;margin:0 auto}
+  .hero-actions .btn{width:100%;text-align:center;padding:16px 24px}
+}
+
+/* Buttons */
+.btn{font-family:var(--display);font-size:12px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;text-decoration:none;padding:14px 32px;border-radius:var(--r);border:none;cursor:pointer;transition:.25s;display:inline-block}
+.btn-play{background:var(--cyan);color:var(--bg);box-shadow:0 0 20px var(--cyan-glow)}
+.btn-play:hover{transform:translateY(-2px);box-shadow:0 0 40px var(--cyan-glow)}
+.btn-levels{background:transparent;color:var(--cyan);border:1px solid var(--cyan);box-shadow:0 0 12px var(--cyan-glow)}
+.btn-levels:hover{background:var(--cyan-dim);transform:translateY(-2px)}
+.btn-challenge{background:var(--orange);color:#fff}
+.btn-challenge:hover{opacity:.85;transform:translateY(-2px)}
+.btn-tournament{background:transparent;color:var(--text2);border:1px solid var(--border-hi)}
+.btn-tournament:hover{color:var(--cyan);border-color:var(--cyan);background:var(--cyan-dim)}
+
+/* Section */
+.section{padding:60px 0}
+.section-label{font-family:var(--display);font-size:10px;font-weight:600;letter-spacing:.5em;text-transform:uppercase;color:var(--cyan);margin-bottom:10px}
+.section-title{font-family:var(--display);font-size:clamp(20px,3vw,32px);font-weight:800;color:var(--text);margin-bottom:32px}
+
+/* Cards */
+.card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-head h3{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--text2)}
+.card-body{padding:20px}
+
+/* Leaderboard grid */
+.lb-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:768px){.lb-grid{grid-template-columns:1fr}}
+
+/* Table */
+.lb-table{width:100%;border-collapse:collapse}
+.lb-table th{font-family:var(--display);font-size:9px;font-weight:600;letter-spacing:.3em;text-transform:uppercase;color:var(--text3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--border-hi)}
+.lb-table th:last-child{text-align:right}
+.lb-table td{padding:12px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+.lb-table td:last-child{text-align:right}
+.lb-table tr:hover{background:rgba(0,229,255,0.03)}
+.lb-rank{font-family:var(--display);font-weight:700;font-size:14px;width:40px;display:inline-flex;align-items:center;justify-content:center}
+.lb-rank.gold{color:var(--gold)}.lb-rank.silver{color:var(--silver)}.lb-rank.bronze{color:var(--bronze)}
+.lb-name{color:var(--text);font-weight:500}
+.lb-score{font-family:var(--display);font-weight:600;font-size:14px;color:var(--cyan)}
+.lb-coins{color:var(--gold);font-size:12px}
+.lb-empty{text-align:center;padding:40px;color:var(--text3);font-size:13px}
+
+.lb-date-picker input[type="date"]{padding:6px 10px;background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-family:var(--body);font-size:12px;outline:none}
+.lb-date-picker input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.7)}
+
+/* Footer */
+.footer{border-top:1px solid var(--border);padding:40px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px;font-size:12px;color:var(--text3)}
+.footer a{color:var(--text2);text-decoration:none;margin:0 12px}
+.footer a:hover{color:var(--cyan)}
+.footer img{width:24px;height:24px;border-radius:4px;opacity:.6;margin-right:8px;vertical-align:middle}
+
+/* Identity bar */
+.id-bar{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:16px;flex-wrap:wrap}
+.id-bar .dot{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.id-bar .dot.on{background:#2ea043;box-shadow:0 0 6px rgba(46,160,67,0.5)}
+.id-bar .tag{font-family:var(--display);font-size:14px;font-weight:600;color:var(--cyan)}
+.btn-wallet{font-family:var(--display);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:12px 24px;border-radius:var(--r);border:none;cursor:pointer;background:var(--orange);color:#fff;transition:.2s}
+.btn-wallet:hover{opacity:.85}
+.btn-disconnect{font-family:var(--body);font-size:11px;padding:6px 14px;border-radius:var(--r);border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:.2s}
+.btn-disconnect:hover{color:var(--text);border-color:var(--text3)}
+
+/* Balance card */
+.balance-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border-hi);border-radius:var(--r);padding:20px 28px;margin-bottom:32px;text-align:center;max-width:400px;width:100%}
+.balance-amount{font-family:var(--display);font-size:clamp(28px,5vw,42px);font-weight:900;color:var(--cyan);text-shadow:0 0 30px var(--cyan-glow);line-height:1.2}
+.balance-label{font-family:var(--display);font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+
+/* Daily Cup — hero today card */
+.daily-cup{margin-top:24px}
+.cup-today{background:linear-gradient(135deg,rgba(255,149,52,0.12) 0%,rgba(255,149,52,0.04) 60%,rgba(20,32,56,0.7) 100%);border:1px solid rgba(255,149,52,0.4);border-radius:var(--r);padding:28px 32px;backdrop-filter:blur(14px);box-shadow:0 0 40px rgba(255,149,52,0.08)}
+.cup-today-header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap;margin-bottom:18px}
+.cup-today-label{font-family:var(--display);font-size:10px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;color:#ff9534;margin-bottom:8px}
+.cup-today-leader-row{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap}
+.cup-today-leader-label{font-size:13px;color:var(--text3)}
+.cup-today-leader{font-family:var(--display);font-size:clamp(22px,4vw,32px);font-weight:700;color:var(--cyan);letter-spacing:.02em;text-shadow:0 0 20px var(--cyan-glow)}
+.cup-today-score{font-family:var(--display);font-size:18px;font-weight:600;color:var(--text2)}
+.cup-today-plays{font-size:12px;color:var(--text3);margin-top:4px}
+.cup-today-countdown{text-align:right;flex-shrink:0}
+.cup-today-countdown-num{font-family:var(--display);font-size:clamp(20px,3.4vw,30px);font-weight:700;color:#ff9534;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.cup-today-countdown-label{font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:var(--text3);margin-top:2px}
+.cup-today-points{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;padding:14px 0;border-top:1px solid rgba(255,149,52,0.18);border-bottom:1px solid rgba(255,149,52,0.18)}
+.cup-points-pill{font-family:var(--display);font-size:11px;font-weight:600;letter-spacing:.05em;padding:6px 12px;border-radius:99px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.1);color:var(--text2)}
+.cup-points-pill.cup-points-1{background:linear-gradient(135deg,#ffd700 0%,#ffa500 100%);color:#1a1a1a;border-color:#ffd700;box-shadow:0 0 12px rgba(255,215,0,0.4)}
+.cup-points-pill.cup-points-2{background:linear-gradient(135deg,#c0c0c0 0%,#a8a8a8 100%);color:#1a1a1a;border-color:#c0c0c0}
+.cup-points-pill.cup-points-3{background:linear-gradient(135deg,#cd7f32 0%,#a36527 100%);color:#fff;border-color:#cd7f32}
+.cup-today-btn{display:inline-block;font-family:var(--display);font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;padding:14px 36px;border-radius:var(--r);background:#ff9534;color:#fff;text-decoration:none;border:none;cursor:pointer;transition:.2s;box-shadow:0 0 24px rgba(255,149,52,0.4)}
+.cup-today-btn:hover{transform:translateY(-1px);box-shadow:0 0 32px rgba(255,149,52,0.6);opacity:.95}
+.cup-card .card-body{padding:0}
+.cup-row{display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px}
+.cup-row:last-child{border-bottom:none}
+.cup-row.you{background:rgba(0,229,255,0.07);border-left:2px solid var(--cyan)}
+.cup-rank{font-family:var(--display);font-weight:700;font-size:14px;text-align:center;color:var(--text3)}
+.cup-rank.r1{color:#ffd700;text-shadow:0 0 8px rgba(255,215,0,0.5)}
+.cup-rank.r2{color:#c0c0c0}
+.cup-rank.r3{color:#cd7f32}
+.cup-name{font-family:var(--display);font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cup-name-meta{font-size:10px;color:var(--text3);font-weight:400;margin-left:6px;letter-spacing:.05em}
+.cup-points{font-family:var(--display);font-weight:700;color:#ff9534;font-size:14px;text-align:right;font-variant-numeric:tabular-nums}
+.cup-points-sub{font-size:10px;color:var(--text3);font-weight:400;display:block;letter-spacing:.05em}
+.cup-empty{padding:40px 20px;text-align:center;color:var(--text3);font-size:13px}
+/* "Your run today" inline strip inside the cup card */
+.cup-you{display:none;margin-top:14px;padding:12px 16px;background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.3);border-radius:var(--r);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.cup-you-label{color:var(--text3);font-family:var(--display);font-size:10px;letter-spacing:.2em;text-transform:uppercase}
+.cup-you-stats{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.cup-you-score{font-family:var(--display);font-size:18px;font-weight:700;color:var(--cyan);font-variant-numeric:tabular-nums}
+.cup-you-rank{font-family:var(--display);font-size:13px;font-weight:600;color:var(--text2)}
+.cup-you-rank.r1{color:#ffd700}.cup-you-rank.r2{color:#c0c0c0}.cup-you-rank.r3{color:#cd7f32}
+.cup-you-empty{font-size:12px;color:var(--text3)}
+/* Pinned "your standing" row at the bottom of the season standings card */
+.cup-you-pinned{border-top:2px dashed rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)}
+.cup-you-pinned .cup-rank{color:var(--cyan)}
+.cup-row.you-cta{padding:18px;text-align:center;color:var(--text3);font-size:12px;display:block}
+.cup-row.you-cta a{color:var(--cyan);text-decoration:none;font-weight:600}
+.cup-row.you-cta a:hover{text-decoration:underline}
+
+/* Compact top bar — replaces the old huge hero */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0 12px;border-bottom:1px solid rgba(95,234,255,0.08);margin-bottom:24px;flex-wrap:wrap}
+.topbar-brand{display:flex;align-items:center;gap:12px}
+.topbar-brand img{width:40px;height:40px;border-radius:8px;filter:drop-shadow(0 0 12px var(--cyan-glow))}
+.topbar-brand h1{font-family:var(--display);font-size:18px;font-weight:800;letter-spacing:.05em;line-height:1}
+.topbar-brand h1 .w1{color:var(--text)}
+.topbar-brand h1 .w2{color:var(--cyan);text-shadow:0 0 12px var(--cyan-glow)}
+.topbar-brand h1 .w3{font-size:9px;font-weight:700;letter-spacing:.4em;color:var(--text3);display:block;margin-top:2px}
+.topbar-id{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.topbar-id .dot{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.topbar-id .dot.on{background:#2ea043;box-shadow:0 0 6px rgba(46,160,67,0.5)}
+.topbar-id .tag{font-family:var(--display);font-size:13px;font-weight:600;color:var(--cyan)}
+.topbar-id button.btn-wallet{padding:8px 16px;font-size:10px}
+.topbar-id button.btn-disconnect{font-size:10px;padding:5px 10px}
+.topbar-balance-toggle{font-family:var(--display);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:6px 12px;border-radius:var(--r);border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer}
+.topbar-balance-toggle:hover{color:var(--cyan);border-color:var(--cyan)}
+.topbar-balance-toggle .amt{color:var(--cyan);font-weight:700;margin-left:4px}
+
+/* Mode tiles — each gets its own color identity. The home page above
+   them already has the orange Daily Cup as the headline; these are the
+   "alternate ways to play" so they read as a cohesive set but each
+   mode is instantly recognisable. */
+.mode-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:32px 0 16px}
+.mode-tile{position:relative;background:linear-gradient(160deg,rgba(20,32,56,0.85) 0%,rgba(10,18,32,0.95) 100%);border:1px solid var(--border-hi);border-radius:10px;padding:22px 16px 20px;text-align:center;text-decoration:none;color:var(--text);font-family:var(--display);font-size:12px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;transition:transform .2s,box-shadow .2s,border-color .2s;backdrop-filter:blur(8px);overflow:hidden;isolation:isolate}
+.mode-tile::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,var(--tile-glow,rgba(95,234,255,0.18)) 0%,transparent 60%);opacity:.65;z-index:-1;transition:opacity .25s}
+.mode-tile::after{content:'';position:absolute;left:14%;right:14%;bottom:-1px;height:2px;background:var(--tile-accent,var(--cyan));opacity:.55;border-radius:2px;box-shadow:0 0 12px var(--tile-accent,var(--cyan));transition:opacity .25s,box-shadow .25s}
+.mode-tile:hover{transform:translateY(-3px);border-color:var(--tile-accent,var(--cyan));box-shadow:0 12px 32px -12px var(--tile-accent,var(--cyan-glow))}
+.mode-tile:hover::before{opacity:1}
+.mode-tile:hover::after{opacity:1;box-shadow:0 0 24px var(--tile-accent,var(--cyan))}
+.mode-tile-icon{font-size:30px;line-height:1;display:block;margin-bottom:10px;color:var(--tile-accent,var(--cyan));text-shadow:0 0 18px var(--tile-accent,var(--cyan));transition:transform .2s}
+.mode-tile:hover .mode-tile-icon{transform:scale(1.1)}
+.mode-tile-sub{display:block;font-family:var(--body);font-size:10px;font-weight:400;letter-spacing:.05em;text-transform:none;color:var(--text3);margin-top:6px;line-height:1.3}
+/* Per-tile colors via CSS vars set on the element */
+.mode-tile.tile-play{--tile-accent:#5feaff;--tile-glow:rgba(95,234,255,0.22)}
+.mode-tile.tile-levels{--tile-accent:#a78bfa;--tile-glow:rgba(167,139,250,0.22)}
+.mode-tile.tile-pvp{--tile-accent:#ff5e87;--tile-glow:rgba(255,94,135,0.22)}
+.mode-tile.tile-tournament{--tile-accent:#fbbf24;--tile-glow:rgba(251,191,36,0.22)}
+@media(max-width:600px){.mode-tiles{grid-template-columns:repeat(2,1fr);gap:10px}.mode-tile{padding:18px 12px}.mode-tile-icon{font-size:24px}}
+
+/* Pull cup section to top — no big top padding */
+.daily-cup.daily-cup-hero{padding:0 0 32px;margin-top:0}
+.daily-cup.daily-cup-hero .section-label{margin-bottom:6px}
+.daily-cup.daily-cup-hero .section-title{margin-bottom:18px;font-size:clamp(22px,3.4vw,30px)}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<canvas id="particles"></canvas>
+
+<main>
+  <!-- Compact top bar: brand left, identity right -->
+  <header class="topbar">
+    <a href="/" class="topbar-brand" style="text-decoration:none">
+      <img src="logo.png" alt="Boxy Run">
+      <h1>
+        <span class="w1">BOXY</span> <span class="w2">RUN</span>
+        <span class="w3">ARENA</span>
+      </h1>
+    </a>
+    <div class="topbar-id">
+      <div id="id-detecting" style="display:none;color:var(--text3);font-size:11px">Detecting wallet…</div>
+      <div id="id-disconnected" style="display:none">
+        <button class="btn-wallet" id="btn-wallet">Connect Wallet</button>
+      </div>
+      <div id="id-connected" style="display:none;align-items:center;gap:10px">
+        <span class="dot on"></span>
+        <span class="tag" id="id-name"></span>
+        <button class="topbar-balance-toggle" id="btn-balance-toggle">
+          Wallet<span class="amt" id="balance-amount-mini">--</span>
+        </button>
+        <button class="btn-disconnect" id="btn-disconnect">Disconnect</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Wallet panel — collapsed by default, opens via topbar button -->
+  <div class="balance-card" id="balance-card" style="display:none;margin:0 auto 24px">
+    <div class="balance-label">Your Balance</div>
+    <div class="balance-amount" id="balance-amount">--</div>
+    <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:14px">
+      <input type="number" style="width:80px;padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-hi);border-radius:var(--r);color:var(--text);font-family:var(--display);font-size:14px;font-weight:600;text-align:center;outline:none" id="transfer-amount" value="10" min="1" step="1">
+      <button class="btn btn-play" id="btn-transfer" style="font-size:10px;padding:8px 20px">Transfer</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px;min-height:16px" id="transfer-status"></div>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+      <button id="btn-toggle-tx" style="background:transparent;border:none;color:var(--text2);font-family:var(--body);font-size:11px;cursor:pointer;text-transform:uppercase;letter-spacing:.1em">Show Transactions ▾</button>
+      <div id="tx-list" style="display:none;margin-top:10px;max-height:240px;overflow-y:auto;font-size:12px;text-align:left"></div>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button id="btn-toggle-diag" style="background:transparent;border:none;color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;letter-spacing:.1em">Show Diagnostics ▾</button>
+      <button onclick="window.__forceReset()" style="background:transparent;border:1px solid var(--text3);color:var(--text3);font-family:var(--body);font-size:10px;cursor:pointer;padding:2px 10px;border-radius:4px">Reset Wallet</button>
+    </div>
+    <div id="diag-panel" style="display:none;margin-top:8px;max-height:260px;overflow-y:auto;background:rgba(0,0,0,0.5);padding:8px;border-radius:4px;text-align:left"></div>
+  </div>
+
+  <!-- ════════ DAILY CUP — the main attraction, above the fold ════════ -->
+  <section class="section daily-cup daily-cup-hero">
+    <div class="section-label" style="color:#ff9534">Daily Cup · 7-day Season</div>
+    <div class="section-title">Today's Run</div>
+
+    <!-- Today's daily — hero card -->
+    <div class="cup-today" id="cup-today">
+      <div class="cup-today-header">
+        <div>
+          <div class="cup-today-label">Today · <span id="cup-today-date">--</span></div>
+          <div class="cup-today-leader-row">
+            <span class="cup-today-leader-label">Leader:</span>
+            <span class="cup-today-leader" id="cup-today-leader">—</span>
+            <span class="cup-today-score" id="cup-today-score"></span>
+          </div>
+          <div class="cup-today-plays" id="cup-today-plays"></div>
+        </div>
+        <div class="cup-today-countdown">
+          <div class="cup-today-countdown-num" id="cup-today-countdown">--:--:--</div>
+          <div class="cup-today-countdown-label">until reset</div>
+        </div>
+      </div>
+      <div class="cup-today-points">
+        <span class="cup-points-pill cup-points-1">1st&nbsp;·&nbsp;10pts</span>
+        <span class="cup-points-pill cup-points-2">2nd&nbsp;·&nbsp;6pts</span>
+        <span class="cup-points-pill cup-points-3">3rd&nbsp;·&nbsp;4pts</span>
+        <span class="cup-points-pill cup-points-4">4th&nbsp;·&nbsp;2pts</span>
+        <span class="cup-points-pill cup-points-5">5th&nbsp;·&nbsp;1pt</span>
+      </div>
+      <a href="dev.html?daily=1" class="cup-today-btn">▶ Play Today's Run</a>
+
+      <!-- Filled in only after we know the user (and only if they've played) -->
+      <div class="cup-you" id="cup-you" style="display:none">
+        <span class="cup-you-label">You today</span>
+        <div class="cup-you-stats">
+          <span class="cup-you-score" id="cup-you-score">--</span>
+          <span class="cup-you-rank" id="cup-you-rank">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Two-up: season standings + yesterday's results -->
+    <div class="lb-grid" style="margin-top:24px">
+      <div class="card cup-card">
+        <div class="card-head">
+          <h3>Season Standings</h3>
+          <span style="font-size:11px;color:var(--text3)">Last 7 days</span>
+        </div>
+        <div class="card-body" id="season-standings-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+      <div class="card cup-card">
+        <div class="card-head">
+          <h3>Yesterday's Winners</h3>
+          <span style="font-size:11px;color:var(--text3)" id="yesterday-date"></span>
+        </div>
+        <div class="card-body" id="yesterday-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- Mode tiles — each color-coded so the row reads as a deck of options
+         rather than a row of identical buttons. Daily Challenge omitted;
+         the orange cup card above is the canonical entry point for it. -->
+    <nav class="mode-tiles" aria-label="Other modes">
+      <a href="dev.html" class="mode-tile tile-play">
+        <span class="mode-tile-icon">▶</span>Single Player
+        <span class="mode-tile-sub">Endless run · solo</span>
+      </a>
+      <a href="levels.html" class="mode-tile tile-levels">
+        <span class="mode-tile-icon">◆</span>Levels
+        <span class="mode-tile-sub">10 hand-tuned stages</span>
+      </a>
+      <a href="challenge.html" class="mode-tile tile-pvp">
+        <span class="mode-tile-icon">⚔</span>PvP
+        <span class="mode-tile-sub">Bots &amp; live opponents</span>
+      </a>
+      <a href="tournament-v2.html" class="mode-tile tile-tournament">
+        <span class="mode-tile-icon">★</span>Tournaments
+        <span class="mode-tile-sub">Bracket play, prizes</span>
+      </a>
+    </nav>
+  </section>
+
+  <!-- All-time + raw daily score leaderboards (kept but secondary) -->
+  <section class="section">
+    <div class="section-label">More Rankings</div>
+    <div class="section-title">All-Time &amp; Daily Scores</div>
+    <div class="lb-grid">
+      <div class="card">
+        <div class="card-head"><h3>All-Time</h3><span style="font-size:11px;color:var(--text3)">Hall of Fame</span></div>
+        <div class="card-body" id="alltime-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Daily</h3>
+          <div class="lb-date-picker"><input type="date" id="daily-date"></div>
+        </div>
+        <div class="card-body" id="daily-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+    </div>
+    <div style="margin-top:24px">
+      <div class="card" style="border-color:rgba(255,149,52,0.3)">
+        <div class="card-head"><h3 style="color:#ff9534">Daily Challenge Today</h3><span style="font-size:11px;color:var(--text3)" id="daily-challenge-date"></span></div>
+        <div class="card-body" id="daily-challenge-body"><div class="lb-empty">Loading...</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Did-you-know factoid — moved below the fold, decorative -->
+  <div id="daily-factoid" style="margin:48px 0 32px;padding:20px 24px;background:rgba(20,32,56,0.7);border:1px solid rgba(95,234,255,0.15);border-radius:6px;backdrop-filter:blur(10px)">
+    <div style="margin-bottom:10px">
+      <span style="font-family:var(--display);font-size:9px;font-weight:700;letter-spacing:.25em;color:var(--cyan);text-transform:uppercase">Did you know?</span>
+    </div>
+    <div id="factoid-text" style="font-size:13px;color:var(--text2);line-height:1.7"></div>
+  </div>
+
+  <footer class="footer">
+    <div></div>
+    <div>
+      <a href="dev.html">Game</a>
+      <a href="challenge.html">Challenge</a>
+      <a href="tournament-v2.html">Tournaments</a>
+      <a href="https://discord.gg/PGzNZT5uVp" target="_blank">Discord</a>
+    </div>
+  </footer>
+</main>
+
+<script>
+// Particles
+(function(){
+  const c=document.getElementById('particles'),x=c.getContext('2d');
+  let w,h,ps=[];
+  function resize(){w=c.width=innerWidth;h=c.height=innerHeight}
+  resize();addEventListener('resize',resize);
+  for(let i=0;i<40;i++)ps.push({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:Math.random()*1.5+.5,a:Math.random()*.3+.05});
+  (function draw(){x.clearRect(0,0,w,h);for(const p of ps){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=w;if(p.x>w)p.x=0;if(p.y<0)p.y=h;if(p.y>h)p.y=0;x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fillStyle=`rgba(0,229,255,${p.a})`;x.fill()}requestAnimationFrame(draw)})();
+})();
+
+// ── Identity (localStorage + Sphere wallet) ──
+const STORAGE_KEY='boxyrun-nametag';
+let myNametag=localStorage.getItem(STORAGE_KEY);
+
+function showConnected(tag){
+  document.getElementById('id-detecting').style.display='none';
+  document.getElementById('id-disconnected').style.display='none';
+  document.getElementById('id-connected').style.display='flex';
+  document.getElementById('id-name').textContent=tag;
+  updateBalance();
+}
+function showDisconnected(){
+  document.getElementById('id-detecting').style.display='none';
+  document.getElementById('id-disconnected').style.display='flex';
+  document.getElementById('id-connected').style.display='none';
+  document.getElementById('balance-card').style.display='none';
+}
+function setIdentity(tag){
+  myNametag=tag;
+  // Mirror onto window so the cup-card script (separate <script>
+  // block, no shared closure with `let myNametag`) can read it.
+  window.myNametag=tag;
+  localStorage.setItem(STORAGE_KEY,tag);
+  showConnected(tag);
+  // Wallet identity just landed — reload anything keyed off the
+  // player's nametag. Without this the cup card sits on its first
+  // (anonymous) load until the 30s poll catches up. Guarded because
+  // the cup loaders are defined in the second <script> block below
+  // and may not yet exist on first init.
+  if(typeof loadPlayerStatus==='function')loadPlayerStatus();
+  if(typeof loadSeasonStandings==='function')loadSeasonStandings();
+}
+
+let gameBalance=null;
+async function fetchGameBalance(){
+  if(!myNametag)return;
+  try{
+    const r=await fetch('/api/balance/'+encodeURIComponent(myNametag));
+    const d=await r.json();
+    gameBalance=d.balance||0;
+  }catch{gameBalance=null}
+}
+function updateBalance(){
+  const card=document.getElementById('balance-card');
+  const amountEl=document.getElementById('balance-amount');
+  const miniEl=document.getElementById('balance-amount-mini');
+  if(!myNametag){
+    if(card)card.style.display='none';
+    return;
+  }
+  // The card is hidden by default and only shown when the user clicks
+  // the topbar Wallet button — don't auto-show it here.
+  const text=gameBalance!==null
+    ? Number(gameBalance).toLocaleString()+' UCT'
+    : 'Loading...';
+  if(amountEl)amountEl.textContent=text;
+  if(miniEl)miniEl.textContent=gameBalance!==null
+    ? ' '+Number(gameBalance).toLocaleString()
+    : ' --';
+}
+
+// Wire the topbar Wallet button to toggle the balance card panel.
+document.addEventListener('click',(e)=>{
+  const t=e.target;
+  if(t&&t.closest&&t.closest('#btn-balance-toggle')){
+    const card=document.getElementById('balance-card');
+    if(card)card.style.display=(card.style.display==='block')?'none':'block';
+  }
+},true);
+
+// ── Transaction history ──
+let txVisible=false;
+async function loadTransactions(){
+  if(!myNametag)return;
+  const el=document.getElementById('tx-list');
+  if(!el)return;
+  el.innerHTML='<div style="color:var(--text3);padding:6px 0">Loading...</div>';
+  try{
+    const r=await fetch('/api/transactions/'+encodeURIComponent(myNametag)+'?limit=100');
+    const d=await r.json();
+    const rows=d.transactions||[];
+    if(!rows.length){el.innerHTML='<div style="color:var(--text3);padding:6px 0">No transactions yet</div>';return}
+    const typeLabel={deposit:'Deposit',entry_fee:'Entry fee',wager_win:'Wager win',wager_loss:'Wager loss',tournament_prize:'Tournament prize',game_earn:'Game earnings'};
+    el.innerHTML=rows.map(t=>{
+      const sign=t.amount>0?'+':'';
+      const color=t.amount>0?'var(--cyan)':'var(--orange)';
+      const date=new Date(t.timestamp).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      const label=typeLabel[t.type]||t.type;
+      return`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+        <div><div style="color:var(--text);font-size:12px">${label}</div><div style="color:var(--text3);font-size:10px">${date} · ${esc(t.memo||'')}</div></div>
+        <div style="color:${color};font-family:var(--display);font-weight:600;white-space:nowrap">${sign}${t.amount} UCT</div>
+      </div>`;
+    }).join('');
+  }catch{
+    el.innerHTML='<div style="color:var(--text3);padding:6px 0">Failed to load</div>';
+  }
+}
+document.getElementById('btn-toggle-diag')?.addEventListener('click',()=>{
+  const el=document.getElementById('diag-panel');
+  const btn=document.getElementById('btn-toggle-diag');
+  if(el.style.display==='none'||!el.style.display){
+    el.style.display='block';
+    btn.textContent='Hide Diagnostics ▴';
+    // Render all existing entries
+    el.innerHTML='';
+    diagLog.forEach(entry=>{
+      const line=document.createElement('div');
+      line.style.cssText='font-size:10px;font-family:monospace;border-bottom:1px solid #333;padding:3px 0;word-break:break-all';
+      line.innerHTML=`<span style="color:#666">${entry.t.substring(11,19)}</span> <strong>${esc(entry.event)}</strong> <span style="color:#888">${esc(JSON.stringify(entry.data||{}))}</span>`;
+      el.appendChild(line);
+    });
+    el.scrollTop=el.scrollHeight;
+  }else{
+    el.style.display='none';
+    btn.textContent='Show Diagnostics ▾';
+  }
+});
+
+document.getElementById('btn-toggle-tx')?.addEventListener('click',()=>{
+  txVisible=!txVisible;
+  const btn=document.getElementById('btn-toggle-tx');
+  const el=document.getElementById('tx-list');
+  if(txVisible){
+    btn.textContent='Hide Transactions ▴';
+    el.style.display='block';
+    loadTransactions();
+  }else{
+    btn.textContent='Show Transactions ▾';
+    el.style.display='none';
+  }
+});
+
+// If already stored, show connected immediately
+if(myNametag){
+  showConnected(myNametag);
+}else{
+  // Show "Detecting wallet..." while SDK initializes, then fall back to button
+  document.getElementById('id-detecting').style.display='flex';
+  setTimeout(()=>{
+    if(!myNametag)showDisconnected();
+  },2000);
+}
+
+// Sphere wallet auto-detect — keeps header state aligned with the
+// actual wallet, not just localStorage. Cases handled:
+//   1. wallet connected, no cached tag → adopt + show connected
+//   2. wallet connected with the same nametag → confirmed; refresh balance
+//   3. wallet connected with a DIFFERENT nametag than cached → user
+//      switched wallet identities (e.g. logged out + back in as someone
+//      else). Adopt the wallet's identity — operations would otherwise
+//      silently send to the wrong account.
+//   4. cached tag but wallet not connected after grace → cache is stale
+//      (new tab, extension locked, popup blocked). Show disconnected so
+//      the user can hit Connect — otherwise they'd see "connected" but
+//      every wallet op would silently fail with "Wallet not connected".
+// Keep probing forever — the SDK can load at any time (slow network,
+// extension init, popup auth). Never permanently give up.
+setInterval(()=>{
+  const w=window.SphereWallet;
+  const walletConnected=!!(w&&w.isConnected&&w.identity?.nametag);
+  if(walletConnected){
+    const liveTag=w.identity.nametag;
+    if(!myNametag){
+      setIdentity(liveTag);
+    }else if(myNametag!==liveTag){
+      diag('wallet.identity_changed',{cached:myNametag,live:liveTag});
+      setIdentity(liveTag);
+    }
+  }
+},1000);
+// Fetch game balance every 5s
+if(myNametag)fetchGameBalance().then(updateBalance);
+setInterval(()=>{if(myNametag)fetchGameBalance().then(updateBalance)},5000);
+
+document.getElementById('btn-wallet').addEventListener('click',()=>{
+  const w=window.SphereWallet;
+  diag('wallet.connect_click',{hasWallet:!!w});
+  if(w&&w.connect){
+    const btn=document.getElementById('btn-wallet');
+    btn.textContent='Connecting...';
+    btn.disabled=true;
+    w.connect()
+      .then(()=>diag('wallet.connect_resolved',{isConnected:w.isConnected,identity:w.identity?.nametag}))
+      .catch(e=>{
+        diag('wallet.connect_err',{err:String(e)});
+        btn.textContent='Connect Sphere Wallet';
+        btn.disabled=false;
+      });
+    // Recovery timeout — if the SDK spinner hangs (Safari blocks
+    // third-party cookies/popups), reset the button after 10s so the
+    // user isn't stuck on a permanent loading state.
+    setTimeout(()=>{
+      if(!myNametag){
+        btn.textContent='Connect Sphere Wallet';
+        btn.disabled=false;
+        diag('wallet.connect_timeout');
+      }
+    },10000);
+  }
+});
+
+// ── Diagnostic logging ──
+const diagLog=[];
+function diag(event,data){
+  const entry={t:new Date().toISOString(),event,data};
+  diagLog.push(entry);
+  if(diagLog.length>500)diagLog.shift();
+  console.log('[boxy]',event,data||'');
+  // Fire-and-forget to server
+  try{
+    fetch('/api/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({nametag:myNametag,event,data})}).catch(()=>{});
+  }catch{}
+  // Update diagnostic panel if open
+  const el=document.getElementById('diag-panel');
+  if(el&&el.style.display==='block'){
+    const line=document.createElement('div');
+    line.style.cssText='font-size:10px;font-family:monospace;border-bottom:1px solid #333;padding:3px 0;word-break:break-all';
+    line.innerHTML=`<span style="color:#666">${entry.t.substring(11,19)}</span> <strong>${esc(event)}</strong> <span style="color:#888">${esc(JSON.stringify(data||{}))}</span>`;
+    el.appendChild(line);
+    el.scrollTop=el.scrollHeight;
+  }
+}
+
+document.getElementById('btn-transfer').addEventListener('click',async()=>{
+  const w=window.SphereWallet;
+  const btn=document.getElementById('btn-transfer');
+  const status=document.getElementById('transfer-status');
+  const amount=parseInt(document.getElementById('transfer-amount').value,10);
+  const txId='tx-'+Date.now().toString(36);
+  diag('transfer.click',{txId,amount,isConnected:w?.isConnected,identity:w?.identity?.nametag,balance:w?.balance});
+
+  if(!w){
+    diag('transfer.no_wallet');
+    status.textContent='Wallet SDK not loaded. Refresh the page.';
+    return;
+  }
+  if(!w.isConnected){
+    diag('transfer.not_connected_trying_reconnect');
+    status.textContent='Reconnecting wallet...';
+    try{
+      await w.connect();
+      if(!w.isConnected){
+        status.textContent='Wallet not connected. Click Connect first.';
+        return;
+      }
+    }catch(e){
+      diag('transfer.reconnect_failed',{err:String(e)});
+      status.textContent='Wallet not connected. Click Connect first.';
+      return;
+    }
+  }
+  if(!amount||amount<1){
+    status.textContent='Enter a valid amount';
+    return;
+  }
+
+  btn.disabled=true;
+  btn.textContent='Confirming...';
+  status.textContent='Approve in your Sphere wallet...';
+
+  const balanceBefore=typeof w.balance==='number'?w.balance:null;
+  diag('transfer.before',{txId,balanceBefore});
+
+  // Health check: verify client is responsive (ping with refreshBalance, short timeout)
+  let healthy=false;
+  try{
+    const pingTimeout=new Promise(r=>setTimeout(()=>r('ping-timeout'),5000));
+    const pingResult=await Promise.race([
+      w.refreshBalance?.().then(()=>'ok').catch(e=>'err:'+e.message),
+      pingTimeout,
+    ]);
+    diag('transfer.healthcheck',{txId,result:pingResult});
+    healthy=pingResult==='ok';
+  }catch(e){
+    diag('transfer.healthcheck_error',{txId,err:String(e)});
+  }
+
+  if(!healthy){
+    diag('transfer.unhealthy');
+    status.innerHTML='Wallet is not responding. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Click here to reset</button>';
+    btn.disabled=false;
+    btn.textContent='Transfer';
+    return;
+  }
+
+  // Kick off the deposit
+  let done=false;
+  let depositResult='pending';
+  const depositPromise=w.deposit(amount).then(ok=>{
+    done=true;
+    depositResult=ok?'ok':'fail';
+    diag('transfer.deposit_resolved',{txId,result:depositResult,isDepositPaid:w.isDepositPaid});
+    return depositResult;
+  }).catch(e=>{
+    done=true;
+    depositResult='err';
+    diag('transfer.deposit_error',{txId,err:String(e)});
+    return 'err';
+  });
+
+  // Poll wallet balance every 2s to detect the drop
+  async function pollForDrop(maxAttempts){
+    for(let i=0;i<maxAttempts;i++){
+      await new Promise(r=>setTimeout(r,2000));
+      if(done)return null;
+      let balAfter=null;
+      if(w.refreshBalance){
+        try{await w.refreshBalance();balAfter=w.balance}catch(e){diag('transfer.refresh_err',{txId,i,err:String(e)})}
+      }
+      diag('transfer.poll',{txId,iter:i,balance:balAfter,isDepositPaid:w.isDepositPaid});
+      if(balanceBefore!==null&&typeof w.balance==='number'&&w.balance<=balanceBefore-amount+0.01){
+        diag('transfer.balance_dropped',{txId,before:balanceBefore,after:w.balance});
+        return 'balance-dropped';
+      }
+    }
+    return 'timeout';
+  }
+
+  const result=await Promise.race([
+    depositPromise,
+    pollForDrop(45),
+  ]);
+  diag('transfer.race_result',{txId,result,isDepositPaid:w.isDepositPaid,balanceAfter:w.balance});
+
+  const succeeded = result==='ok' || result==='balance-dropped' || (result==='timeout'&&w.isDepositPaid);
+
+  if(succeeded){
+    diag('transfer.succeeded',{txId,via:result});
+    // No client-side /api/deposit POST any more — the server-side Sphere
+    // watcher (arena-watcher.ts) sees the on-chain transfer arrive at the
+    // arena wallet and credits player_transactions itself. The watcher's
+    // event fires within a few seconds of the on-chain commit, so we poll
+    // the balance briefly to surface the credit in the UI.
+    status.textContent='Transfer complete! +'+amount+' UCT — crediting…';
+    status.style.color='var(--cyan)';
+    const expected=(typeof gameBalance==='number'?gameBalance:0)+amount;
+    for(let i=0;i<10;i++){
+      await new Promise(r=>setTimeout(r,1500));
+      await fetchGameBalance();
+      updateBalance();
+      if(txVisible)loadTransactions();
+      if(typeof gameBalance==='number'&&gameBalance>=expected)break;
+    }
+    status.textContent='Transfer complete! +'+amount+' UCT';
+  }else if(result==='timeout'){
+    diag('transfer.timeout',{txId});
+    status.innerHTML='Timed out. If UCT left your wallet, your balance will update on refresh. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Reset wallet</button>';
+    status.style.color='var(--orange)';
+  }else{
+    diag('transfer.failed',{txId,result,err:w.error});
+    const msg=w.error||'Transfer cancelled';
+    // Distinguish hard errors (insufficient balance, etc.) from a user-cancel.
+    // Red for errors that require action; muted gray for plain cancellation.
+    const isError=/insufficient|not connected|required|failed|error/i.test(msg);
+    status.textContent=msg;
+    status.style.color=isError?'var(--red,#ef4444)':'var(--text3)';
+    status.style.fontSize=isError?'12px':'11px';
+    status.style.fontWeight=isError?'600':'400';
+  }
+  btn.disabled=false;
+  btn.textContent='Transfer';
+});
+
+// Force-reset: disconnect wallet and reload
+window.__forceReset=function(){
+  diag('forceReset');
+  try{window.SphereWallet?.disconnect?.()}catch{}
+  try{sessionStorage.clear()}catch{}
+  setTimeout(()=>location.reload(),200);
+};
+
+document.getElementById('btn-disconnect').addEventListener('click',()=>{
+  myNametag=null;
+  localStorage.removeItem(STORAGE_KEY);
+  const w=window.SphereWallet;
+  if(w&&w.disconnect)w.disconnect();
+  showDisconnected();
+});
+
+// Daily factoid — one per day, deterministic from date
+(function() {
+  var facts = [
+    'Unicity throws out the shared ledger that every blockchain since Bitcoin has used. Each token is its own off-chain ledger \u2014 the chain only proves nothing has been double-spent.',
+    'Unicity tokens are self-authenticating, like physical cash: you can verify them without connecting to any blockchain. The chain just proves they haven\u2019t been double-spent.',
+    'The Unicity protocol was invented by Vladimir Rogojin while researching how to reduce server load for Somnium Space, a metaverse company building massive online simulations.',
+    'Most of the Unicity core team came from Guardtime \u2014 an Estonian blockchain company founded in 2007 that\u2019s been working on blockchain protocols for nearly 20 years.',
+    'Two of Unicity\u2019s researchers \u2014 M\u00e4rt Saarepera and Ahto Buldas \u2014 evaluated Proof of Work as a digital currency back in 2003, five years before Bitcoin\u2019s whitepaper.',
+    'The Unicity alpha chain launched in June 2024 with around 10 community miners. It spread by word of mouth \u2014 no central authority decided who got coins.',
+    'A transaction on the Unicity Proof Aggregation Layer costs less than $0.00000001 \u2014 the infrastructure just registers a single hash in a sparse Merkle tree.',
+    'Unicity transactions finalise in roughly 2 seconds with an inclusion proof \u2014 but high-frequency-trading mode gives the recipient an instant exclusion proof so they can act immediately.',
+    'Unicity tokens can be sent through email, WhatsApp, NFC, or QR codes \u2014 anywhere you can send a file. They\u2019re self-contained packages, not chain entries.',
+    'Unicity \u2018agents\u2019 are the equivalent of smart contracts \u2014 but they run in parallel off-chain, not on a shared blockchain. You can even run an EVM inside one.',
+  ];
+  var day = Math.floor(Date.now() / 86400000); // days since epoch
+  var idx = day % facts.length;
+  var el = document.getElementById('factoid-text');
+  if (el) el.textContent = facts[idx];
+})();
+
+// Leaderboards
+const API='/api';
+const medals=['','\u{1F947}','\u{1F948}','\u{1F949}'];
+function rc(i){return i===0?'gold':i===1?'silver':i===2?'bronze':''}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+function buildTable(entries,showCoins,showDate){
+  if(!entries||!entries.length)return'<div class="lb-empty">No scores yet</div>';
+  let h='<table class="lb-table"><thead><tr><th>Rank</th><th>Player</th>';
+  if(showCoins)h+='<th>Coins</th>';
+  if(showDate)h+='<th>Date</th>';
+  h+='<th>Score</th></tr></thead><tbody>';
+  entries.forEach((e,i)=>{
+    const rank=e.rank||i+1;
+    h+=`<tr><td><span class="lb-rank ${rc(i)}">${medals[rank]||rank}</span></td>`;
+    h+=`<td class="lb-name">${esc(e.nickname)}</td>`;
+    if(showCoins)h+=`<td class="lb-coins">${e.coins??''}</td>`;
+    if(showDate)h+=`<td style="font-size:12px;color:var(--text3)">${e.date||new Date(e.timestamp).toLocaleDateString()}</td>`;
+    h+=`<td class="lb-score">${Number(e.score).toLocaleString()}</td></tr>`;
+  });
+  return h+'</tbody></table>';
+}
+
+async function loadAllTime(){
+  const el=document.getElementById('alltime-body');
+  try{const r=await fetch(`${API}/leaderboard/alltime?limit=10`);const d=await r.json();el.innerHTML=buildTable(d.leaderboard,false,true)}
+  catch{el.innerHTML='<div class="lb-empty">Could not load</div>'}
+}
+async function loadDaily(date){
+  const el=document.getElementById('daily-body');
+  try{
+    const today=new Date().toISOString().split('T')[0];
+    const isToday=!date||date===today;
+    const url=isToday?`${API}/leaderboard/daily?limit=10`:`${API}/leaderboard/history?date=${date}&limit=10`;
+    const r=await fetch(url);const d=await r.json();el.innerHTML=buildTable(d.leaderboard,true,false);
+  }catch{el.innerHTML='<div class="lb-empty">Could not load</div>'}
+}
+
+const dp=document.getElementById('daily-date');
+dp.value=new Date().toISOString().split('T')[0];
+dp.max=dp.value;
+dp.addEventListener('change',()=>loadDaily(dp.value));
+
+loadAllTime();loadDaily();loadDailyChallenge();
+
+async function loadDailyChallenge(){
+  try{
+    const r=await fetch(API+'/daily-challenge/leaderboard');
+    const d=await r.json();
+    const el=document.getElementById('daily-challenge-body');
+    const dateEl=document.getElementById('daily-challenge-date');
+    if(dateEl)dateEl.textContent=d.date||'';
+    if(!d.leaderboard||!d.leaderboard.length){el.innerHTML='<div class="lb-empty">No entries yet — be the first!</div>';return}
+    el.innerHTML=buildTable(d.leaderboard);
+  }catch{
+    document.getElementById('daily-challenge-body').innerHTML='<div class="lb-empty">Could not load</div>';
+  }
+}
+setInterval(loadDaily,30000);
+setInterval(loadAllTime,60000);
+
+// ════════ Daily Cup ════════
+function escHtml(s){const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function fmtScore(n){return Number(n).toLocaleString()}
+
+async function loadCupToday(){
+  try{
+    const r=await fetch(API+'/season/today');
+    const d=await r.json();
+    const dateEl=document.getElementById('cup-today-date');
+    if(dateEl)dateEl.textContent=d.date||'';
+    const leaderEl=document.getElementById('cup-today-leader');
+    const scoreEl=document.getElementById('cup-today-score');
+    const playsEl=document.getElementById('cup-today-plays');
+    if(d.leader){
+      leaderEl.textContent='@'+d.leader.nametag;
+      scoreEl.textContent=fmtScore(d.leader.score);
+    }else{
+      leaderEl.textContent='Be the first';
+      scoreEl.textContent='';
+    }
+    playsEl.textContent=d.plays?`${d.plays} ${d.plays===1?'run':'runs'} so far today`:'No one has played yet';
+  }catch{/* keep placeholder */}
+}
+
+function updateCupCountdown(){
+  const el=document.getElementById('cup-today-countdown');
+  if(!el)return;
+  // Daily reset at UTC 00:00.
+  const now=new Date();
+  const next=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1,0,0,0));
+  let s=Math.max(0,Math.floor((next-now)/1000));
+  const h=Math.floor(s/3600);s-=h*3600;
+  const m=Math.floor(s/60);s-=m*60;
+  el.textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function renderCupRow(rank,nametag,points,sub,isYou){
+  const cls='cup-row'+(isYou?' you':'');
+  const rcls='cup-rank'+(rank<=3?' r'+rank:'');
+  return `<div class="${cls}">
+    <div class="${rcls}">${rank}</div>
+    <div class="cup-name">@${escHtml(nametag)}${sub?`<span class="cup-name-meta">${escHtml(sub)}</span>`:''}</div>
+    <div class="cup-points">${points}<span class="cup-points-sub">pts</span></div>
+  </div>`;
+}
+
+async function loadSeasonStandings(){
+  const el=document.getElementById('season-standings-body');
+  try{
+    const r=await fetch(API+'/season/standings?limit=10');
+    const d=await r.json();
+    if(!d.standings||!d.standings.length){
+      el.innerHTML='<div class="cup-empty">No points awarded yet this season.<br>Be the first to take the daily!</div>';
+      return;
+    }
+    const me=(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)||localStorage.getItem('boxyrun-nametag')||'';
+    el.innerHTML=d.standings.map(s=>{
+      const meta=s.wins>0?`${s.wins} win${s.wins>1?'s':''}`:`best #${s.bestRank}`;
+      return renderCupRow(s.rank,s.nametag,s.points,meta,me&&me.toLowerCase()===s.nametag.toLowerCase());
+    }).join('');
+  }catch{el.innerHTML='<div class="cup-empty">Could not load standings</div>'}
+}
+
+async function loadYesterdayResults(){
+  const el=document.getElementById('yesterday-body');
+  const dateEl=document.getElementById('yesterday-date');
+  try{
+    const r=await fetch(API+'/season/yesterday');
+    const d=await r.json();
+    if(dateEl)dateEl.textContent=d.date||'';
+    if(!d.results||!d.results.length){
+      el.innerHTML='<div class="cup-empty">No one scored yesterday.</div>';
+      return;
+    }
+    const me=(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)||localStorage.getItem('boxyrun-nametag')||'';
+    el.innerHTML=d.results.map(r=>{
+      return renderCupRow(r.rank,r.nametag,r.points,fmtScore(r.score)+' pts game',me&&me.toLowerCase()===r.nametag.toLowerCase());
+    }).join('');
+  }catch{el.innerHTML='<div class="cup-empty">Could not load</div>'}
+}
+
+// Personal status — today's run + season standing in one shot.
+// Renders the inline "you" line in the cup card and the pinned row at
+// the bottom of the season standings card.
+function getMyTag(){
+  // Order matters: window.myNametag is the page's authoritative copy
+  // (set in setIdentity() once the wallet handshake completes), and
+  // it's the same value the daily-challenge submit code uses, so
+  // querying with it guarantees a hit when the player has played.
+  // Fall back to wallet identity then localStorage for first paint.
+  const t=(window.myNametag)
+        ||(window.SphereWallet&&window.SphereWallet.identity&&window.SphereWallet.identity.nametag)
+        ||localStorage.getItem('boxyrun-nametag')||'';
+  return t.replace(/^@/,'');
+}
+
+async function loadPlayerStatus(){
+  const tag=getMyTag();
+  const youEl=document.getElementById('cup-you');
+  if(!tag){
+    if(youEl)youEl.style.display='none';
+    return null;
+  }
+  try{
+    const r=await fetch(API+'/season/status/'+encodeURIComponent(tag));
+    const d=await r.json();
+    // Today inline strip in the cup card
+    if(youEl){
+      const scoreEl=document.getElementById('cup-you-score');
+      const rankEl=document.getElementById('cup-you-rank');
+      if(d.today){
+        youEl.style.display='flex';
+        scoreEl.textContent=fmtScore(d.today.score);
+        const r=d.today.rank;
+        rankEl.className='cup-you-rank'+(r<=3?' r'+r:'');
+        const inPoints=r<=5?` · ${[10,6,4,2,1][r-1]}pts`:'';
+        rankEl.textContent=`Rank #${r}${inPoints} of ${d.today.totalPlayers}`;
+      }else{
+        // Connected but hasn't played → show a soft prompt
+        youEl.style.display='flex';
+        scoreEl.textContent='—';
+        rankEl.className='cup-you-rank';
+        rankEl.textContent='Haven\'t played today yet';
+      }
+    }
+    return d;
+  }catch{
+    if(youEl)youEl.style.display='none';
+    return null;
+  }
+}
+
+// Patch the existing standings loader to append a pinned "you" row
+// when the player isn't already in the visible top 10.
+const _origLoadStandings=loadSeasonStandings;
+loadSeasonStandings=async function(){
+  await _origLoadStandings();
+  const tag=getMyTag();
+  if(!tag)return;
+  const status=await loadPlayerStatus();
+  const el=document.getElementById('season-standings-body');
+  if(!el||!status)return;
+  // If already highlighted in the top-10 (the .you class fired in the
+  // existing render), no need to also pin a duplicate row.
+  if(el.querySelector('.cup-row.you'))return;
+  if(status.season&&status.season.points>0){
+    const rk=status.season.rank;
+    const meta=status.season.wins>0
+      ? `${status.season.wins} win${status.season.wins>1?'s':''}`
+      : `${status.season.daysScored} day${status.season.daysScored>1?'s':''} scored`;
+    el.insertAdjacentHTML('beforeend',
+      `<div class="cup-row cup-you-pinned">
+         <div class="cup-rank">${rk?'#'+rk:'—'}</div>
+         <div class="cup-name">@${escHtml(tag)}<span class="cup-name-meta">${escHtml(meta)} · You</span></div>
+         <div class="cup-points">${status.season.points}<span class="cup-points-sub">pts</span></div>
+       </div>`);
+  }else{
+    el.insertAdjacentHTML('beforeend',
+      `<div class="cup-row you-cta">You're not on the board yet — <a href="dev.html?daily=1">play today's run</a> and crack the top 5 to score points.</div>`);
+  }
+};
+
+loadCupToday();
+loadSeasonStandings();
+loadYesterdayResults();
+loadPlayerStatus();
+updateCupCountdown();setInterval(updateCupCountdown,1000);
+setInterval(loadCupToday,30000);
+setInterval(loadSeasonStandings,60000);
+setInterval(loadYesterdayResults,5*60*1000);
+setInterval(loadPlayerStatus,30000);
+// Re-render once the wallet finishes connecting (nametag arrives async)
+setTimeout(()=>{loadPlayerStatus();loadSeasonStandings()},1500);
+</script>
+</body>
+</html>
