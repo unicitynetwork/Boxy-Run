@@ -1415,7 +1415,7 @@ var SphereConnect = (() => {
   }
   var ENTRY_FEE = 10;
   var COIN_ID = "UCT";
-  var UCT_COIN_ID_HEX = "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
+  var UCT_COIN_ID_HEX = "f581d30f593e4b369d684a4563b5246f07b1d265f7178a2c0a82b81f39c24dc0";
   var UCT_DECIMALS = 18;
   var FAUCET_URL = "https://faucet.unicity.network/api/v1/faucet/request";
   var SESSION_KEY = "boxyrun-sphere-session";

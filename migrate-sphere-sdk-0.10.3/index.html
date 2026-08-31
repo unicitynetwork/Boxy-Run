@@ -740,6 +740,14 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
     diag('transfer.timeout',{txId});
     status.innerHTML='Timed out. If UCT left your wallet, your balance will update on refresh. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Reset wallet</button>';
     status.style.color='var(--orange)';
+    // This poll gives up at 45*2s = 90s, but the ConnectClient's own intent
+    // timeout is 120s and the host's deadline is longer still — so 'timeout'
+    // here means the send is very likely STILL LIVE at the wallet, not dead.
+    // Re-enabling Transfer would offer a second payment for the same purchase.
+    // Leave it disabled; a reload is the honest way forward.
+    btn.disabled=true;
+    btn.textContent='Reload to continue';
+    return;
   }else{
     diag('transfer.failed',{txId,result,err:w.error});
     const msg=w.error||'Transfer cancelled';
