@@ -36,7 +36,13 @@ function gameWalletAddress(): string {
 }
 const ENTRY_FEE = 10;
 const COIN_ID = 'UCT';
-const UCT_COIN_ID_HEX = '455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89';
+// TESTNET2 UCT, from the network's own registry (unicity-ids.testnet2.json).
+// The id carried here before — 455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89
+// — is the v1 testnet coin and is absent from the testnet2 registry entirely.
+// This fallback is more reachable than it looks: it fires whenever the wallet
+// reports no UCT asset, which is exactly the state of every wallet after the
+// 2026-08-29 reset, so a wrong value here sends a coinId nobody holds.
+const UCT_COIN_ID_HEX = 'f581d30f593e4b369d684a4563b5246f07b1d265f7178a2c0a82b81f39c24dc0';
 const UCT_DECIMALS = 18;
 const FAUCET_URL = 'https://faucet.unicity.network/api/v1/faucet/request';
 const SESSION_KEY = 'boxyrun-sphere-session';

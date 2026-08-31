@@ -133,9 +133,17 @@ function readWalletFile(): ParsedWallet {
  *  Token payload doesn't surface the decimals field. */
 const UCT_DECIMALS = 18;
 
-/** The only coin the game ledger denominates in. */
+/**
+ * The only coin the game ledger denominates in.
+ *
+ * This is the TESTNET2 id, taken from the network's own registry
+ * (unicity-ids.testnet2.json). The id Boxy-Run carried before —
+ * 455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89 — is the v1
+ * testnet coin and does not appear in the testnet2 registry at all, so keying
+ * anything on it matches nothing that can actually arrive here.
+ */
 const UCT_SYMBOL = 'UCT';
-const UCT_COIN_ID_HEX = '455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89';
+const UCT_COIN_ID_HEX = 'f581d30f593e4b369d684a4563b5246f07b1d265f7178a2c0a82b81f39c24dc0';
 
 /** True when an incoming token entry is the coin this ledger accounts in. */
 function isUct(tk: { coinId?: string; symbol?: string }): boolean {
@@ -157,7 +165,13 @@ function isUct(tk: { coinId?: string; symbol?: string }): boolean {
  * why this went unnoticed.
  */
 function sumIncomingAmount(transfer: IncomingTransfer): number {
-	let total = 0;
+	// Accumulate in BASE UNITS and divide ONCE at the end. Dividing per entry
+	// floors each one separately, and a single 10 UCT send routinely arrives as
+	// several tokens of arbitrary size (only the split leg is exact; direct legs
+	// are whatever the sender's inventory happened to hold) — so 3.5 + 6.5 would
+	// credit 3 + 6 = 9 and quietly eat a whole UCT.
+	let baseUnits = 0n;
+	let decimals = UCT_DECIMALS;
 	for (const t of transfer.tokens) {
 		const tk = t as { coinId?: string; symbol?: string; amount?: string; decimals?: number };
 		if (!isUct(tk)) {
@@ -167,21 +181,32 @@ function sumIncomingAmount(transfer: IncomingTransfer): number {
 			);
 			continue;
 		}
-		// Decimals: prefer what the token says, fall back to UCT's 18 if
-		// it's missing or 0 (we don't yet support multi-token economies and
-		// the SDK has been inconsistent about populating this field).
-		const decimals: number = (typeof tk.decimals === 'number' && tk.decimals > 0) ? tk.decimals : UCT_DECIMALS;
+		// Decimals: prefer what the token says, fall back to UCT's 18 if it is
+		// missing or 0. A cold TokenRegistry reports 0 for a coin it has not
+		// fetched yet, and taking that literally would credit raw base units as
+		// whole UCT — a 10^18x over-credit.
+		if (typeof tk.decimals === 'number' && tk.decimals > 0) decimals = tk.decimals;
 		const raw = String(tk.amount ?? '0');
 		try {
-			const big = BigInt(raw);
-			const divisor = BigInt(10) ** BigInt(decimals);
-			const whole = Number(big / divisor);
-			total += whole;
+			baseUnits += BigInt(raw);
 		} catch (e) {
-			console.warn('[arena-watcher] could not parse token amount', { raw, decimals, token: tk }, e);
+			console.warn('[arena-watcher] could not parse token amount', { raw, token: tk }, e);
 		}
 	}
-	return total;
+	if (baseUnits === 0n) return 0;
+	const divisor = 10n ** BigInt(decimals);
+	const whole = Number(baseUnits / divisor);
+	const remainder = baseUnits % divisor;
+	if (remainder !== 0n) {
+		// The ledger's amount column is INTEGER, so a fractional tail cannot be
+		// stored. Log it rather than lose it silently — it is real money.
+		console.warn(
+			`[arena-watcher] transfer ${transfer.id} has a fractional remainder ` +
+			`${remainder.toString()} base units (${decimals} decimals) that the INTEGER ` +
+			`ledger cannot hold — credited ${whole} UCT`,
+		);
+	}
+	return whole;
 }
 
 /**
@@ -294,10 +319,16 @@ export async function startArenaWatcher(): Promise<void> {
 	// Stash for the auth module's nametag → chainPubkey resolver.
 	transport = providers.transport;
 
-	// Use `import` (not `init`) — it is the ONLY entry point that honours
-	// `derivationMode` / `basePath`, and the deployed wallet file may carry them.
-	// The same mnemonic under a different derivation is a DIFFERENT identity
-	// holding no money, so this is not a detail to trade away for tidiness.
+	// Use `import` (not `init`). `import` is the only entry point that ACCEPTS
+	// `basePath`, and the deployed wallet file may carry a descriptorPath; the
+	// same mnemonic under a different derivation is a DIFFERENT identity holding
+	// no money, so the entry point is not a detail to trade away for tidiness.
+	//
+	// Be precise about what actually applies, though: on the MNEMONIC path
+	// `Sphere.import` ignores `derivationMode` entirely (storeMnemonic hard-sets
+	// 'bip32'; options.derivationMode is only read on the masterKey path). It is
+	// still passed below so the masterKey path stays correct if this ever grows
+	// one, but do not read its presence as proof the mode is being honoured.
 	//
 	// Known cost: `Sphere.import` clears existing storage first, so each boot
 	// drops the scoped KV (refresh token, receive seen-set, delivery journal)
