@@ -1,4 +1,4 @@
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 RUN npx esbuild tournament/server/server.ts --bundle --outfile=dist/server.js --platform=node --format=cjs --packages=external
 
-FROM node:20-slim
+FROM node:22-slim
 
 WORKDIR /app
 COPY package.json package-lock.json ./
