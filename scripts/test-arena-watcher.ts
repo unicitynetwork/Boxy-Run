@@ -11,6 +11,10 @@
  * Environment overrides (optional):
  *   ARENA_WALLET_PATH   path to the wallet JSON (default: ./boxyrunstaging.json)
  *   SPHERE_DATA_DIR     where Sphere caches state    (default: ./arena-test-data)
+ *   SPHERE_NETWORK      default 'testnet2' (must match the backend exactly)
+ *   WALLET_API_URL      default the STAGING backend — this is a test script, so
+ *                       it points somewhere you can safely churn sign-ins
+ *   AGGREGATOR_API_KEY  default the non-secret testnet2 gateway key
  *
  * Then, from a different Sphere wallet, send some UCT to @boxyrunstaging.
  * If the watcher is wired correctly, you'll see:
@@ -21,6 +25,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Sphere } from '@unicitylabs/sphere-sdk';
 import { createNodeProviders } from '@unicitylabs/sphere-sdk/impl/nodejs';
+import { createWalletApiProviders } from '@unicitylabs/sphere-sdk/impl/shared/wallet-api';
 
 // Polyfill global WebSocket for Node 20 (added natively in Node 22).
 if (typeof (globalThis as any).WebSocket === 'undefined') {
@@ -56,23 +61,30 @@ async function main() {
 	console.log(`  basePath:       ${parsed.wallet?.descriptorPath || '(none)'}`);
 	console.log('');
 
-	// testnet → testnet2 (networkId 4), the v2 gateway network under SDK 0.10.
-	const network = (process.env.SPHERE_NETWORK || 'testnet') as 'mainnet' | 'testnet' | 'dev';
-	console.log(`→ Initializing Node providers (network=${network})…`);
-	const providers = createNodeProviders({
+	// Must be the backend's exact network name — the SDK verifies it against the
+	// name embedded in the auth challenge, so the 'testnet' alias fails sign-in.
+	const network = (process.env.SPHERE_NETWORK || 'testnet2') as 'testnet' | 'testnet2';
+	const walletApiUrl = process.env.WALLET_API_URL || 'https://wallet-api.staging.unicity.network';
+	const aggregatorApiKey = process.env.AGGREGATOR_API_KEY || 'sk_ddc3cfcc001e4a28ac3fad7407f99590';
+	console.log(`→ Initializing Node providers (network=${network} walletApi=${walletApiUrl})…`);
+	// No `tokensDir` — token custody is the wallet-api backend now — and the
+	// oracle apiKey has no bundled default.
+	const base = createNodeProviders({
 		network,
 		dataDir,
-		tokensDir: `${dataDir}/tokens`,
-		// Mainnet default `wss://relay.unicity.network` NXDOMAINs.
-		// Testnet uses `wss://nostr-relay.testnet.unicity.network`.
-		transport: network === 'testnet'
-			? { relays: ['wss://nostr-relay.testnet.unicity.network'] }
-			: { relays: ['wss://sphere-relay.unicity.network', 'wss://nos.lol'] },
+		oracle: { apiKey: aggregatorApiKey },
+		transport: { relays: ['wss://nostr-relay.testnet.unicity.network'] },
+	});
+	const providers = createWalletApiProviders(base, {
+		baseUrl: walletApiUrl,
+		network,
+		deviceId: `boxyrun-arena-test-${network}`,
 	});
 
 	console.log('→ Importing wallet from mnemonic…');
 	const sphere = await Sphere.import({
 		mnemonic,
+		network,
 		...(parsed.derivationMode ? { derivationMode: parsed.derivationMode } : {}),
 		...(parsed.wallet?.descriptorPath ? { basePath: parsed.wallet.descriptorPath } : {}),
 		...providers,
@@ -147,26 +159,31 @@ async function main() {
 			receivedAt: new Date(transfer.receivedAt).toISOString(),
 		}, null, 2));
 	});
-	sphere.on('transfer:confirmed', (r: any) => {
-		console.log('━━ transfer:confirmed ━━', r?.id, r?.status);
+	// The pre-flip event names (transfer:confirmed / transfer:failed / sync:* /
+	// connection:changed) were REMOVED from the public event map. Subscribing to
+	// them is not an error — `on()` accepts any name — it just silently never
+	// fires, which is exactly how a diagnostic script lies to you. These are the
+	// v2 names.
+	sphere.on('transfer:updated', (r: any) => {
+		console.log('━━ transfer:updated ━━', r?.id, r?.status, r?.error ?? '', r?.deliveryState ?? '');
 	});
-	sphere.on('transfer:failed', (r: any) => {
-		console.log('━━ transfer:failed ━━', r?.id, r?.error);
+	sphere.on('transfer:attention', (e: any) => {
+		console.log('━━ transfer:attention ━━', JSON.stringify(e));
+	});
+	sphere.on('inventory:updated', () => {
+		console.log('━━ inventory:updated ━━');
+	});
+	sphere.on('history:updated', (e: any) => {
+		console.log('━━ history:updated ━━', JSON.stringify(e));
+	});
+	sphere.on('connection:status', (e: any) => {
+		console.log('━━ connection:status ━━', JSON.stringify(e));
 	});
 	sphere.on('nametag:registered', (e: any) => {
 		console.log('━━ nametag:registered ━━', e);
 	});
 	sphere.on('nametag:recovered', (e: any) => {
 		console.log('━━ nametag:recovered ━━', e);
-	});
-	sphere.on('sync:completed', (e: any) => {
-		console.log('━━ sync:completed ━━', e);
-	});
-	sphere.on('sync:error', (e: any) => {
-		console.log('━━ sync:error ━━', e);
-	});
-	sphere.on('connection:changed', (e: any) => {
-		console.log('━━ connection:changed ━━', JSON.stringify(e));
 	});
 
 	console.log('→ Subscribed to transfer:incoming + related events.');

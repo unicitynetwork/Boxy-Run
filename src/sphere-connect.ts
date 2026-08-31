@@ -1,5 +1,6 @@
 import {
   ConnectClient,
+  ERROR_CODES,
   HOST_READY_TYPE,
   HOST_READY_TIMEOUT,
   INTENT_ACTIONS,
@@ -48,6 +49,19 @@ interface WalletState {
   identity: PublicIdentity | null;
   balance: number | null;
   error: string | null;
+  /**
+   * Set when a deposit answered INTENT_OUTCOME_UNKNOWN (4201): the wallet had
+   * the intent and the outcome is unknown. Nothing may re-issue that payment.
+   *
+   * Deliberately IN-MEMORY, so a reload clears it — that is the design, not an
+   * oversight. Nothing in this page can learn whether the payment landed, so
+   * the reconciliation has to be a human one: reload, read the real balance and
+   * the game ledger (which the arena watcher credits from the chain), then
+   * decide. Persisting it to sessionStorage would block the retry the player is
+   * entitled to after checking, with nothing able to clear the flag. What the
+   * guard must prevent is the reflexive same-session re-click, and it does.
+   */
+  outcomeUnknown: boolean;
 }
 
 let client: ConnectClient | null = null;
@@ -62,6 +76,7 @@ const state: WalletState = {
   identity: null,
   balance: null,
   error: null,
+  outcomeUnknown: false,
 };
 
 // ── Detection helpers ──────────────────────────────────────────────────────
@@ -167,10 +182,20 @@ async function connect(): Promise<void> {
     }
 
     // Connect via the resolved transport.
-    // SDK 0.10 Connect protocol 2.0 added a network handshake gate: the wallet
-    // host rejects with INCOMPATIBLE_NETWORK (4008) unless the dApp declares a
-    // `network` whose id matches the wallet's active networkId. testnet2
-    // (networkId 4) is the v2 gateway network the arena wallet runs on.
+    //
+    // The wallet host runs TWO handshake gates, both of which this client must
+    // satisfy (connect/compatibility.ts in the SDK):
+    //
+    //  1. Network (INCOMPATIBLE_NETWORK, 4008) — the dApp must declare a
+    //     `network` whose id equals the wallet's active networkId. Omitting it
+    //     is itself a rejection. testnet2 (networkId 4) is the network the
+    //     deployed wallet and the arena wallet both run on.
+    //  2. npm-SDK floor (UNSUPPORTED_PROTOCOL_VERSION, 4007) — the host
+    //     enforces `minSdkVersion`, defaulting to DEFAULT_MIN_CLIENT_SDK_VERSION
+    //     = '0.14.1-0' (the P11 flip: the v1 payments era is gone). The
+    //     ConnectClient reports its own package version, so a dApp bundled
+    //     against sphere-sdk < 0.14.1 is refused at the handshake no matter
+    //     what it sends. That is the hard reason this app tracks 0.15.x.
     client = new ConnectClient({
       transport, dapp: dappMeta, permissions: [...dappPermissions], resumeSessionId,
       network: SPHERE_NETWORKS.testnet2,
@@ -225,6 +250,7 @@ async function disconnect(): Promise<void> {
   state.identity = null;
   state.balance = null;
   state.error = null;
+  state.outcomeUnknown = false;
   updateUI('disconnected');
 }
 
@@ -251,8 +277,55 @@ async function refreshBalance(): Promise<void> {
   }
 }
 
+/**
+ * Convert a whole-token amount (what the UI and the game ledger speak) into
+ * BASE UNITS (the smallest indivisible unit) as a decimal integer string.
+ *
+ * WHY THIS EXISTS — money-critical. The Connect `send` intent changed its
+ * `amount` contract: it used to carry a whole-token decimal, and now carries
+ * base units, validated by the wallet as /^\d+$/ and > 0. Both forms PASS that
+ * validation, so the old whole-token value is not rejected — it is silently
+ * reinterpreted. Sending `10` for a UCT entry fee would move 10 * 10^-18 UCT
+ * (dust) instead of 10 UCT: the player is debited nothing, and the arena
+ * watcher credits nothing (its integer divide by 10^18 floors to 0), with no
+ * error surfaced anywhere. Always convert here, at the dApp's UI edge.
+ *
+ * Done with BigInt, not Math.pow — 10 * 10**18 exceeds Number.MAX_SAFE_INTEGER
+ * and would serialise in exponential notation, failing the wallet's regex.
+ */
+function toBaseUnits(wholeTokens: number, decimals: number): string {
+  if (!Number.isFinite(wholeTokens) || wholeTokens <= 0) {
+    throw new Error(`Invalid amount: ${wholeTokens}`);
+  }
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    throw new Error(`Invalid decimals: ${decimals}`);
+  }
+  const scale = 10n ** BigInt(decimals);
+  if (Number.isInteger(wholeTokens)) {
+    return (BigInt(wholeTokens) * scale).toString();
+  }
+  // Fractional input: go through a fixed-point string so we never round-trip
+  // through a float that cannot represent the value exactly.
+  const [intPart, fracPart = ''] = wholeTokens.toFixed(decimals).split('.');
+  const frac = (fracPart + '0'.repeat(decimals)).slice(0, decimals);
+  const units = BigInt(intPart) * scale + BigInt(frac || '0');
+  if (units <= 0n) throw new Error(`Amount ${wholeTokens} is below one base unit`);
+  return units.toString();
+}
+
 async function deposit(amount?: number): Promise<boolean> {
   const sendAmount = amount ?? ENTRY_FEE;
+
+  // A previous deposit's outcome is unknown; re-issuing it is the double-spend
+  // this guard exists to prevent. Only a reload (after the player has checked
+  // their balance) clears it.
+  if (state.outcomeUnknown) {
+    state.error =
+      'A previous payment\'s outcome is still unknown. Reload the page and check ' +
+      'your balance before paying again.';
+    updateUI('connected');
+    return false;
+  }
 
   if (!client || !state.isConnected) {
     state.error = 'Not connected';
@@ -281,9 +354,15 @@ async function deposit(amount?: number): Promise<boolean> {
       uctCoinId = UCT_COIN_ID_HEX;
       uctDecimals = UCT_DECIMALS;
     }
+    // Never scale by a zero/absent decimals — that would send whole-token
+    // digits as base units, i.e. dust, which the wallet happily accepts.
+    if (!uctDecimals) uctDecimals = UCT_DECIMALS;
+    // `amount` is in BASE UNITS — see toBaseUnits() for why this conversion is
+    // not optional. `coinId` must be lowercase even-length hex; the wallet
+    // rejects a short symbol like 'UCT' with INVALID_PARAMS.
     await client.intent(INTENT_ACTIONS.SEND, {
       to: gameWalletAddress(),
-      amount: sendAmount,
+      amount: toBaseUnits(sendAmount, uctDecimals),
       coinId: uctCoinId,
       memo: 'Boxy Run entry fee',
     });
@@ -294,6 +373,30 @@ async function deposit(amount?: number): Promise<boolean> {
     updateUI('ready');
     return true;
   } catch (err) {
+    // INTENT_OUTCOME_UNKNOWN (4201): the wallet HAD the intent and the answer
+    // was lost — a host deadline fired, or the wallet locked mid-flight. The
+    // money may or may not have moved. Treating it like an ordinary failure is
+    // how a player pays twice: the old code re-enabled "Play" on every throw,
+    // and the natural next click re-issues the same transfer. There is no
+    // retry that is safe here, so refuse to offer one and let the arena
+    // watcher's on-chain credit settle it — that ledger is the source of truth
+    // and its tx_id is UNIQUE, so a deposit that DID land still credits.
+    const code = (err as { code?: unknown })?.code;
+    if (code === ERROR_CODES.INTENT_OUTCOME_UNKNOWN) {
+      state.outcomeUnknown = true;
+      state.error =
+        'Payment sent, but the wallet could not confirm the outcome. Do NOT pay again — ' +
+        'if it went through, your balance updates on its own within a minute.';
+      state.isDepositPaid = false;
+      updateUI('connected');
+      return false;
+    }
+    if (code === ERROR_CODES.WALLET_LOCKED) {
+      state.error = 'Wallet is locked. Unlock it in Sphere, then try again.';
+      state.isDepositPaid = false;
+      updateUI('connected');
+      return false;
+    }
     state.error = err instanceof Error ? err.message : 'Deposit failed';
     state.isDepositPaid = false;
     updateUI('connected');
@@ -496,6 +599,7 @@ setInterval(() => {
   get identity() { return state.identity; },
   get balance() { return state.balance; },
   get error() { return state.error; },
+  get outcomeUnknown() { return state.outcomeUnknown; },
   get entryFee() { return ENTRY_FEE; },
   get coinId() { return COIN_ID; },
   connect,

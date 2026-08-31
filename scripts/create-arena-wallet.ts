@@ -13,7 +13,10 @@
  *
  * Usage:
  *   CONFIRM=yes npx tsx scripts/create-arena-wallet.ts
- *     [--nametag=BoxyRunArena] [--network=mainnet] [--data-dir=./arena-data]
+ *     [--nametag=BoxyRunArena] [--network=testnet2] [--data-dir=./arena-data]
+ *     [--wallet-api=https://wallet-api.unicity.network]
+ *
+ * Env: WALLET_API_URL, AGGREGATOR_API_KEY (both have defaults, see below).
  *
  * Without CONFIRM=yes, the script prints the plan and exits without
  * touching the chain. This is a dry-run by default.
@@ -36,8 +39,15 @@ if (typeof (globalThis as any).WebSocket === 'undefined') {
 
 import { Sphere, generateMnemonic } from '@unicitylabs/sphere-sdk';
 import { createNodeProviders } from '@unicitylabs/sphere-sdk/impl/nodejs';
+import { createWalletApiProviders } from '@unicitylabs/sphere-sdk/impl/shared/wallet-api';
 
-type NetworkType = 'mainnet' | 'testnet' | 'dev';
+// mainnet/dev ship no embedded trust base and are refused at provider creation.
+type NetworkType = 'testnet' | 'testnet2';
+
+// See tournament/server/arena-watcher.ts for why these three must agree and why
+// the network string has to be the backend's exact name, not an alias.
+const DEFAULT_WALLET_API_URL = 'https://wallet-api.unicity.network';
+const DEFAULT_AGGREGATOR_API_KEY = 'sk_ddc3cfcc001e4a28ac3fad7407f99590';
 
 function parseArg(name: string, fallback: string): string {
 	const prefix = `--${name}=`;
@@ -49,21 +59,25 @@ function parseArg(name: string, fallback: string): string {
 
 async function main() {
 	const nametag = parseArg('nametag', 'boxyrunarena');
-	// Default to testnet (→ testnet2, networkId 4) — the v2 network. Override
-	// with --network=mainnet once mainnet's gateway is cut over to the v2 engine.
-	const network = parseArg('network', 'testnet') as NetworkType;
+	// 'testnet2' is the name the deployed wallet-api backends put in the auth
+	// challenge; the SDK verifies ours against it, so the alias 'testnet' fails
+	// sign-in even though it resolves to the same gateway everywhere else.
+	const network = parseArg('network', 'testnet2') as NetworkType;
 	const dataDir = resolve(parseArg('data-dir', './arena-data'));
 	const outFile = resolve(parseArg('out', './arena-wallet.json'));
+	const walletApiUrl = parseArg('wallet-api', process.env.WALLET_API_URL || DEFAULT_WALLET_API_URL);
+	const aggregatorApiKey = process.env.AGGREGATOR_API_KEY || DEFAULT_AGGREGATOR_API_KEY;
 	const confirm = process.env.CONFIRM === 'yes';
 
 	console.log('');
 	console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 	console.log('  Arena wallet creation');
 	console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-	console.log(`  Nametag:   @${nametag}`);
-	console.log(`  Network:   ${network}`);
-	console.log(`  Data dir:  ${dataDir}`);
-	console.log(`  Output:    ${outFile}`);
+	console.log(`  Nametag:    @${nametag}`);
+	console.log(`  Network:    ${network}`);
+	console.log(`  wallet-api: ${walletApiUrl}`);
+	console.log(`  Data dir:   ${dataDir}`);
+	console.log(`  Output:     ${outFile}`);
 	console.log('');
 
 	if (existsSync(outFile)) {
@@ -94,27 +108,31 @@ async function main() {
 	console.log(`  (${mnemonic.split(' ').length} words generated)`);
 
 	console.log(`→ Initializing ${network} providers…`);
-	// SDK's default relay list (wss://relay.unicity.network) is stale / NXDOMAIN.
-	// Use the relays that actually resolve.
-	const mainnetRelays = [
-		'wss://sphere-relay.unicity.network',
-		'wss://relay.damus.io',
-		'wss://nos.lol',
-	];
+	// Only the Unicity-operated relay: public relays returning 5xx can hang the
+	// boot, because the SDK awaits every transport handshake.
 	const testnetRelays = ['wss://nostr-relay.testnet.unicity.network'];
-	const providers = createNodeProviders({
+	// `tokensDir` is gone — token custody is the wallet-api backend now. The
+	// oracle apiKey has no bundled default and the token engine needs it.
+	const base = createNodeProviders({
 		network,
 		dataDir,
-		tokensDir: `${dataDir}/tokens`,
-		transport: {
-			relays: network === 'testnet' ? testnetRelays : mainnetRelays,
-		},
+		oracle: { apiKey: aggregatorApiKey },
+		transport: { relays: testnetRelays },
+	});
+	// Sphere.create is fail-closed without a wallet-api composition: it throws
+	// INVALID_CONFIG before writing anything. The wallet must be created against
+	// the SAME backend the watcher will later read its mailbox from.
+	const providers = createWalletApiProviders(base, {
+		baseUrl: walletApiUrl,
+		network,
+		deviceId: `boxyrun-arena-create-${network}`,
 	});
 
 	console.log(`→ Creating wallet + registering @${nametag}… (this hits the chain, may take a minute)`);
 	const sphere = await Sphere.create({
 		mnemonic,
 		nametag,
+		network,
 		...providers,
 	});
 
@@ -128,9 +146,9 @@ async function main() {
 		createdAt: new Date().toISOString(),
 		network,
 		nametag: `@${nametag}`,
-		// SDK 0.10 dropped the L1 layer from Identity; the L3 DIRECT address is
-		// the on-chain address now. Informational only — the watcher re-derives
-		// identity from the mnemonic, it never reads this field back.
+		// The L3 DIRECT address is the on-chain address (the L1 layer left
+		// Identity in the v2 engine cutover). Informational only — the watcher
+		// re-derives identity from the mnemonic, it never reads this field back.
 		directAddress: identity.directAddress ?? null,
 		chainPubkey: identity.chainPubkey,
 		// The secret: anyone with this mnemonic controls every token in @BoxyRunArena.
@@ -154,6 +172,8 @@ async function main() {
 	console.log(`       shred -u ${outFile}`);
 	console.log(`     (Leaving it on disk means anyone with file access controls the wallet.)`);
 	console.log(`  3. Set ARENA_WALLET=@${nametag} in your deployment env.`);
+	console.log(`  4. Point the watcher at the SAME backend: WALLET_API_URL=${walletApiUrl}`);
+	console.log(`     and the same network: SPHERE_NETWORK=${network}`);
 	console.log('');
 
 	// Clean shutdown (closes Nostr relay sockets etc.)
