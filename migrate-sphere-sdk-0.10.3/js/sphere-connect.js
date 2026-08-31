@@ -95,74 +95,13 @@ var SphereConnect = (() => {
       delete g[LOGGER_KEY];
     }
   };
-  var SphereError = class extends Error {
-    constructor(message, code, cause) {
-      super(message);
-      __publicField(this, "code");
-      __publicField(this, "cause");
-      this.name = "SphereError";
-      this.code = code;
-      this.cause = cause;
-    }
-  };
-  var STORAGE_KEYS_GLOBAL = {
-    /** Encrypted BIP39 mnemonic */
-    MNEMONIC: "mnemonic",
-    /** Encrypted master private key */
-    MASTER_KEY: "master_key",
-    /** BIP32 chain code */
-    CHAIN_CODE: "chain_code",
-    /** HD derivation path (full path like m/44'/0'/0'/0/0) */
-    DERIVATION_PATH: "derivation_path",
-    /** Base derivation path (like m/44'/0'/0' without chain/index) */
-    BASE_PATH: "base_path",
-    /** Derivation mode: bip32, wif_hmac, legacy_hmac */
-    DERIVATION_MODE: "derivation_mode",
-    /** Wallet source: mnemonic, file, unknown */
-    WALLET_SOURCE: "wallet_source",
-    /** Wallet existence flag */
-    WALLET_EXISTS: "wallet_exists",
-    /** Current active address index */
-    CURRENT_ADDRESS_INDEX: "current_address_index",
-    /** Nametag cache per address (separate from tracked addresses registry) */
-    ADDRESS_NAMETAGS: "address_nametags",
-    /** Active addresses registry (JSON: TrackedAddressesStorage) */
-    TRACKED_ADDRESSES: "tracked_addresses",
-    /** Last processed Nostr wallet event timestamp (unix seconds), keyed per pubkey */
-    LAST_WALLET_EVENT_TS: "last_wallet_event_ts",
-    /** Last processed Nostr DM (gift-wrap) event timestamp (unix seconds), keyed per pubkey */
-    LAST_DM_EVENT_TS: "last_dm_event_ts",
-    /** Group chat: last used relay URL (stale data detection) — global, same relay for all addresses */
-    GROUP_CHAT_RELAY_URL: "group_chat_relay_url",
-    /** Cached token registry JSON (fetched from remote) */
-    TOKEN_REGISTRY_CACHE: "token_registry_cache",
-    /** Timestamp of last token registry cache update (ms since epoch) */
-    TOKEN_REGISTRY_CACHE_TS: "token_registry_cache_ts",
-    /** Cached price data JSON (from CoinGecko or other provider) */
-    PRICE_CACHE: "price_cache",
-    /** Timestamp of last price cache update (ms since epoch) */
-    PRICE_CACHE_TS: "price_cache_ts"
-  };
   var STORAGE_KEYS_ADDRESS = {
-    /** Pending transfers for this address */
-    PENDING_TRANSFERS: "pending_transfers",
-    /** Transfer outbox for this address */
+    /** Transfer outbox for this address (pre-flip key name; kept as the network-scoping witness) */
     OUTBOX: "outbox",
     /** Conversations for this address */
     CONVERSATIONS: "conversations",
     /** Messages for this address */
     MESSAGES: "messages",
-    /** Transaction history for this address */
-    TRANSACTION_HISTORY: "transaction_history",
-    /** Pending V5 finalization tokens (unconfirmed instant split tokens) */
-    PENDING_V5_TOKENS: "pending_v5_tokens",
-    /**
-     * FINISHED v2 token blobs awaiting transport delivery. Written the moment a
-     * transfer/split output is certified on-chain (the source is already spent),
-     * removed after successful delivery — survives transport failures + crashes
-     * so the recipient's token is never lost with the process.
-     */
-    PENDING_V2_DELIVERIES: "pending_v2_deliveries",
     /** Group chat: joined groups for this address */
     GROUP_CHAT_GROUPS: "group_chat_groups",
     /** Group chat: messages for this address */
@@ -171,47 +110,17 @@ var SphereConnect = (() => {
     GROUP_CHAT_MEMBERS: "group_chat_members",
     /** Group chat: processed event IDs for deduplication */
     GROUP_CHAT_PROCESSED_EVENTS: "group_chat_processed_events",
-    /** Processed V5 split group IDs for Nostr re-delivery dedup */
-    PROCESSED_SPLIT_GROUP_IDS: "processed_split_group_ids",
-    /** Processed V6 combined transfer IDs for Nostr re-delivery dedup */
-    PROCESSED_COMBINED_TRANSFER_IDS: "processed_combined_transfer_ids",
-    // Invoice / Accounting storage keys
-    /** Set of cancelled invoice IDs (JSON string array) */
-    CANCELLED_INVOICES: "cancelled_invoices",
-    /** Set of closed invoice IDs (JSON string array) */
-    CLOSED_INVOICES: "closed_invoices",
-    /** Frozen balances for terminated invoices (JSON map: invoiceId → FrozenInvoiceBalances) */
-    FROZEN_BALANCES: "frozen_balances",
-    /** Auto-return settings (JSON: AutoReturnSettings) */
+    /** Auto-return settings (pre-flip key name; kept as the network-scoping witness) */
     AUTO_RETURN: "auto_return",
-    /** Auto-return dedup ledger (JSON: AutoReturnLedger) */
+    /** Auto-return dedup ledger (pre-flip key name; kept as the network-scoping witness) */
     AUTO_RETURN_LEDGER: "auto_return_ledger",
-    /** Invoice-transfer index metadata (JSON: Record<invoiceId, { terminated, frozenAt? }>) */
-    INV_LEDGER_INDEX: "inv_ledger_index",
-    /** Token scan state watermarks (JSON: Record<tokenId, txCount>) */
-    TOKEN_SCAN_STATE: "token_scan_state",
-    // Swap storage keys
-    /** Per-swap key: swap:{swapId} */
-    SWAP_RECORD_PREFIX: "swap:",
-    /** Lightweight index array for listing */
-    SWAP_INDEX: "swap_index"
+    /** Per-swap key prefix (pre-flip key name; kept as the network-scoping witness) */
+    SWAP_RECORD_PREFIX: "swap:"
   };
   var NETWORK_SCOPED_ADDRESS_KEYS = [
-    STORAGE_KEYS_ADDRESS.PENDING_TRANSFERS,
     STORAGE_KEYS_ADDRESS.OUTBOX,
-    STORAGE_KEYS_ADDRESS.TRANSACTION_HISTORY,
-    STORAGE_KEYS_ADDRESS.PENDING_V5_TOKENS,
-    STORAGE_KEYS_ADDRESS.PENDING_V2_DELIVERIES,
-    STORAGE_KEYS_ADDRESS.PROCESSED_SPLIT_GROUP_IDS,
-    STORAGE_KEYS_ADDRESS.PROCESSED_COMBINED_TRANSFER_IDS,
-    STORAGE_KEYS_ADDRESS.CANCELLED_INVOICES,
-    STORAGE_KEYS_ADDRESS.CLOSED_INVOICES,
-    STORAGE_KEYS_ADDRESS.FROZEN_BALANCES,
     STORAGE_KEYS_ADDRESS.AUTO_RETURN,
-    STORAGE_KEYS_ADDRESS.AUTO_RETURN_LEDGER,
-    STORAGE_KEYS_ADDRESS.INV_LEDGER_INDEX,
-    STORAGE_KEYS_ADDRESS.TOKEN_SCAN_STATE,
-    STORAGE_KEYS_ADDRESS.SWAP_INDEX
+    STORAGE_KEYS_ADDRESS.AUTO_RETURN_LEDGER
   ];
   var NETWORK_SCOPED_ADDRESS_PREFIXES = [
     STORAGE_KEYS_ADDRESS.SWAP_RECORD_PREFIX,
@@ -219,10 +128,6 @@ var SphereConnect = (() => {
     "inv_ledger:"
     // AccountingModule INV_LEDGER_PREFIX
   ];
-  var STORAGE_KEYS = {
-    ...STORAGE_KEYS_GLOBAL,
-    ...STORAGE_KEYS_ADDRESS
-  };
   var DEFAULT_NOSTR_RELAYS = [
     "wss://relay.unicity.network",
     "wss://relay.damus.io",
@@ -231,9 +136,6 @@ var SphereConnect = (() => {
   ];
   var DEFAULT_AGGREGATOR_URL = "https://aggregator.unicity.network/rpc";
   var DEV_AGGREGATOR_URL = "https://dev-aggregator.dyndns.org/rpc";
-  var DEFAULT_IPFS_GATEWAYS = [
-    "https://unicity-ipfs1.dyndns.org"
-  ];
   var DEFAULT_BASE_PATH = "m/44'/0'/0'";
   var DEFAULT_DERIVATION_PATH = `${DEFAULT_BASE_PATH}/0/0`;
   var TOKEN_REGISTRY_URL = "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet.json";
@@ -248,7 +150,6 @@ var SphereConnect = (() => {
       name: "Mainnet",
       aggregatorUrl: DEFAULT_AGGREGATOR_URL,
       nostrRelays: DEFAULT_NOSTR_RELAYS,
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS,
       groupRelays: DEFAULT_GROUP_RELAYS,
       tokenRegistryUrl: TOKEN_REGISTRY_URL
     },
@@ -262,7 +163,6 @@ var SphereConnect = (() => {
       aggregatorUrl: "https://gateway.testnet2.unicity.network",
       nostrRelays: TEST_NOSTR_RELAYS,
       // reuse testnet infra (shared relays/ipfs)
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS,
       groupRelays: DEFAULT_GROUP_RELAYS,
       tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
     },
@@ -273,7 +173,6 @@ var SphereConnect = (() => {
       aggregatorUrl: "https://gateway.testnet2.unicity.network",
       nostrRelays: TEST_NOSTR_RELAYS,
       // reuse testnet infra (shared relays/ipfs)
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS,
       groupRelays: DEFAULT_GROUP_RELAYS,
       tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
     },
@@ -284,7 +183,6 @@ var SphereConnect = (() => {
       name: "Development",
       aggregatorUrl: DEV_AGGREGATOR_URL,
       nostrRelays: TEST_NOSTR_RELAYS,
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS,
       groupRelays: DEFAULT_GROUP_RELAYS,
       tokenRegistryUrl: TOKEN_REGISTRY_URL
     }
@@ -295,7 +193,7 @@ var SphereConnect = (() => {
   var HOST_READY_TYPE = "sphere-connect:host-ready";
   var HOST_READY_TIMEOUT = 3e4;
   var SPHERE_CONNECT_NAMESPACE = "sphere-connect";
-  var SPHERE_CONNECT_VERSION = "2.0";
+  var SPHERE_CONNECT_VERSION = "2.1";
   var RPC_METHODS = {
     GET_IDENTITY: "sphere_getIdentity",
     GET_BALANCE: "sphere_getBalance",
@@ -310,9 +208,7 @@ var SphereConnect = (() => {
     GET_CONVERSATIONS: "sphere_getConversations",
     GET_MESSAGES: "sphere_getMessages",
     GET_DM_UNREAD_COUNT: "sphere_getDMUnreadCount",
-    MARK_AS_READ: "sphere_markAsRead",
-    GET_INVOICES: "sphere_getInvoices",
-    GET_INVOICE_STATUS: "sphere_getInvoiceStatus"
+    MARK_AS_READ: "sphere_markAsRead"
   };
   var INTENT_ACTIONS = {
     SEND: "send",
@@ -320,24 +216,87 @@ var SphereConnect = (() => {
     PAYMENT_REQUEST: "payment_request",
     RECEIVE: "receive",
     SIGN_MESSAGE: "sign_message",
-    CREATE_INVOICE: "create_invoice",
-    CLOSE_INVOICE: "close_invoice",
-    CANCEL_INVOICE: "cancel_invoice",
-    PAY_INVOICE: "pay_invoice",
-    RETURN_INVOICE_PAYMENT: "return_invoice_payment",
-    IMPORT_INVOICE: "import_invoice",
-    SEND_INVOICE_RECEIPTS: "send_invoice_receipts",
-    SEND_CANCELLATION_NOTICES: "send_cancellation_notices",
-    SET_AUTO_RETURN: "set_auto_return",
     MINT: "mint"
   };
+  var ERROR_CODES = {
+    // Standard JSON-RPC
+    PARSE_ERROR: -32700,
+    INVALID_REQUEST: -32600,
+    METHOD_NOT_FOUND: -32601,
+    INVALID_PARAMS: -32602,
+    INTERNAL_ERROR: -32603,
+    // Sphere Connect (4xxx)
+    NOT_CONNECTED: 4001,
+    PERMISSION_DENIED: 4002,
+    USER_REJECTED: 4003,
+    SESSION_EXPIRED: 4004,
+    ORIGIN_BLOCKED: 4005,
+    RATE_LIMITED: 4006,
+    UNSUPPORTED_PROTOCOL_VERSION: 4007,
+    // Connect MAJOR mismatch (incompatible era)
+    INCOMPATIBLE_NETWORK: 4008,
+    // dApp targets a different network than the wallet
+    // Wallet locked; THE SESSION IS STILL ALIVE. A QUERY may be retried after wallet:unlocked.
+    // An INTENT already delegated to the wallet is NEVER answered with this code — it gets
+    // INTENT_OUTCOME_UNKNOWN (4201) instead, because a retry could double-spend.
+    WALLET_LOCKED: 4009,
+    INSUFFICIENT_BALANCE: 4100,
+    INVALID_RECIPIENT: 4101,
+    TRANSFER_FAILED: 4102,
+    INTENT_CANCELLED: 4200,
+    /**
+     * The intent was DELEGATED to the wallet and the host lost track of the answer — a host
+     * deadline fired, or the wallet locked / logged out mid-flight. **The outcome is UNKNOWN:
+     * the money may or may not have moved.**
+     *
+     * A dApp MUST NOT retry on this code. Reconcile out of band (poll the recipient, the
+     * aggregator, or your own backend) and only then decide.
+     *
+     * This code exists because every other answer would be a lie. `INTENT_CANCELLED` (4200)
+     * asserts the user declined and nothing happened; `WALLET_LOCKED` (4009) invites a retry
+     * after the unlock. Sending either for an intent the wallet had already submitted is how a
+     * paid-but-not-credited order — and then a double spend on retry — happens.
+     */
+    INTENT_OUTCOME_UNKNOWN: 4201
+  };
+  var WALLET_EVENTS = {
+    /** Wallet is LOCKED — the session is STILL ALIVE. Requests are answered
+     *  WALLET_LOCKED (4009) until `wallet:unlocked`. The dApp must NOT disconnect,
+     *  must NOT clear its sessionId, and must NOT re-handshake.
+     *  Payload: {@link WalletLockedPayload}. Pushed by ConnectHost.setLocked() and
+     *  immediately after a handshake response carrying `locked: true`. */
+    LOCKED: "wallet:locked",
+    /** Wallet was unlocked — the SAME session continues: no re-handshake, no re-approval,
+     *  no re-subscribe (the host re-arms the dApp's subscriptions before pushing this).
+     *  Payload: {@link WalletUnlockedPayload} — carries the CURRENT identity, which may
+     *  differ from the one the dApp connected with. Pushed by ConnectHost.updateSphere()
+     *  on the locked -> live edge only. */
+    UNLOCKED: "wallet:unlocked",
+    /** The session is GONE (logout, wallet deleted, dApp sphere_disconnect, expiry seen at
+     *  unlock, a different seed behind the lock screen, host destroy).
+     *  The dApp must clear its session and re-handshake to continue. Unlocking does not cure it.
+     *  Payload: {@link WalletDisconnectedPayload}. Pushed by ConnectHost.revokeSession(). */
+    DISCONNECTED: "wallet:disconnected",
+    /** Active wallet address changed. dApp should update displayed identity.
+     *  Pushed automatically by ConnectHost — no sphere_subscribe needed. */
+    IDENTITY_CHANGED: "identity:changed"
+  };
+  var AUTO_PUSHED_EVENTS = [
+    WALLET_EVENTS.LOCKED,
+    WALLET_EVENTS.UNLOCKED,
+    WALLET_EVENTS.DISCONNECTED,
+    WALLET_EVENTS.IDENTITY_CHANGED
+  ];
+  function isAutoPushedEvent(event) {
+    return AUTO_PUSHED_EVENTS.includes(event);
+  }
   function createRequestId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       return crypto.randomUUID();
     }
     return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
   }
-  var SDK_VERSION = "0.10.3";
+  var SDK_VERSION = "0.15.0";
   var PERMISSION_SCOPES = {
     IDENTITY_READ: "identity:read",
     BALANCE_READ: "balance:read",
@@ -351,9 +310,7 @@ var SphereConnect = (() => {
     DM_MANAGE: "dm:manage",
     PAYMENT_REQUEST: "payment:request",
     SIGN_REQUEST: "sign:request",
-    MINT_REQUEST: "mint:request",
-    INVOICE_READ: "invoice:read",
-    INVOICE_WRITE: "invoice:write"
+    MINT_REQUEST: "mint:request"
   };
   var ALL_PERMISSIONS = Object.values(PERMISSION_SCOPES);
   var DEFAULT_PERMISSIONS = [
@@ -372,9 +329,7 @@ var SphereConnect = (() => {
     [RPC_METHODS.GET_CONVERSATIONS]: PERMISSION_SCOPES.DM_READ,
     [RPC_METHODS.GET_MESSAGES]: PERMISSION_SCOPES.DM_READ,
     [RPC_METHODS.GET_DM_UNREAD_COUNT]: PERMISSION_SCOPES.DM_READ,
-    [RPC_METHODS.MARK_AS_READ]: PERMISSION_SCOPES.DM_MANAGE,
-    [RPC_METHODS.GET_INVOICES]: PERMISSION_SCOPES.INVOICE_READ,
-    [RPC_METHODS.GET_INVOICE_STATUS]: PERMISSION_SCOPES.INVOICE_READ
+    [RPC_METHODS.MARK_AS_READ]: PERMISSION_SCOPES.DM_MANAGE
   };
   var INTENT_PERMISSIONS = {
     [INTENT_ACTIONS.SEND]: PERMISSION_SCOPES.TRANSFER_REQUEST,
@@ -382,17 +337,137 @@ var SphereConnect = (() => {
     [INTENT_ACTIONS.PAYMENT_REQUEST]: PERMISSION_SCOPES.PAYMENT_REQUEST,
     [INTENT_ACTIONS.RECEIVE]: PERMISSION_SCOPES.IDENTITY_READ,
     [INTENT_ACTIONS.SIGN_MESSAGE]: PERMISSION_SCOPES.SIGN_REQUEST,
-    [INTENT_ACTIONS.CREATE_INVOICE]: PERMISSION_SCOPES.INVOICE_WRITE,
-    [INTENT_ACTIONS.CLOSE_INVOICE]: PERMISSION_SCOPES.INVOICE_WRITE,
-    [INTENT_ACTIONS.CANCEL_INVOICE]: PERMISSION_SCOPES.INVOICE_WRITE,
-    [INTENT_ACTIONS.PAY_INVOICE]: PERMISSION_SCOPES.TRANSFER_REQUEST,
-    [INTENT_ACTIONS.RETURN_INVOICE_PAYMENT]: PERMISSION_SCOPES.TRANSFER_REQUEST,
-    [INTENT_ACTIONS.IMPORT_INVOICE]: PERMISSION_SCOPES.INVOICE_WRITE,
-    [INTENT_ACTIONS.SEND_INVOICE_RECEIPTS]: PERMISSION_SCOPES.INVOICE_WRITE,
-    [INTENT_ACTIONS.SEND_CANCELLATION_NOTICES]: PERMISSION_SCOPES.INVOICE_WRITE,
-    [INTENT_ACTIONS.SET_AUTO_RETURN]: PERMISSION_SCOPES.INVOICE_WRITE,
     [INTENT_ACTIONS.MINT]: PERMISSION_SCOPES.MINT_REQUEST
   };
+  var SETTLED_STATUSES = /* @__PURE__ */ new Set([
+    "confirmed",
+    "delivered",
+    "completed"
+  ]);
+  var REALTIME_STATUS = {
+    connected: "connected",
+    degraded: "reconnecting",
+    offline: "closed"
+  };
+  function toLegacyRequest(view, status) {
+    return { ...view, symbol: view.symbol ?? "", status };
+  }
+  function paymentsOrNull(sphere) {
+    try {
+      return sphere.payments;
+    } catch {
+      return null;
+    }
+  }
+  function legacyRequestPayload(sphere, update) {
+    const view = paymentsOrNull(sphere)?.requests.list().find((request) => request.id === update.id);
+    if (!view) {
+      return {
+        id: update.id,
+        requestId: update.id,
+        senderPubkey: "",
+        amount: "",
+        coinId: "",
+        symbol: "",
+        timestamp: Date.now(),
+        status: update.status
+      };
+    }
+    return toLegacyRequest(view, update.status);
+  }
+  function requestStatusAttacher(status) {
+    return (sphere, forward) => sphere.on("payment_request:updated", (update) => {
+      if (update.status === status) forward(legacyRequestPayload(sphere, update));
+    });
+  }
+  function attentionAttacher(code, toLegacy) {
+    return (sphere, forward) => sphere.on("transfer:attention", (attention) => {
+      if (attention.code === code) forward(toLegacy(attention));
+    });
+  }
+  function remoteUpdateAttacher(sphere, forward) {
+    let sequence = 0;
+    return sphere.on("inventory:updated", () => {
+      sequence += 1;
+      forward({ providerId: "wallet-api", name: "wallet-api", sequence, cid: "", added: 0, removed: 0 });
+    });
+  }
+  var COMPAT_ATTACHERS = /* @__PURE__ */ new Map([
+    // Old completion split, held: deliveryPending ? delivery_pending : confirmed, plus the
+    // failed arm (manifest judgment call #1). Payloads are the TransferResult, unchanged.
+    ["transfer:confirmed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
+      if (SETTLED_STATUSES.has(result.status) && result.deliveryPending !== true) forward(result);
+    })],
+    ["transfer:delivery_pending", (sphere, forward) => sphere.on("transfer:updated", (result) => {
+      if (result.status !== "failed" && result.deliveryPending === true) forward(result);
+    })],
+    ["transfer:failed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
+      if (result.status === "failed") forward(result);
+    })],
+    // Same name on both wires, different payload: the raw v2 view has optional `symbol`;
+    // legacy subscribers get the IncomingPaymentRequest shape via the shared mapping.
+    ["payment_request:incoming", (sphere, forward) => sphere.on("payment_request:incoming", (view) => {
+      forward(toLegacyRequest(view, view.status));
+    })],
+    ["payment_request:paid", requestStatusAttacher("paid")],
+    ["payment_request:rejected", requestStatusAttacher("rejected")],
+    ["payment_request:expired", requestStatusAttacher("expired")],
+    // detail carries the old inner code (SPLIT_CHECKPOINT_LOST / CHECKPOINT_TRUSTBASE_MISMATCH).
+    ["split:checkpoint-stuck", attentionAttacher("split:checkpoint-stuck", (attention) => ({
+      transferId: attention.transferId,
+      code: attention.detail ?? "",
+      error: attention.detail ?? ""
+    }))],
+    ["delivery:undeliverable", attentionAttacher("delivery:undeliverable", (attention) => ({
+      transferId: attention.transferId,
+      recipientPubkey: "",
+      attempts: 0,
+      error: attention.detail ?? ""
+    }))],
+    ["delivery:deferred", attentionAttacher("delivery:deferred", (attention) => ({
+      transferId: attention.transferId,
+      recipientPubkey: "",
+      reason: attention.detail ?? attention.code,
+      deferredUntil: 0
+    }))],
+    ["realtime:status", (sphere, forward) => sphere.on("connection:status", (connection) => {
+      forward({ status: REALTIME_STATUS[connection.status] ?? "closed" });
+    })],
+    // The server IS storage on the v2 vertical — a degraded connection is degraded storage.
+    ["storage:degraded", (sphere, forward) => sphere.on("connection:status", (connection) => {
+      if (connection.status !== "degraded") return;
+      forward({ providerId: "wallet-api", error: "wallet-api connection degraded" });
+    })],
+    ["sync:completed", (sphere, forward) => sphere.on("inventory:updated", () => {
+      forward({ source: "payments", count: paymentsOrNull(sphere)?.tokens().length ?? 0 });
+    })],
+    ["sync:remote-update", remoteUpdateAttacher]
+  ]);
+  var WALLET_LOCKED_MESSAGE = "Wallet is locked";
+  var NOT_CONNECTED_MESSAGE = "Not connected";
+  var LOCKED_ALLOWLIST = /* @__PURE__ */ new Set([
+    RPC_METHODS.GET_IDENTITY,
+    RPC_METHODS.SUBSCRIBE,
+    RPC_METHODS.UNSUBSCRIBE,
+    RPC_METHODS.DISCONNECT
+  ]);
+  var REFUSE_NOT_CONNECTED = {
+    kind: "refuse",
+    error: { code: ERROR_CODES.NOT_CONNECTED, message: NOT_CONNECTED_MESSAGE }
+  };
+  var REFUSE_LOCKED = {
+    kind: "refuse",
+    error: {
+      code: ERROR_CODES.WALLET_LOCKED,
+      message: WALLET_LOCKED_MESSAGE,
+      data: { reason: "locked" }
+    }
+  };
+  var EMPTY_WALLET_SNAPSHOT = Object.freeze({ capturedAt: 0 });
+  var CHANNEL_ONLY_CODES = /* @__PURE__ */ new Set([
+    ERROR_CODES.WALLET_LOCKED,
+    ERROR_CODES.NOT_CONNECTED
+  ]);
   var ConnectError = class extends Error {
     constructor(message, code, data) {
       super(message);
@@ -417,6 +492,8 @@ var SphereConnect = (() => {
       __publicField(this, "grantedPermissions", []);
       __publicField(this, "identity", null);
       __publicField(this, "walletNet", null);
+      __publicField(this, "walletProto", null);
+      __publicField(this, "locked", false);
       __publicField(this, "connected", false);
       __publicField(this, "pendingRequests", /* @__PURE__ */ new Map());
       __publicField(this, "eventHandlers", /* @__PURE__ */ new Map());
@@ -488,12 +565,37 @@ var SphereConnect = (() => {
     get walletNetwork() {
       return this.walletNet;
     }
+    /**
+     * The wallet's Connect protocol version, captured from the handshake response `v`.
+     * Null before the first handshake response and after a disconnect.
+     *
+     * Feature-detect with it: compare against '2.1' to decide whether the wallet can be
+     * trusted to send wallet:unlocked / wallet:disconnected. A Connect 2.0 wallet destroys
+     * the session on lock and never emits either, so a dApp waiting for them against one
+     * waits forever.
+     *
+     * CAVEAT: on an ERROR response the host echoes the dApp's own `v` back
+     * (ConnectHost.sendHandshakeResponse), so after a refused connection this may be the
+     * dApp's version rather than the wallet's. Only trust it after a successful handshake.
+     */
+    get walletProtocol() {
+      return this.walletProto;
+    }
+    /**
+     * Whether the wallet was locked at the last handshake or lifecycle event.
+     * A locked client is still CONNECTED: `isConnected` stays true and `session` stays valid.
+     * Requests answer WALLET_LOCKED (4009) until `wallet:unlocked` arrives on the SAME
+     * session — do not disconnect, do not clear the session, do not re-handshake.
+     */
+    get walletLocked() {
+      return this.locked;
+    }
     // ===========================================================================
     // Query (read data)
     // ===========================================================================
     /** Send a query request and return the result */
     async query(method, params) {
-      if (!this.connected) throw new SphereError("Not connected", "NOT_INITIALIZED");
+      if (!this.connected) throw new ConnectError("Not connected", ERROR_CODES.NOT_CONNECTED);
       const id = createRequestId();
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -503,7 +605,8 @@ var SphereConnect = (() => {
         this.pendingRequests.set(id, {
           resolve,
           reject,
-          timer
+          timer,
+          kind: "query"
         });
         this.transport.send({
           ns: SPHERE_CONNECT_NAMESPACE,
@@ -520,17 +623,23 @@ var SphereConnect = (() => {
     // ===========================================================================
     /** Send an intent request. The wallet will open its UI for user confirmation. */
     async intent(action, params) {
-      if (!this.connected) throw new SphereError("Not connected", "NOT_INITIALIZED");
+      if (!this.connected) throw new ConnectError("Not connected", ERROR_CODES.NOT_CONNECTED);
       const id = createRequestId();
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           this.pendingRequests.delete(id);
-          reject(new Error(`Intent timeout: ${action}`));
+          reject(
+            new ConnectError(
+              `Intent outcome unknown \u2014 do not retry; reconcile before acting: ${action}`,
+              ERROR_CODES.INTENT_OUTCOME_UNKNOWN
+            )
+          );
         }, this.intentTimeout);
         this.pendingRequests.set(id, {
           resolve,
           reject,
-          timer
+          timer,
+          kind: "intent"
         });
         this.transport.send({
           ns: SPHERE_CONNECT_NAMESPACE,
@@ -549,7 +658,7 @@ var SphereConnect = (() => {
     on(event, handler) {
       if (!this.eventHandlers.has(event)) {
         this.eventHandlers.set(event, /* @__PURE__ */ new Set());
-        if (this.connected) {
+        if (this.connected && !isAutoPushedEvent(event)) {
           this.query(RPC_METHODS.SUBSCRIBE, { event }).catch((err) => logger.debug("Connect", "Event subscription failed", err));
         }
       }
@@ -560,7 +669,7 @@ var SphereConnect = (() => {
           handlers.delete(handler);
           if (handlers.size === 0) {
             this.eventHandlers.delete(event);
-            if (this.connected) {
+            if (this.connected && !isAutoPushedEvent(event)) {
               this.query(RPC_METHODS.UNSUBSCRIBE, { event }).catch((err) => logger.debug("Connect", "Event unsubscription failed", err));
             }
           }
@@ -584,15 +693,36 @@ var SphereConnect = (() => {
         return;
       }
       if (msg.type === "event") {
-        const handlers = this.eventHandlers.get(msg.event);
-        if (handlers) {
-          for (const handler of handlers) {
-            try {
-              handler(msg.data);
-            } catch (err) {
-              logger.debug("Connect", "Event handler error", err);
-            }
-          }
+        if (!this.connected || !this.sessionId) {
+          logger.warn("Connect", `Ignoring wallet event before a session exists: ${msg.event}`);
+          return;
+        }
+        if (msg.event === WALLET_EVENTS.LOCKED) {
+          this.locked = true;
+        } else if (msg.event === WALLET_EVENTS.UNLOCKED) {
+          this.locked = false;
+          const identity = msg.data?.identity;
+          if (identity) this.identity = identity;
+        } else if (msg.event === WALLET_EVENTS.DISCONNECTED) {
+          this.connected = false;
+        } else if (msg.event === WALLET_EVENTS.IDENTITY_CHANGED) {
+          const data = msg.data;
+          if (data && typeof data.chainPubkey === "string") this.identity = data;
+        }
+        this.dispatchEvent(msg.event, msg.data);
+        if (msg.event === WALLET_EVENTS.DISCONNECTED) {
+          this.cleanup();
+        }
+      }
+    }
+    dispatchEvent(event, data) {
+      const handlers = this.eventHandlers.get(event);
+      if (!handlers) return;
+      for (const handler of handlers) {
+        try {
+          handler(data);
+        } catch (err) {
+          logger.debug("Connect", "Event handler error", err);
         }
       }
     }
@@ -600,6 +730,7 @@ var SphereConnect = (() => {
       if (!this.handshakeResolver) return;
       clearTimeout(this.handshakeResolver.timer);
       const m = msg;
+      this.walletProto = msg.v ?? null;
       if (m.error) {
         this.handshakeResolver.reject(new ConnectError(m.error.message, m.error.code, m.error.data));
         this.handshakeResolver = null;
@@ -610,12 +741,16 @@ var SphereConnect = (() => {
         this.grantedPermissions = msg.permissions;
         this.identity = msg.identity;
         this.walletNet = m.network ?? null;
+        this.locked = m.locked === true;
         this.connected = true;
         if (m.warning) logger.warn("Connect", "Wallet deprecation notice", m.warning.message);
         this.handshakeResolver.resolve({
           sessionId: msg.sessionId,
           permissions: this.grantedPermissions,
-          identity: msg.identity
+          identity: msg.identity,
+          // A resume DURING a lock succeeds: the dApp is connected on the same session and
+          // must not re-handshake. It will get wallet:unlocked when the user unlocks.
+          ...this.locked ? { locked: true } : {}
         });
       } else {
         this.handshakeResolver.reject(new Error("Connection rejected by wallet"));
@@ -641,9 +776,19 @@ var SphereConnect = (() => {
         this.unsubscribeTransport();
         this.unsubscribeTransport = null;
       }
+      if (this.handshakeResolver) {
+        clearTimeout(this.handshakeResolver.timer);
+        this.handshakeResolver.reject(new ConnectError("Disconnected", ERROR_CODES.NOT_CONNECTED));
+        this.handshakeResolver = null;
+      }
       for (const [, pending] of this.pendingRequests) {
         clearTimeout(pending.timer);
-        pending.reject(new Error("Disconnected"));
+        pending.reject(
+          pending.kind === "intent" ? new ConnectError(
+            "Intent outcome unknown \u2014 do not retry; reconcile before acting",
+            ERROR_CODES.INTENT_OUTCOME_UNKNOWN
+          ) : new ConnectError("Disconnected", ERROR_CODES.NOT_CONNECTED)
+        );
       }
       this.pendingRequests.clear();
       this.eventHandlers.clear();
@@ -652,6 +797,8 @@ var SphereConnect = (() => {
       this.grantedPermissions = [];
       this.identity = null;
       this.walletNet = null;
+      this.walletProto = null;
+      this.locked = false;
     }
   };
 
@@ -659,64 +806,13 @@ var SphereConnect = (() => {
   function majorOf(v) {
     return parseInt(String(v).split(".")[0], 10);
   }
-  var STORAGE_KEYS_GLOBAL2 = {
-    /** Encrypted BIP39 mnemonic */
-    MNEMONIC: "mnemonic",
-    /** Encrypted master private key */
-    MASTER_KEY: "master_key",
-    /** BIP32 chain code */
-    CHAIN_CODE: "chain_code",
-    /** HD derivation path (full path like m/44'/0'/0'/0/0) */
-    DERIVATION_PATH: "derivation_path",
-    /** Base derivation path (like m/44'/0'/0' without chain/index) */
-    BASE_PATH: "base_path",
-    /** Derivation mode: bip32, wif_hmac, legacy_hmac */
-    DERIVATION_MODE: "derivation_mode",
-    /** Wallet source: mnemonic, file, unknown */
-    WALLET_SOURCE: "wallet_source",
-    /** Wallet existence flag */
-    WALLET_EXISTS: "wallet_exists",
-    /** Current active address index */
-    CURRENT_ADDRESS_INDEX: "current_address_index",
-    /** Nametag cache per address (separate from tracked addresses registry) */
-    ADDRESS_NAMETAGS: "address_nametags",
-    /** Active addresses registry (JSON: TrackedAddressesStorage) */
-    TRACKED_ADDRESSES: "tracked_addresses",
-    /** Last processed Nostr wallet event timestamp (unix seconds), keyed per pubkey */
-    LAST_WALLET_EVENT_TS: "last_wallet_event_ts",
-    /** Last processed Nostr DM (gift-wrap) event timestamp (unix seconds), keyed per pubkey */
-    LAST_DM_EVENT_TS: "last_dm_event_ts",
-    /** Group chat: last used relay URL (stale data detection) — global, same relay for all addresses */
-    GROUP_CHAT_RELAY_URL: "group_chat_relay_url",
-    /** Cached token registry JSON (fetched from remote) */
-    TOKEN_REGISTRY_CACHE: "token_registry_cache",
-    /** Timestamp of last token registry cache update (ms since epoch) */
-    TOKEN_REGISTRY_CACHE_TS: "token_registry_cache_ts",
-    /** Cached price data JSON (from CoinGecko or other provider) */
-    PRICE_CACHE: "price_cache",
-    /** Timestamp of last price cache update (ms since epoch) */
-    PRICE_CACHE_TS: "price_cache_ts"
-  };
   var STORAGE_KEYS_ADDRESS2 = {
-    /** Pending transfers for this address */
-    PENDING_TRANSFERS: "pending_transfers",
-    /** Transfer outbox for this address */
+    /** Transfer outbox for this address (pre-flip key name; kept as the network-scoping witness) */
     OUTBOX: "outbox",
     /** Conversations for this address */
     CONVERSATIONS: "conversations",
     /** Messages for this address */
     MESSAGES: "messages",
-    /** Transaction history for this address */
-    TRANSACTION_HISTORY: "transaction_history",
-    /** Pending V5 finalization tokens (unconfirmed instant split tokens) */
-    PENDING_V5_TOKENS: "pending_v5_tokens",
-    /**
-     * FINISHED v2 token blobs awaiting transport delivery. Written the moment a
-     * transfer/split output is certified on-chain (the source is already spent),
-     * removed after successful delivery — survives transport failures + crashes
-     * so the recipient's token is never lost with the process.
-     */
-    PENDING_V2_DELIVERIES: "pending_v2_deliveries",
     /** Group chat: joined groups for this address */
     GROUP_CHAT_GROUPS: "group_chat_groups",
     /** Group chat: messages for this address */
@@ -725,47 +821,17 @@ var SphereConnect = (() => {
     GROUP_CHAT_MEMBERS: "group_chat_members",
     /** Group chat: processed event IDs for deduplication */
     GROUP_CHAT_PROCESSED_EVENTS: "group_chat_processed_events",
-    /** Processed V5 split group IDs for Nostr re-delivery dedup */
-    PROCESSED_SPLIT_GROUP_IDS: "processed_split_group_ids",
-    /** Processed V6 combined transfer IDs for Nostr re-delivery dedup */
-    PROCESSED_COMBINED_TRANSFER_IDS: "processed_combined_transfer_ids",
-    // Invoice / Accounting storage keys
-    /** Set of cancelled invoice IDs (JSON string array) */
-    CANCELLED_INVOICES: "cancelled_invoices",
-    /** Set of closed invoice IDs (JSON string array) */
-    CLOSED_INVOICES: "closed_invoices",
-    /** Frozen balances for terminated invoices (JSON map: invoiceId → FrozenInvoiceBalances) */
-    FROZEN_BALANCES: "frozen_balances",
-    /** Auto-return settings (JSON: AutoReturnSettings) */
+    /** Auto-return settings (pre-flip key name; kept as the network-scoping witness) */
     AUTO_RETURN: "auto_return",
-    /** Auto-return dedup ledger (JSON: AutoReturnLedger) */
+    /** Auto-return dedup ledger (pre-flip key name; kept as the network-scoping witness) */
     AUTO_RETURN_LEDGER: "auto_return_ledger",
-    /** Invoice-transfer index metadata (JSON: Record<invoiceId, { terminated, frozenAt? }>) */
-    INV_LEDGER_INDEX: "inv_ledger_index",
-    /** Token scan state watermarks (JSON: Record<tokenId, txCount>) */
-    TOKEN_SCAN_STATE: "token_scan_state",
-    // Swap storage keys
-    /** Per-swap key: swap:{swapId} */
-    SWAP_RECORD_PREFIX: "swap:",
-    /** Lightweight index array for listing */
-    SWAP_INDEX: "swap_index"
+    /** Per-swap key prefix (pre-flip key name; kept as the network-scoping witness) */
+    SWAP_RECORD_PREFIX: "swap:"
   };
   var NETWORK_SCOPED_ADDRESS_KEYS2 = [
-    STORAGE_KEYS_ADDRESS2.PENDING_TRANSFERS,
     STORAGE_KEYS_ADDRESS2.OUTBOX,
-    STORAGE_KEYS_ADDRESS2.TRANSACTION_HISTORY,
-    STORAGE_KEYS_ADDRESS2.PENDING_V5_TOKENS,
-    STORAGE_KEYS_ADDRESS2.PENDING_V2_DELIVERIES,
-    STORAGE_KEYS_ADDRESS2.PROCESSED_SPLIT_GROUP_IDS,
-    STORAGE_KEYS_ADDRESS2.PROCESSED_COMBINED_TRANSFER_IDS,
-    STORAGE_KEYS_ADDRESS2.CANCELLED_INVOICES,
-    STORAGE_KEYS_ADDRESS2.CLOSED_INVOICES,
-    STORAGE_KEYS_ADDRESS2.FROZEN_BALANCES,
     STORAGE_KEYS_ADDRESS2.AUTO_RETURN,
-    STORAGE_KEYS_ADDRESS2.AUTO_RETURN_LEDGER,
-    STORAGE_KEYS_ADDRESS2.INV_LEDGER_INDEX,
-    STORAGE_KEYS_ADDRESS2.TOKEN_SCAN_STATE,
-    STORAGE_KEYS_ADDRESS2.SWAP_INDEX
+    STORAGE_KEYS_ADDRESS2.AUTO_RETURN_LEDGER
   ];
   var NETWORK_SCOPED_ADDRESS_PREFIXES2 = [
     STORAGE_KEYS_ADDRESS2.SWAP_RECORD_PREFIX,
@@ -773,10 +839,6 @@ var SphereConnect = (() => {
     "inv_ledger:"
     // AccountingModule INV_LEDGER_PREFIX
   ];
-  var STORAGE_KEYS2 = {
-    ...STORAGE_KEYS_GLOBAL2,
-    ...STORAGE_KEYS_ADDRESS2
-  };
   var DEFAULT_NOSTR_RELAYS2 = [
     "wss://relay.unicity.network",
     "wss://relay.damus.io",
@@ -785,9 +847,6 @@ var SphereConnect = (() => {
   ];
   var DEFAULT_AGGREGATOR_URL2 = "https://aggregator.unicity.network/rpc";
   var DEV_AGGREGATOR_URL2 = "https://dev-aggregator.dyndns.org/rpc";
-  var DEFAULT_IPFS_GATEWAYS2 = [
-    "https://unicity-ipfs1.dyndns.org"
-  ];
   var DEFAULT_BASE_PATH2 = "m/44'/0'/0'";
   var DEFAULT_DERIVATION_PATH2 = `${DEFAULT_BASE_PATH2}/0/0`;
   var TOKEN_REGISTRY_URL2 = "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet.json";
@@ -802,7 +861,6 @@ var SphereConnect = (() => {
       name: "Mainnet",
       aggregatorUrl: DEFAULT_AGGREGATOR_URL2,
       nostrRelays: DEFAULT_NOSTR_RELAYS2,
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS2,
       groupRelays: DEFAULT_GROUP_RELAYS2,
       tokenRegistryUrl: TOKEN_REGISTRY_URL2
     },
@@ -816,7 +874,6 @@ var SphereConnect = (() => {
       aggregatorUrl: "https://gateway.testnet2.unicity.network",
       nostrRelays: TEST_NOSTR_RELAYS2,
       // reuse testnet infra (shared relays/ipfs)
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS2,
       groupRelays: DEFAULT_GROUP_RELAYS2,
       tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
     },
@@ -827,7 +884,6 @@ var SphereConnect = (() => {
       aggregatorUrl: "https://gateway.testnet2.unicity.network",
       nostrRelays: TEST_NOSTR_RELAYS2,
       // reuse testnet infra (shared relays/ipfs)
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS2,
       groupRelays: DEFAULT_GROUP_RELAYS2,
       tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
     },
@@ -838,7 +894,6 @@ var SphereConnect = (() => {
       name: "Development",
       aggregatorUrl: DEV_AGGREGATOR_URL2,
       nostrRelays: TEST_NOSTR_RELAYS2,
-      ipfsGateways: DEFAULT_IPFS_GATEWAYS2,
       groupRelays: DEFAULT_GROUP_RELAYS2,
       tokenRegistryUrl: TOKEN_REGISTRY_URL2
     }
@@ -847,7 +902,7 @@ var SphereConnect = (() => {
     testnet2: { id: NETWORKS2.testnet2.networkId, name: "testnet2" }
   };
   var SPHERE_CONNECT_NAMESPACE2 = "sphere-connect";
-  var SPHERE_CONNECT_VERSION2 = "2.0";
+  var SPHERE_CONNECT_VERSION2 = "2.1";
   var RPC_METHODS2 = {
     GET_IDENTITY: "sphere_getIdentity",
     GET_BALANCE: "sphere_getBalance",
@@ -862,9 +917,7 @@ var SphereConnect = (() => {
     GET_CONVERSATIONS: "sphere_getConversations",
     GET_MESSAGES: "sphere_getMessages",
     GET_DM_UNREAD_COUNT: "sphere_getDMUnreadCount",
-    MARK_AS_READ: "sphere_markAsRead",
-    GET_INVOICES: "sphere_getInvoices",
-    GET_INVOICE_STATUS: "sphere_getInvoiceStatus"
+    MARK_AS_READ: "sphere_markAsRead"
   };
   var INTENT_ACTIONS2 = {
     SEND: "send",
@@ -872,17 +925,77 @@ var SphereConnect = (() => {
     PAYMENT_REQUEST: "payment_request",
     RECEIVE: "receive",
     SIGN_MESSAGE: "sign_message",
-    CREATE_INVOICE: "create_invoice",
-    CLOSE_INVOICE: "close_invoice",
-    CANCEL_INVOICE: "cancel_invoice",
-    PAY_INVOICE: "pay_invoice",
-    RETURN_INVOICE_PAYMENT: "return_invoice_payment",
-    IMPORT_INVOICE: "import_invoice",
-    SEND_INVOICE_RECEIPTS: "send_invoice_receipts",
-    SEND_CANCELLATION_NOTICES: "send_cancellation_notices",
-    SET_AUTO_RETURN: "set_auto_return",
     MINT: "mint"
   };
+  var ERROR_CODES2 = {
+    // Standard JSON-RPC
+    PARSE_ERROR: -32700,
+    INVALID_REQUEST: -32600,
+    METHOD_NOT_FOUND: -32601,
+    INVALID_PARAMS: -32602,
+    INTERNAL_ERROR: -32603,
+    // Sphere Connect (4xxx)
+    NOT_CONNECTED: 4001,
+    PERMISSION_DENIED: 4002,
+    USER_REJECTED: 4003,
+    SESSION_EXPIRED: 4004,
+    ORIGIN_BLOCKED: 4005,
+    RATE_LIMITED: 4006,
+    UNSUPPORTED_PROTOCOL_VERSION: 4007,
+    // Connect MAJOR mismatch (incompatible era)
+    INCOMPATIBLE_NETWORK: 4008,
+    // dApp targets a different network than the wallet
+    // Wallet locked; THE SESSION IS STILL ALIVE. A QUERY may be retried after wallet:unlocked.
+    // An INTENT already delegated to the wallet is NEVER answered with this code — it gets
+    // INTENT_OUTCOME_UNKNOWN (4201) instead, because a retry could double-spend.
+    WALLET_LOCKED: 4009,
+    INSUFFICIENT_BALANCE: 4100,
+    INVALID_RECIPIENT: 4101,
+    TRANSFER_FAILED: 4102,
+    INTENT_CANCELLED: 4200,
+    /**
+     * The intent was DELEGATED to the wallet and the host lost track of the answer — a host
+     * deadline fired, or the wallet locked / logged out mid-flight. **The outcome is UNKNOWN:
+     * the money may or may not have moved.**
+     *
+     * A dApp MUST NOT retry on this code. Reconcile out of band (poll the recipient, the
+     * aggregator, or your own backend) and only then decide.
+     *
+     * This code exists because every other answer would be a lie. `INTENT_CANCELLED` (4200)
+     * asserts the user declined and nothing happened; `WALLET_LOCKED` (4009) invites a retry
+     * after the unlock. Sending either for an intent the wallet had already submitted is how a
+     * paid-but-not-credited order — and then a double spend on retry — happens.
+     */
+    INTENT_OUTCOME_UNKNOWN: 4201
+  };
+  var WALLET_EVENTS2 = {
+    /** Wallet is LOCKED — the session is STILL ALIVE. Requests are answered
+     *  WALLET_LOCKED (4009) until `wallet:unlocked`. The dApp must NOT disconnect,
+     *  must NOT clear its sessionId, and must NOT re-handshake.
+     *  Payload: {@link WalletLockedPayload}. Pushed by ConnectHost.setLocked() and
+     *  immediately after a handshake response carrying `locked: true`. */
+    LOCKED: "wallet:locked",
+    /** Wallet was unlocked — the SAME session continues: no re-handshake, no re-approval,
+     *  no re-subscribe (the host re-arms the dApp's subscriptions before pushing this).
+     *  Payload: {@link WalletUnlockedPayload} — carries the CURRENT identity, which may
+     *  differ from the one the dApp connected with. Pushed by ConnectHost.updateSphere()
+     *  on the locked -> live edge only. */
+    UNLOCKED: "wallet:unlocked",
+    /** The session is GONE (logout, wallet deleted, dApp sphere_disconnect, expiry seen at
+     *  unlock, a different seed behind the lock screen, host destroy).
+     *  The dApp must clear its session and re-handshake to continue. Unlocking does not cure it.
+     *  Payload: {@link WalletDisconnectedPayload}. Pushed by ConnectHost.revokeSession(). */
+    DISCONNECTED: "wallet:disconnected",
+    /** Active wallet address changed. dApp should update displayed identity.
+     *  Pushed automatically by ConnectHost — no sphere_subscribe needed. */
+    IDENTITY_CHANGED: "identity:changed"
+  };
+  var AUTO_PUSHED_EVENTS2 = [
+    WALLET_EVENTS2.LOCKED,
+    WALLET_EVENTS2.UNLOCKED,
+    WALLET_EVENTS2.DISCONNECTED,
+    WALLET_EVENTS2.IDENTITY_CHANGED
+  ];
   function isSphereConnectMessage(msg) {
     if (!msg || typeof msg !== "object") return false;
     const m = msg;
@@ -904,9 +1017,7 @@ var SphereConnect = (() => {
     DM_MANAGE: "dm:manage",
     PAYMENT_REQUEST: "payment:request",
     SIGN_REQUEST: "sign:request",
-    MINT_REQUEST: "mint:request",
-    INVOICE_READ: "invoice:read",
-    INVOICE_WRITE: "invoice:write"
+    MINT_REQUEST: "mint:request"
   };
   var ALL_PERMISSIONS2 = Object.values(PERMISSION_SCOPES2);
   var DEFAULT_PERMISSIONS2 = [
@@ -925,9 +1036,7 @@ var SphereConnect = (() => {
     [RPC_METHODS2.GET_CONVERSATIONS]: PERMISSION_SCOPES2.DM_READ,
     [RPC_METHODS2.GET_MESSAGES]: PERMISSION_SCOPES2.DM_READ,
     [RPC_METHODS2.GET_DM_UNREAD_COUNT]: PERMISSION_SCOPES2.DM_READ,
-    [RPC_METHODS2.MARK_AS_READ]: PERMISSION_SCOPES2.DM_MANAGE,
-    [RPC_METHODS2.GET_INVOICES]: PERMISSION_SCOPES2.INVOICE_READ,
-    [RPC_METHODS2.GET_INVOICE_STATUS]: PERMISSION_SCOPES2.INVOICE_READ
+    [RPC_METHODS2.MARK_AS_READ]: PERMISSION_SCOPES2.DM_MANAGE
   };
   var INTENT_PERMISSIONS2 = {
     [INTENT_ACTIONS2.SEND]: PERMISSION_SCOPES2.TRANSFER_REQUEST,
@@ -935,18 +1044,146 @@ var SphereConnect = (() => {
     [INTENT_ACTIONS2.PAYMENT_REQUEST]: PERMISSION_SCOPES2.PAYMENT_REQUEST,
     [INTENT_ACTIONS2.RECEIVE]: PERMISSION_SCOPES2.IDENTITY_READ,
     [INTENT_ACTIONS2.SIGN_MESSAGE]: PERMISSION_SCOPES2.SIGN_REQUEST,
-    [INTENT_ACTIONS2.CREATE_INVOICE]: PERMISSION_SCOPES2.INVOICE_WRITE,
-    [INTENT_ACTIONS2.CLOSE_INVOICE]: PERMISSION_SCOPES2.INVOICE_WRITE,
-    [INTENT_ACTIONS2.CANCEL_INVOICE]: PERMISSION_SCOPES2.INVOICE_WRITE,
-    [INTENT_ACTIONS2.PAY_INVOICE]: PERMISSION_SCOPES2.TRANSFER_REQUEST,
-    [INTENT_ACTIONS2.RETURN_INVOICE_PAYMENT]: PERMISSION_SCOPES2.TRANSFER_REQUEST,
-    [INTENT_ACTIONS2.IMPORT_INVOICE]: PERMISSION_SCOPES2.INVOICE_WRITE,
-    [INTENT_ACTIONS2.SEND_INVOICE_RECEIPTS]: PERMISSION_SCOPES2.INVOICE_WRITE,
-    [INTENT_ACTIONS2.SEND_CANCELLATION_NOTICES]: PERMISSION_SCOPES2.INVOICE_WRITE,
-    [INTENT_ACTIONS2.SET_AUTO_RETURN]: PERMISSION_SCOPES2.INVOICE_WRITE,
     [INTENT_ACTIONS2.MINT]: PERMISSION_SCOPES2.MINT_REQUEST
   };
+  var SETTLED_STATUSES2 = /* @__PURE__ */ new Set([
+    "confirmed",
+    "delivered",
+    "completed"
+  ]);
+  var REALTIME_STATUS2 = {
+    connected: "connected",
+    degraded: "reconnecting",
+    offline: "closed"
+  };
+  function toLegacyRequest2(view, status) {
+    return { ...view, symbol: view.symbol ?? "", status };
+  }
+  function paymentsOrNull2(sphere) {
+    try {
+      return sphere.payments;
+    } catch {
+      return null;
+    }
+  }
+  function legacyRequestPayload2(sphere, update) {
+    const view = paymentsOrNull2(sphere)?.requests.list().find((request) => request.id === update.id);
+    if (!view) {
+      return {
+        id: update.id,
+        requestId: update.id,
+        senderPubkey: "",
+        amount: "",
+        coinId: "",
+        symbol: "",
+        timestamp: Date.now(),
+        status: update.status
+      };
+    }
+    return toLegacyRequest2(view, update.status);
+  }
+  function requestStatusAttacher2(status) {
+    return (sphere, forward) => sphere.on("payment_request:updated", (update) => {
+      if (update.status === status) forward(legacyRequestPayload2(sphere, update));
+    });
+  }
+  function attentionAttacher2(code, toLegacy) {
+    return (sphere, forward) => sphere.on("transfer:attention", (attention) => {
+      if (attention.code === code) forward(toLegacy(attention));
+    });
+  }
+  function remoteUpdateAttacher2(sphere, forward) {
+    let sequence = 0;
+    return sphere.on("inventory:updated", () => {
+      sequence += 1;
+      forward({ providerId: "wallet-api", name: "wallet-api", sequence, cid: "", added: 0, removed: 0 });
+    });
+  }
+  var COMPAT_ATTACHERS2 = /* @__PURE__ */ new Map([
+    // Old completion split, held: deliveryPending ? delivery_pending : confirmed, plus the
+    // failed arm (manifest judgment call #1). Payloads are the TransferResult, unchanged.
+    ["transfer:confirmed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
+      if (SETTLED_STATUSES2.has(result.status) && result.deliveryPending !== true) forward(result);
+    })],
+    ["transfer:delivery_pending", (sphere, forward) => sphere.on("transfer:updated", (result) => {
+      if (result.status !== "failed" && result.deliveryPending === true) forward(result);
+    })],
+    ["transfer:failed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
+      if (result.status === "failed") forward(result);
+    })],
+    // Same name on both wires, different payload: the raw v2 view has optional `symbol`;
+    // legacy subscribers get the IncomingPaymentRequest shape via the shared mapping.
+    ["payment_request:incoming", (sphere, forward) => sphere.on("payment_request:incoming", (view) => {
+      forward(toLegacyRequest2(view, view.status));
+    })],
+    ["payment_request:paid", requestStatusAttacher2("paid")],
+    ["payment_request:rejected", requestStatusAttacher2("rejected")],
+    ["payment_request:expired", requestStatusAttacher2("expired")],
+    // detail carries the old inner code (SPLIT_CHECKPOINT_LOST / CHECKPOINT_TRUSTBASE_MISMATCH).
+    ["split:checkpoint-stuck", attentionAttacher2("split:checkpoint-stuck", (attention) => ({
+      transferId: attention.transferId,
+      code: attention.detail ?? "",
+      error: attention.detail ?? ""
+    }))],
+    ["delivery:undeliverable", attentionAttacher2("delivery:undeliverable", (attention) => ({
+      transferId: attention.transferId,
+      recipientPubkey: "",
+      attempts: 0,
+      error: attention.detail ?? ""
+    }))],
+    ["delivery:deferred", attentionAttacher2("delivery:deferred", (attention) => ({
+      transferId: attention.transferId,
+      recipientPubkey: "",
+      reason: attention.detail ?? attention.code,
+      deferredUntil: 0
+    }))],
+    ["realtime:status", (sphere, forward) => sphere.on("connection:status", (connection) => {
+      forward({ status: REALTIME_STATUS2[connection.status] ?? "closed" });
+    })],
+    // The server IS storage on the v2 vertical — a degraded connection is degraded storage.
+    ["storage:degraded", (sphere, forward) => sphere.on("connection:status", (connection) => {
+      if (connection.status !== "degraded") return;
+      forward({ providerId: "wallet-api", error: "wallet-api connection degraded" });
+    })],
+    ["sync:completed", (sphere, forward) => sphere.on("inventory:updated", () => {
+      forward({ source: "payments", count: paymentsOrNull2(sphere)?.tokens().length ?? 0 });
+    })],
+    ["sync:remote-update", remoteUpdateAttacher2]
+  ]);
+  var WALLET_LOCKED_MESSAGE2 = "Wallet is locked";
+  var NOT_CONNECTED_MESSAGE2 = "Not connected";
+  var LOCKED_ALLOWLIST2 = /* @__PURE__ */ new Set([
+    RPC_METHODS2.GET_IDENTITY,
+    RPC_METHODS2.SUBSCRIBE,
+    RPC_METHODS2.UNSUBSCRIBE,
+    RPC_METHODS2.DISCONNECT
+  ]);
+  var REFUSE_NOT_CONNECTED2 = {
+    kind: "refuse",
+    error: { code: ERROR_CODES2.NOT_CONNECTED, message: NOT_CONNECTED_MESSAGE2 }
+  };
+  var REFUSE_LOCKED2 = {
+    kind: "refuse",
+    error: {
+      code: ERROR_CODES2.WALLET_LOCKED,
+      message: WALLET_LOCKED_MESSAGE2,
+      data: { reason: "locked" }
+    }
+  };
+  var EMPTY_WALLET_SNAPSHOT2 = Object.freeze({ capturedAt: 0 });
+  var CHANNEL_ONLY_CODES2 = /* @__PURE__ */ new Set([
+    ERROR_CODES2.WALLET_LOCKED,
+    ERROR_CODES2.NOT_CONNECTED
+  ]);
   var POPUP_CLOSE_CHECK_INTERVAL = 1e3;
+  function originOf(targetOrigin) {
+    if (targetOrigin === "*") return null;
+    try {
+      return [new URL(targetOrigin).origin];
+    } catch {
+      return null;
+    }
+  }
   var PostMessageTransport = class _PostMessageTransport {
     constructor(targetWindow, targetOrigin, allowedOrigins) {
       __publicField(this, "targetWindow");
@@ -960,6 +1197,9 @@ var SphereConnect = (() => {
       this.targetOrigin = targetOrigin;
       this.allowedOrigins = allowedOrigins ? new Set(allowedOrigins) : null;
       this.listener = (event) => {
+        if (event.source && event.source !== this.targetWindow) {
+          return;
+        }
         if (this.allowedOrigins && !this.allowedOrigins.has("*") && !this.allowedOrigins.has(event.origin)) {
           return;
         }
@@ -998,7 +1238,8 @@ var SphereConnect = (() => {
     static forClient(options) {
       const target = options?.target ?? window.parent;
       const targetOrigin = options?.targetOrigin ?? "*";
-      const transport2 = new _PostMessageTransport(target, targetOrigin, null);
+      const allowedOrigins = originOf(targetOrigin);
+      const transport2 = new _PostMessageTransport(target, targetOrigin, allowedOrigins);
       if (options?.target && options.target !== window.parent) {
         transport2.startPopupCloseDetection(options.target);
       }
@@ -1189,7 +1430,8 @@ var SphereConnect = (() => {
     isDepositPaid: false,
     identity: null,
     balance: null,
-    error: null
+    error: null,
+    outcomeUnknown: false
   };
   function isInIframe() {
     try {
@@ -1326,6 +1568,7 @@ var SphereConnect = (() => {
     state.identity = null;
     state.balance = null;
     state.error = null;
+    state.outcomeUnknown = false;
     updateUI("disconnected");
   }
   async function refreshBalance() {
@@ -1349,8 +1592,30 @@ var SphereConnect = (() => {
       state.balance = null;
     }
   }
+  function toBaseUnits(wholeTokens, decimals) {
+    if (!Number.isFinite(wholeTokens) || wholeTokens <= 0) {
+      throw new Error(`Invalid amount: ${wholeTokens}`);
+    }
+    if (!Number.isInteger(decimals) || decimals < 0) {
+      throw new Error(`Invalid decimals: ${decimals}`);
+    }
+    const scale = 10n ** BigInt(decimals);
+    if (Number.isInteger(wholeTokens)) {
+      return (BigInt(wholeTokens) * scale).toString();
+    }
+    const [intPart, fracPart = ""] = wholeTokens.toFixed(decimals).split(".");
+    const frac = (fracPart + "0".repeat(decimals)).slice(0, decimals);
+    const units = BigInt(intPart) * scale + BigInt(frac || "0");
+    if (units <= 0n) throw new Error(`Amount ${wholeTokens} is below one base unit`);
+    return units.toString();
+  }
   async function deposit(amount) {
     const sendAmount = amount ?? ENTRY_FEE;
+    if (state.outcomeUnknown) {
+      state.error = "A previous payment's outcome is still unknown. Reload the page and check your balance before paying again.";
+      updateUI("connected");
+      return false;
+    }
     if (!client || !state.isConnected) {
       state.error = "Not connected";
       return false;
@@ -1372,9 +1637,10 @@ var SphereConnect = (() => {
         uctCoinId = UCT_COIN_ID_HEX;
         uctDecimals = UCT_DECIMALS;
       }
+      if (!uctDecimals) uctDecimals = UCT_DECIMALS;
       await client.intent(INTENT_ACTIONS.SEND, {
         to: gameWalletAddress(),
-        amount: sendAmount,
+        amount: toBaseUnits(sendAmount, uctDecimals),
         coinId: uctCoinId,
         memo: "Boxy Run entry fee"
       });
@@ -1384,6 +1650,20 @@ var SphereConnect = (() => {
       updateUI("ready");
       return true;
     } catch (err) {
+      const code = err?.code;
+      if (code === ERROR_CODES.INTENT_OUTCOME_UNKNOWN) {
+        state.outcomeUnknown = true;
+        state.error = "Payment sent, but the wallet could not confirm the outcome. Do NOT pay again \u2014 if it went through, your balance updates on its own within a minute.";
+        state.isDepositPaid = false;
+        updateUI("connected");
+        return false;
+      }
+      if (code === ERROR_CODES.WALLET_LOCKED) {
+        state.error = "Wallet is locked. Unlock it in Sphere, then try again.";
+        state.isDepositPaid = false;
+        updateUI("connected");
+        return false;
+      }
       state.error = err instanceof Error ? err.message : "Deposit failed";
       state.isDepositPaid = false;
       updateUI("connected");
@@ -1558,6 +1838,9 @@ var SphereConnect = (() => {
     },
     get error() {
       return state.error;
+    },
+    get outcomeUnknown() {
+      return state.outcomeUnknown;
     },
     get entryFee() {
       return ENTRY_FEE;

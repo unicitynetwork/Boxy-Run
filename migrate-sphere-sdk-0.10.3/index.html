@@ -745,11 +745,19 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
     const msg=w.error||'Transfer cancelled';
     // Distinguish hard errors (insufficient balance, etc.) from a user-cancel.
     // Red for errors that require action; muted gray for plain cancellation.
-    const isError=/insufficient|not connected|required|failed|error/i.test(msg);
+    const isError=/insufficient|not connected|required|failed|error|unknown/i.test(msg);
     status.textContent=msg;
     status.style.color=isError?'var(--red,#ef4444)':'var(--text3)';
     status.style.fontSize=isError?'12px':'11px';
     status.style.fontWeight=isError?'600':'400';
+  }
+  // INTENT_OUTCOME_UNKNOWN: the wallet had the payment and its fate is unknown.
+  // Re-enabling Transfer here is exactly the second spend the code must not
+  // invite — leave it disabled and make a reload the only way forward.
+  if(w.outcomeUnknown){
+    btn.disabled=true;
+    btn.textContent='Reload to continue';
+    return;
   }
   btn.disabled=false;
   btn.textContent='Transfer';
