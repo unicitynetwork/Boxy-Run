@@ -270,8 +270,8 @@ export async function startArenaWatcher(): Promise<void> {
 	// Sphere network and throws INVALID_CONFIG on any difference, and the
 	// wallet-api auth challenge embeds the backend's own network name which the
 	// SDK verifies against ours. 'testnet2' is what both deployed backends issue.
-	// mainnet/dev have no embedded trust base and are refused at provider
-	// creation.
+	// Only testnet2 is wired up here: the relay, the aggregator key default and
+	// UCT_COIN_ID_HEX are all testnet2's.
 	const network = (process.env.SPHERE_NETWORK || 'testnet2') as 'testnet' | 'testnet2';
 	const dataDir = process.env.SPHERE_DATA_DIR || '/data/arena-sphere';
 	if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
@@ -330,16 +330,25 @@ export async function startArenaWatcher(): Promise<void> {
 	// still passed below so the masterKey path stays correct if this ever grows
 	// one, but do not read its presence as proof the mode is being honoured.
 	//
-	// Known cost: `Sphere.import` clears existing storage first, so each boot
-	// drops the scoped KV (refresh token, receive seen-set, delivery journal)
-	// and re-runs the challenge sign-in. Harmless here because the server is the
-	// record and `tx_id` is UNIQUE, so a replayed credit is a no-op insert.
+	// `overwrite: true` is required, not optional. Since sphere-sdk 0.17.4,
+	// `Sphere.import` refuses with ALREADY_INITIALIZED over a storage that
+	// already holds a wallet, and `dataDir` sits on the Fly volume, so without
+	// it every boot after the first dies. Replacing rather than `load`ing keeps
+	// ARENA_WALLET_FILE authoritative: a rotated secret takes effect on the next
+	// boot instead of the old wallet on the volume being silently watched.
+	//
+	// Known cost: the overwrite clears the whole store, so each boot drops the
+	// scoped KV (refresh token, receive seen-set, delivery journal) and re-runs
+	// the challenge sign-in. Harmless here: this wallet only receives, so there
+	// are no outgoing intents in that journal to lose, the server is the record,
+	// and `tx_id` is UNIQUE, so a replayed credit is a no-op insert.
 	//
 	// `network` MUST be passed: it is compared against walletApi.network, and
 	// omitting it (as this call used to) is an immediate INVALID_CONFIG.
 	sphere = await sdk.Sphere.import({
 		mnemonic: wallet.mnemonic,
 		network,
+		overwrite: true,
 		...(wallet.derivationMode ? { derivationMode: wallet.derivationMode } : {}),
 		...(wallet.basePath ? { basePath: wallet.basePath } : {}),
 		...providers,

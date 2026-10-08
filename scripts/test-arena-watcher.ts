@@ -82,9 +82,13 @@ async function main() {
 	});
 
 	console.log('→ Importing wallet from mnemonic…');
+	// `overwrite: true`: since sphere-sdk 0.17.4 an import over a dataDir that
+	// already holds a wallet is refused with ALREADY_INITIALIZED, so a second run
+	// of this script would otherwise fail.
 	const sphere = await Sphere.import({
 		mnemonic,
 		network,
+		overwrite: true,
 		...(parsed.derivationMode ? { derivationMode: parsed.derivationMode } : {}),
 		...(parsed.wallet?.descriptorPath ? { basePath: parsed.wallet.descriptorPath } : {}),
 		...providers,

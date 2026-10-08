@@ -201,7 +201,7 @@ async function connect(): Promise<void> {
     //     = '0.14.1-0' (the P11 flip: the v1 payments era is gone). The
     //     ConnectClient reports its own package version, so a dApp bundled
     //     against sphere-sdk < 0.14.1 is refused at the handshake no matter
-    //     what it sends. That is the hard reason this app tracks 0.15.x.
+    //     what it sends. That floor is why this app cannot go back below 0.14.1.
     client = new ConnectClient({
       transport, dapp: dappMeta, permissions: [...dappPermissions], resumeSessionId,
       network: SPHERE_NETWORKS.testnet2,

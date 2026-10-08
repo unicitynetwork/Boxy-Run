@@ -41,7 +41,8 @@ import { Sphere, generateMnemonic } from '@unicitylabs/sphere-sdk';
 import { createNodeProviders } from '@unicitylabs/sphere-sdk/impl/nodejs';
 import { createWalletApiProviders } from '@unicitylabs/sphere-sdk/impl/shared/wallet-api';
 
-// mainnet/dev ship no embedded trust base and are refused at provider creation.
+// The defaults below (relay, aggregator key) are testnet2's; 'dev' no longer
+// exists in the SDK, and mainnet is not wired up here.
 type NetworkType = 'testnet' | 'testnet2';
 
 // See tournament/server/arena-watcher.ts for why these three must agree and why
