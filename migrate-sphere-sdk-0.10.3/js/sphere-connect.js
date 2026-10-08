@@ -4,7 +4,223 @@ var SphereConnect = (() => {
   var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // node_modules/@unicitylabs/sphere-sdk/dist/connect/index.js
+  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-47AV3W6I.js
+  var STORAGE_KEYS_ADDRESS = {
+    /** Transfer outbox for this address (pre-flip key name; kept as the network-scoping witness) */
+    OUTBOX: "outbox",
+    /** Conversations for this address */
+    CONVERSATIONS: "conversations",
+    /** Messages for this address */
+    MESSAGES: "messages",
+    /** Group chat: joined groups for this address */
+    GROUP_CHAT_GROUPS: "group_chat_groups",
+    /** Group chat: messages for this address */
+    GROUP_CHAT_MESSAGES: "group_chat_messages",
+    /** Group chat: members for this address */
+    GROUP_CHAT_MEMBERS: "group_chat_members",
+    /** Group chat: processed event IDs for deduplication */
+    GROUP_CHAT_PROCESSED_EVENTS: "group_chat_processed_events",
+    /** Auto-return settings (pre-flip key name; kept as the network-scoping witness) */
+    AUTO_RETURN: "auto_return",
+    /** Auto-return dedup ledger (pre-flip key name; kept as the network-scoping witness) */
+    AUTO_RETURN_LEDGER: "auto_return_ledger",
+    /** Per-swap key prefix (pre-flip key name; kept as the network-scoping witness) */
+    SWAP_RECORD_PREFIX: "swap:"
+  };
+  var NETWORK_SCOPED_ADDRESS_KEYS = [
+    STORAGE_KEYS_ADDRESS.OUTBOX,
+    STORAGE_KEYS_ADDRESS.AUTO_RETURN,
+    STORAGE_KEYS_ADDRESS.AUTO_RETURN_LEDGER
+  ];
+  var NETWORK_SCOPED_ADDRESS_PREFIXES = [
+    STORAGE_KEYS_ADDRESS.SWAP_RECORD_PREFIX,
+    // 'swap:'
+    "inv_ledger:"
+    // AccountingModule INV_LEDGER_PREFIX
+  ];
+  var DEFAULT_BASE_PATH = "m/44'/0'/0'";
+  var DEFAULT_DERIVATION_PATH = `${DEFAULT_BASE_PATH}/0/0`;
+  var TEST_NOSTR_RELAYS = [
+    "wss://nostr-relay.testnet.unicity.network"
+  ];
+  var DEFAULT_GROUP_RELAYS = [
+    "wss://sphere-relay.unicity.network"
+  ];
+  var TESTNET2_UCT_COIN_ID = "f581d30f593e4b369d684a4563b5246f07b1d265f7178a2c0a82b81f39c24dc0";
+  var NETWORKS = {
+    mainnet: {
+      name: "Mainnet",
+      networkId: 1,
+      // v3 state-transition gateway (networkId 1 comes from the trust base). apiKey is env-injected;
+      // unlike testnet2's, a mainnet gateway key is a SECRET — never commit one.
+      aggregatorUrl: "https://gateway.mainnet.unicity.network",
+      // Mainnet has no relay of its own yet — it shares the testnet relay until one is stood up.
+      // Consequence while shared: nametag bindings for both networks live in ONE namespace, and
+      // since bindings carry no network the cross-network recipient guard can only signal (#734).
+      nostrRelays: TEST_NOSTR_RELAYS,
+      groupRelays: DEFAULT_GROUP_RELAYS,
+      // Published, but currently only the non-fungible base token type — no fungible
+      // coins yet, so those still miss the registry (decimals 0, symbol falls back to
+      // six hex chars). Presentation only: the money path treats coinId as opaque bytes.
+      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.mainnet.json",
+      nftTokenType: "9f190eea6c8d7e1e564c35feb4c289add78be4bedb81bb77fe265e926e5493f4",
+      // No UCT coin id is published for mainnet yet (its registry lists no fungible coin).
+      nativeCoinIds: []
+    },
+    // v1 cutover: 'testnet' now POINTS AT TESTNET2 (the v2 gateway network). The
+    // old goggregator testnet spoke the removed v1 protocol — a v2 engine cannot
+    // run against it. 'testnet2' stays as an alias of the same configuration.
+    testnet: {
+      name: "Testnet",
+      networkId: 4,
+      // v2 state-transition gateway (networkId 4 comes from the trust base). apiKey is env-injected.
+      aggregatorUrl: "https://gateway.testnet2.unicity.network",
+      nostrRelays: TEST_NOSTR_RELAYS,
+      // reuse testnet infra (shared relays/ipfs)
+      groupRelays: DEFAULT_GROUP_RELAYS,
+      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json",
+      nftTokenType: "971a26eef0e3aeb22bd3e7d44c47ce963400037e8df42b50d4d44e1589f83826",
+      nativeCoinIds: [TESTNET2_UCT_COIN_ID]
+    },
+    testnet2: {
+      name: "Testnet",
+      networkId: 4,
+      // v2 state-transition gateway (networkId 4 comes from the trust base). apiKey is env-injected.
+      aggregatorUrl: "https://gateway.testnet2.unicity.network",
+      nostrRelays: TEST_NOSTR_RELAYS,
+      // reuse testnet infra (shared relays/ipfs)
+      groupRelays: DEFAULT_GROUP_RELAYS,
+      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json",
+      nftTokenType: "971a26eef0e3aeb22bd3e7d44c47ce963400037e8df42b50d4d44e1589f83826",
+      nativeCoinIds: [TESTNET2_UCT_COIN_ID]
+    }
+  };
+  var SPHERE_NETWORKS = {
+    mainnet: { id: NETWORKS.mainnet.networkId, name: "mainnet" },
+    testnet2: { id: NETWORKS.testnet2.networkId, name: "testnet2" }
+  };
+  var HOST_READY_TYPE = "sphere-connect:host-ready";
+  var HOST_READY_TIMEOUT = 3e4;
+  function majorOf(v) {
+    return parseInt(String(v).split(".")[0], 10);
+  }
+  var SPHERE_CONNECT_NAMESPACE = "sphere-connect";
+  var SPHERE_CONNECT_VERSION = "2.3";
+  var RPC_METHODS = {
+    GET_IDENTITY: "sphere_getIdentity",
+    GET_BALANCE: "sphere_getBalance",
+    GET_ASSETS: "sphere_getAssets",
+    GET_FIAT_BALANCE: "sphere_getFiatBalance",
+    GET_TOKENS: "sphere_getTokens",
+    GET_HISTORY: "sphere_getHistory",
+    RESOLVE: "sphere_resolve",
+    SUBSCRIBE: "sphere_subscribe",
+    UNSUBSCRIBE: "sphere_unsubscribe",
+    DISCONNECT: "sphere_disconnect",
+    GET_CONVERSATIONS: "sphere_getConversations",
+    GET_MESSAGES: "sphere_getMessages",
+    GET_DM_UNREAD_COUNT: "sphere_getDMUnreadCount",
+    MARK_AS_READ: "sphere_markAsRead"
+  };
+  var INTENT_ACTIONS = {
+    SEND: "send",
+    DM: "dm",
+    PAYMENT_REQUEST: "payment_request",
+    RECEIVE: "receive",
+    SIGN_MESSAGE: "sign_message",
+    MINT: "mint",
+    // #777: params { to, tokenId, memo? }. Named NFT rather than 'send_token':
+    // coins are tokens too, so 'token' does not say which kind moves.
+    SEND_NFT: "send_nft",
+    // Connect 2.3: params MintNftIntentParams, result MintNftIntentResult (connect/nft-wire.ts).
+    MINT_NFT: "mint_nft"
+  };
+  var ERROR_CODES = {
+    // Standard JSON-RPC
+    PARSE_ERROR: -32700,
+    INVALID_REQUEST: -32600,
+    METHOD_NOT_FOUND: -32601,
+    INVALID_PARAMS: -32602,
+    INTERNAL_ERROR: -32603,
+    // Sphere Connect (4xxx)
+    NOT_CONNECTED: 4001,
+    PERMISSION_DENIED: 4002,
+    USER_REJECTED: 4003,
+    SESSION_EXPIRED: 4004,
+    ORIGIN_BLOCKED: 4005,
+    RATE_LIMITED: 4006,
+    UNSUPPORTED_PROTOCOL_VERSION: 4007,
+    // Connect MAJOR mismatch (incompatible era)
+    INCOMPATIBLE_NETWORK: 4008,
+    // dApp targets a different network than the wallet
+    // Wallet locked; THE SESSION IS STILL ALIVE. A QUERY may be retried after wallet:unlocked.
+    // An INTENT already delegated to the wallet is NEVER answered with this code — it gets
+    // INTENT_OUTCOME_UNKNOWN (4201) instead, because a retry could double-spend.
+    WALLET_LOCKED: 4009,
+    INSUFFICIENT_BALANCE: 4100,
+    INVALID_RECIPIENT: 4101,
+    TRANSFER_FAILED: 4102,
+    INTENT_CANCELLED: 4200,
+    /**
+     * The intent was DELEGATED to the wallet and the host lost track of the answer — a host
+     * deadline fired, or the wallet locked / logged out mid-flight. **The outcome is UNKNOWN:
+     * the money may or may not have moved.**
+     *
+     * A dApp MUST NOT retry on this code. Reconcile out of band (poll the recipient, the
+     * aggregator, or your own backend) and only then decide.
+     *
+     * This code exists because every other answer would be a lie. `INTENT_CANCELLED` (4200)
+     * asserts the user declined and nothing happened; `WALLET_LOCKED` (4009) invites a retry
+     * after the unlock. Sending either for an intent the wallet had already submitted is how a
+     * paid-but-not-credited order — and then a double spend on retry — happens.
+     */
+    INTENT_OUTCOME_UNKNOWN: 4201
+  };
+  var WALLET_EVENTS = {
+    /** Wallet is LOCKED — the session is STILL ALIVE. Requests are answered
+     *  WALLET_LOCKED (4009) until `wallet:unlocked`. The dApp must NOT disconnect,
+     *  must NOT clear its sessionId, and must NOT re-handshake.
+     *  Payload: {@link WalletLockedPayload}. Pushed by ConnectHost.setLocked() and
+     *  immediately after a handshake response carrying `locked: true`. */
+    LOCKED: "wallet:locked",
+    /** Wallet was unlocked — the SAME session continues: no re-handshake, no re-approval,
+     *  no re-subscribe (the host re-arms the dApp's subscriptions before pushing this).
+     *  Payload: {@link WalletUnlockedPayload} — carries the CURRENT identity, which may
+     *  differ from the one the dApp connected with. Pushed by ConnectHost.updateSphere()
+     *  on the locked -> live edge only. */
+    UNLOCKED: "wallet:unlocked",
+    /** The session is GONE (logout, wallet deleted, dApp sphere_disconnect, expiry seen at
+     *  unlock, a different seed behind the lock screen, host destroy).
+     *  The dApp must clear its session and re-handshake to continue. Unlocking does not cure it.
+     *  Payload: {@link WalletDisconnectedPayload}. Pushed by ConnectHost.revokeSession(). */
+    DISCONNECTED: "wallet:disconnected",
+    /** Active wallet address changed. dApp should update displayed identity.
+     *  Pushed automatically by ConnectHost — no sphere_subscribe needed. */
+    IDENTITY_CHANGED: "identity:changed"
+  };
+  var AUTO_PUSHED_EVENTS = [
+    WALLET_EVENTS.LOCKED,
+    WALLET_EVENTS.UNLOCKED,
+    WALLET_EVENTS.DISCONNECTED,
+    WALLET_EVENTS.IDENTITY_CHANGED
+  ];
+  function isAutoPushedEvent(event) {
+    return AUTO_PUSHED_EVENTS.includes(event);
+  }
+  function isSphereConnectMessage(msg) {
+    if (!msg || typeof msg !== "object") return false;
+    const m = msg;
+    if (m.ns !== SPHERE_CONNECT_NAMESPACE) return false;
+    if (m.type === "handshake") return true;
+    if (typeof m.v !== "string") return false;
+    return majorOf(m.v) === majorOf(SPHERE_CONNECT_VERSION);
+  }
+  function createRequestId() {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  }
   var LOGGER_KEY = "__sphere_sdk_logger__";
   function getState() {
     const g = globalThis;
@@ -95,208 +311,8 @@ var SphereConnect = (() => {
       delete g[LOGGER_KEY];
     }
   };
-  var STORAGE_KEYS_ADDRESS = {
-    /** Transfer outbox for this address (pre-flip key name; kept as the network-scoping witness) */
-    OUTBOX: "outbox",
-    /** Conversations for this address */
-    CONVERSATIONS: "conversations",
-    /** Messages for this address */
-    MESSAGES: "messages",
-    /** Group chat: joined groups for this address */
-    GROUP_CHAT_GROUPS: "group_chat_groups",
-    /** Group chat: messages for this address */
-    GROUP_CHAT_MESSAGES: "group_chat_messages",
-    /** Group chat: members for this address */
-    GROUP_CHAT_MEMBERS: "group_chat_members",
-    /** Group chat: processed event IDs for deduplication */
-    GROUP_CHAT_PROCESSED_EVENTS: "group_chat_processed_events",
-    /** Auto-return settings (pre-flip key name; kept as the network-scoping witness) */
-    AUTO_RETURN: "auto_return",
-    /** Auto-return dedup ledger (pre-flip key name; kept as the network-scoping witness) */
-    AUTO_RETURN_LEDGER: "auto_return_ledger",
-    /** Per-swap key prefix (pre-flip key name; kept as the network-scoping witness) */
-    SWAP_RECORD_PREFIX: "swap:"
-  };
-  var NETWORK_SCOPED_ADDRESS_KEYS = [
-    STORAGE_KEYS_ADDRESS.OUTBOX,
-    STORAGE_KEYS_ADDRESS.AUTO_RETURN,
-    STORAGE_KEYS_ADDRESS.AUTO_RETURN_LEDGER
-  ];
-  var NETWORK_SCOPED_ADDRESS_PREFIXES = [
-    STORAGE_KEYS_ADDRESS.SWAP_RECORD_PREFIX,
-    // 'swap:'
-    "inv_ledger:"
-    // AccountingModule INV_LEDGER_PREFIX
-  ];
-  var DEFAULT_NOSTR_RELAYS = [
-    "wss://relay.unicity.network",
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.nostr.band"
-  ];
-  var DEFAULT_AGGREGATOR_URL = "https://aggregator.unicity.network/rpc";
-  var DEV_AGGREGATOR_URL = "https://dev-aggregator.dyndns.org/rpc";
-  var DEFAULT_BASE_PATH = "m/44'/0'/0'";
-  var DEFAULT_DERIVATION_PATH = `${DEFAULT_BASE_PATH}/0/0`;
-  var TOKEN_REGISTRY_URL = "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet.json";
-  var TEST_NOSTR_RELAYS = [
-    "wss://nostr-relay.testnet.unicity.network"
-  ];
-  var DEFAULT_GROUP_RELAYS = [
-    "wss://sphere-relay.unicity.network"
-  ];
-  var NETWORKS = {
-    mainnet: {
-      name: "Mainnet",
-      aggregatorUrl: DEFAULT_AGGREGATOR_URL,
-      nostrRelays: DEFAULT_NOSTR_RELAYS,
-      groupRelays: DEFAULT_GROUP_RELAYS,
-      tokenRegistryUrl: TOKEN_REGISTRY_URL
-    },
-    // v1 cutover: 'testnet' now POINTS AT TESTNET2 (the v2 gateway network). The
-    // old goggregator testnet spoke the removed v1 protocol — a v2 engine cannot
-    // run against it. 'testnet2' stays as an alias of the same configuration.
-    testnet: {
-      name: "Testnet2",
-      networkId: 4,
-      // v2 state-transition gateway (networkId 4 comes from the trust base). apiKey is env-injected.
-      aggregatorUrl: "https://gateway.testnet2.unicity.network",
-      nostrRelays: TEST_NOSTR_RELAYS,
-      // reuse testnet infra (shared relays/ipfs)
-      groupRelays: DEFAULT_GROUP_RELAYS,
-      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
-    },
-    testnet2: {
-      name: "Testnet2",
-      networkId: 4,
-      // v2 state-transition gateway (networkId 4 comes from the trust base). apiKey is env-injected.
-      aggregatorUrl: "https://gateway.testnet2.unicity.network",
-      nostrRelays: TEST_NOSTR_RELAYS,
-      // reuse testnet infra (shared relays/ipfs)
-      groupRelays: DEFAULT_GROUP_RELAYS,
-      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
-    },
-    // NOTE: mainnet/dev still point at v1-era aggregators. The v2 engine cannot
-    // operate against them until their gateways are cut over to the v2 protocol —
-    // wallet operations on these networks fail loudly (AGGREGATOR_ERROR) until then.
-    dev: {
-      name: "Development",
-      aggregatorUrl: DEV_AGGREGATOR_URL,
-      nostrRelays: TEST_NOSTR_RELAYS,
-      groupRelays: DEFAULT_GROUP_RELAYS,
-      tokenRegistryUrl: TOKEN_REGISTRY_URL
-    }
-  };
-  var SPHERE_NETWORKS = {
-    testnet2: { id: NETWORKS.testnet2.networkId, name: "testnet2" }
-  };
-  var HOST_READY_TYPE = "sphere-connect:host-ready";
-  var HOST_READY_TIMEOUT = 3e4;
-  var SPHERE_CONNECT_NAMESPACE = "sphere-connect";
-  var SPHERE_CONNECT_VERSION = "2.1";
-  var RPC_METHODS = {
-    GET_IDENTITY: "sphere_getIdentity",
-    GET_BALANCE: "sphere_getBalance",
-    GET_ASSETS: "sphere_getAssets",
-    GET_FIAT_BALANCE: "sphere_getFiatBalance",
-    GET_TOKENS: "sphere_getTokens",
-    GET_HISTORY: "sphere_getHistory",
-    RESOLVE: "sphere_resolve",
-    SUBSCRIBE: "sphere_subscribe",
-    UNSUBSCRIBE: "sphere_unsubscribe",
-    DISCONNECT: "sphere_disconnect",
-    GET_CONVERSATIONS: "sphere_getConversations",
-    GET_MESSAGES: "sphere_getMessages",
-    GET_DM_UNREAD_COUNT: "sphere_getDMUnreadCount",
-    MARK_AS_READ: "sphere_markAsRead"
-  };
-  var INTENT_ACTIONS = {
-    SEND: "send",
-    DM: "dm",
-    PAYMENT_REQUEST: "payment_request",
-    RECEIVE: "receive",
-    SIGN_MESSAGE: "sign_message",
-    MINT: "mint"
-  };
-  var ERROR_CODES = {
-    // Standard JSON-RPC
-    PARSE_ERROR: -32700,
-    INVALID_REQUEST: -32600,
-    METHOD_NOT_FOUND: -32601,
-    INVALID_PARAMS: -32602,
-    INTERNAL_ERROR: -32603,
-    // Sphere Connect (4xxx)
-    NOT_CONNECTED: 4001,
-    PERMISSION_DENIED: 4002,
-    USER_REJECTED: 4003,
-    SESSION_EXPIRED: 4004,
-    ORIGIN_BLOCKED: 4005,
-    RATE_LIMITED: 4006,
-    UNSUPPORTED_PROTOCOL_VERSION: 4007,
-    // Connect MAJOR mismatch (incompatible era)
-    INCOMPATIBLE_NETWORK: 4008,
-    // dApp targets a different network than the wallet
-    // Wallet locked; THE SESSION IS STILL ALIVE. A QUERY may be retried after wallet:unlocked.
-    // An INTENT already delegated to the wallet is NEVER answered with this code — it gets
-    // INTENT_OUTCOME_UNKNOWN (4201) instead, because a retry could double-spend.
-    WALLET_LOCKED: 4009,
-    INSUFFICIENT_BALANCE: 4100,
-    INVALID_RECIPIENT: 4101,
-    TRANSFER_FAILED: 4102,
-    INTENT_CANCELLED: 4200,
-    /**
-     * The intent was DELEGATED to the wallet and the host lost track of the answer — a host
-     * deadline fired, or the wallet locked / logged out mid-flight. **The outcome is UNKNOWN:
-     * the money may or may not have moved.**
-     *
-     * A dApp MUST NOT retry on this code. Reconcile out of band (poll the recipient, the
-     * aggregator, or your own backend) and only then decide.
-     *
-     * This code exists because every other answer would be a lie. `INTENT_CANCELLED` (4200)
-     * asserts the user declined and nothing happened; `WALLET_LOCKED` (4009) invites a retry
-     * after the unlock. Sending either for an intent the wallet had already submitted is how a
-     * paid-but-not-credited order — and then a double spend on retry — happens.
-     */
-    INTENT_OUTCOME_UNKNOWN: 4201
-  };
-  var WALLET_EVENTS = {
-    /** Wallet is LOCKED — the session is STILL ALIVE. Requests are answered
-     *  WALLET_LOCKED (4009) until `wallet:unlocked`. The dApp must NOT disconnect,
-     *  must NOT clear its sessionId, and must NOT re-handshake.
-     *  Payload: {@link WalletLockedPayload}. Pushed by ConnectHost.setLocked() and
-     *  immediately after a handshake response carrying `locked: true`. */
-    LOCKED: "wallet:locked",
-    /** Wallet was unlocked — the SAME session continues: no re-handshake, no re-approval,
-     *  no re-subscribe (the host re-arms the dApp's subscriptions before pushing this).
-     *  Payload: {@link WalletUnlockedPayload} — carries the CURRENT identity, which may
-     *  differ from the one the dApp connected with. Pushed by ConnectHost.updateSphere()
-     *  on the locked -> live edge only. */
-    UNLOCKED: "wallet:unlocked",
-    /** The session is GONE (logout, wallet deleted, dApp sphere_disconnect, expiry seen at
-     *  unlock, a different seed behind the lock screen, host destroy).
-     *  The dApp must clear its session and re-handshake to continue. Unlocking does not cure it.
-     *  Payload: {@link WalletDisconnectedPayload}. Pushed by ConnectHost.revokeSession(). */
-    DISCONNECTED: "wallet:disconnected",
-    /** Active wallet address changed. dApp should update displayed identity.
-     *  Pushed automatically by ConnectHost — no sphere_subscribe needed. */
-    IDENTITY_CHANGED: "identity:changed"
-  };
-  var AUTO_PUSHED_EVENTS = [
-    WALLET_EVENTS.LOCKED,
-    WALLET_EVENTS.UNLOCKED,
-    WALLET_EVENTS.DISCONNECTED,
-    WALLET_EVENTS.IDENTITY_CHANGED
-  ];
-  function isAutoPushedEvent(event) {
-    return AUTO_PUSHED_EVENTS.includes(event);
-  }
-  function createRequestId() {
-    if (typeof crypto !== "undefined" && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-  }
-  var SDK_VERSION = "0.15.0";
+
+  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-MFEBQDLV.js
   var PERMISSION_SCOPES = {
     IDENTITY_READ: "identity:read",
     BALANCE_READ: "balance:read",
@@ -310,7 +326,11 @@ var SphereConnect = (() => {
     DM_MANAGE: "dm:manage",
     PAYMENT_REQUEST: "payment:request",
     SIGN_REQUEST: "sign:request",
-    MINT_REQUEST: "mint:request"
+    MINT_REQUEST: "mint:request",
+    /** #777: moving a coinless token (an NFT). Distinct from transfer:request. */
+    NFT_TRANSFER: "nft:transfer",
+    /** Minting an NFT signs dApp-chosen content as the user; mint:request and nft:transfer do not imply it. */
+    NFT_MINT: "nft:mint"
   };
   var ALL_PERMISSIONS = Object.values(PERMISSION_SCOPES);
   var DEFAULT_PERMISSIONS = [
@@ -337,137 +357,13 @@ var SphereConnect = (() => {
     [INTENT_ACTIONS.PAYMENT_REQUEST]: PERMISSION_SCOPES.PAYMENT_REQUEST,
     [INTENT_ACTIONS.RECEIVE]: PERMISSION_SCOPES.IDENTITY_READ,
     [INTENT_ACTIONS.SIGN_MESSAGE]: PERMISSION_SCOPES.SIGN_REQUEST,
-    [INTENT_ACTIONS.MINT]: PERMISSION_SCOPES.MINT_REQUEST
+    [INTENT_ACTIONS.MINT]: PERMISSION_SCOPES.MINT_REQUEST,
+    [INTENT_ACTIONS.SEND_NFT]: PERMISSION_SCOPES.NFT_TRANSFER,
+    [INTENT_ACTIONS.MINT_NFT]: PERMISSION_SCOPES.NFT_MINT
   };
-  var SETTLED_STATUSES = /* @__PURE__ */ new Set([
-    "confirmed",
-    "delivered",
-    "completed"
-  ]);
-  var REALTIME_STATUS = {
-    connected: "connected",
-    degraded: "reconnecting",
-    offline: "closed"
-  };
-  function toLegacyRequest(view, status) {
-    return { ...view, symbol: view.symbol ?? "", status };
-  }
-  function paymentsOrNull(sphere) {
-    try {
-      return sphere.payments;
-    } catch {
-      return null;
-    }
-  }
-  function legacyRequestPayload(sphere, update) {
-    const view = paymentsOrNull(sphere)?.requests.list().find((request) => request.id === update.id);
-    if (!view) {
-      return {
-        id: update.id,
-        requestId: update.id,
-        senderPubkey: "",
-        amount: "",
-        coinId: "",
-        symbol: "",
-        timestamp: Date.now(),
-        status: update.status
-      };
-    }
-    return toLegacyRequest(view, update.status);
-  }
-  function requestStatusAttacher(status) {
-    return (sphere, forward) => sphere.on("payment_request:updated", (update) => {
-      if (update.status === status) forward(legacyRequestPayload(sphere, update));
-    });
-  }
-  function attentionAttacher(code, toLegacy) {
-    return (sphere, forward) => sphere.on("transfer:attention", (attention) => {
-      if (attention.code === code) forward(toLegacy(attention));
-    });
-  }
-  function remoteUpdateAttacher(sphere, forward) {
-    let sequence = 0;
-    return sphere.on("inventory:updated", () => {
-      sequence += 1;
-      forward({ providerId: "wallet-api", name: "wallet-api", sequence, cid: "", added: 0, removed: 0 });
-    });
-  }
-  var COMPAT_ATTACHERS = /* @__PURE__ */ new Map([
-    // Old completion split, held: deliveryPending ? delivery_pending : confirmed, plus the
-    // failed arm (manifest judgment call #1). Payloads are the TransferResult, unchanged.
-    ["transfer:confirmed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
-      if (SETTLED_STATUSES.has(result.status) && result.deliveryPending !== true) forward(result);
-    })],
-    ["transfer:delivery_pending", (sphere, forward) => sphere.on("transfer:updated", (result) => {
-      if (result.status !== "failed" && result.deliveryPending === true) forward(result);
-    })],
-    ["transfer:failed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
-      if (result.status === "failed") forward(result);
-    })],
-    // Same name on both wires, different payload: the raw v2 view has optional `symbol`;
-    // legacy subscribers get the IncomingPaymentRequest shape via the shared mapping.
-    ["payment_request:incoming", (sphere, forward) => sphere.on("payment_request:incoming", (view) => {
-      forward(toLegacyRequest(view, view.status));
-    })],
-    ["payment_request:paid", requestStatusAttacher("paid")],
-    ["payment_request:rejected", requestStatusAttacher("rejected")],
-    ["payment_request:expired", requestStatusAttacher("expired")],
-    // detail carries the old inner code (SPLIT_CHECKPOINT_LOST / CHECKPOINT_TRUSTBASE_MISMATCH).
-    ["split:checkpoint-stuck", attentionAttacher("split:checkpoint-stuck", (attention) => ({
-      transferId: attention.transferId,
-      code: attention.detail ?? "",
-      error: attention.detail ?? ""
-    }))],
-    ["delivery:undeliverable", attentionAttacher("delivery:undeliverable", (attention) => ({
-      transferId: attention.transferId,
-      recipientPubkey: "",
-      attempts: 0,
-      error: attention.detail ?? ""
-    }))],
-    ["delivery:deferred", attentionAttacher("delivery:deferred", (attention) => ({
-      transferId: attention.transferId,
-      recipientPubkey: "",
-      reason: attention.detail ?? attention.code,
-      deferredUntil: 0
-    }))],
-    ["realtime:status", (sphere, forward) => sphere.on("connection:status", (connection) => {
-      forward({ status: REALTIME_STATUS[connection.status] ?? "closed" });
-    })],
-    // The server IS storage on the v2 vertical — a degraded connection is degraded storage.
-    ["storage:degraded", (sphere, forward) => sphere.on("connection:status", (connection) => {
-      if (connection.status !== "degraded") return;
-      forward({ providerId: "wallet-api", error: "wallet-api connection degraded" });
-    })],
-    ["sync:completed", (sphere, forward) => sphere.on("inventory:updated", () => {
-      forward({ source: "payments", count: paymentsOrNull(sphere)?.tokens().length ?? 0 });
-    })],
-    ["sync:remote-update", remoteUpdateAttacher]
-  ]);
-  var WALLET_LOCKED_MESSAGE = "Wallet is locked";
-  var NOT_CONNECTED_MESSAGE = "Not connected";
-  var LOCKED_ALLOWLIST = /* @__PURE__ */ new Set([
-    RPC_METHODS.GET_IDENTITY,
-    RPC_METHODS.SUBSCRIBE,
-    RPC_METHODS.UNSUBSCRIBE,
-    RPC_METHODS.DISCONNECT
-  ]);
-  var REFUSE_NOT_CONNECTED = {
-    kind: "refuse",
-    error: { code: ERROR_CODES.NOT_CONNECTED, message: NOT_CONNECTED_MESSAGE }
-  };
-  var REFUSE_LOCKED = {
-    kind: "refuse",
-    error: {
-      code: ERROR_CODES.WALLET_LOCKED,
-      message: WALLET_LOCKED_MESSAGE,
-      data: { reason: "locked" }
-    }
-  };
-  var EMPTY_WALLET_SNAPSHOT = Object.freeze({ capturedAt: 0 });
-  var CHANNEL_ONLY_CODES = /* @__PURE__ */ new Set([
-    ERROR_CODES.WALLET_LOCKED,
-    ERROR_CODES.NOT_CONNECTED
-  ]);
+  var SDK_VERSION = "0.18.1";
+
+  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-QCRWQNHK.js
   var ConnectError = class extends Error {
     constructor(message, code, data) {
       super(message);
@@ -803,378 +699,6 @@ var SphereConnect = (() => {
   };
 
   // node_modules/@unicitylabs/sphere-sdk/dist/impl/browser/connect/index.js
-  function majorOf(v) {
-    return parseInt(String(v).split(".")[0], 10);
-  }
-  var STORAGE_KEYS_ADDRESS2 = {
-    /** Transfer outbox for this address (pre-flip key name; kept as the network-scoping witness) */
-    OUTBOX: "outbox",
-    /** Conversations for this address */
-    CONVERSATIONS: "conversations",
-    /** Messages for this address */
-    MESSAGES: "messages",
-    /** Group chat: joined groups for this address */
-    GROUP_CHAT_GROUPS: "group_chat_groups",
-    /** Group chat: messages for this address */
-    GROUP_CHAT_MESSAGES: "group_chat_messages",
-    /** Group chat: members for this address */
-    GROUP_CHAT_MEMBERS: "group_chat_members",
-    /** Group chat: processed event IDs for deduplication */
-    GROUP_CHAT_PROCESSED_EVENTS: "group_chat_processed_events",
-    /** Auto-return settings (pre-flip key name; kept as the network-scoping witness) */
-    AUTO_RETURN: "auto_return",
-    /** Auto-return dedup ledger (pre-flip key name; kept as the network-scoping witness) */
-    AUTO_RETURN_LEDGER: "auto_return_ledger",
-    /** Per-swap key prefix (pre-flip key name; kept as the network-scoping witness) */
-    SWAP_RECORD_PREFIX: "swap:"
-  };
-  var NETWORK_SCOPED_ADDRESS_KEYS2 = [
-    STORAGE_KEYS_ADDRESS2.OUTBOX,
-    STORAGE_KEYS_ADDRESS2.AUTO_RETURN,
-    STORAGE_KEYS_ADDRESS2.AUTO_RETURN_LEDGER
-  ];
-  var NETWORK_SCOPED_ADDRESS_PREFIXES2 = [
-    STORAGE_KEYS_ADDRESS2.SWAP_RECORD_PREFIX,
-    // 'swap:'
-    "inv_ledger:"
-    // AccountingModule INV_LEDGER_PREFIX
-  ];
-  var DEFAULT_NOSTR_RELAYS2 = [
-    "wss://relay.unicity.network",
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.nostr.band"
-  ];
-  var DEFAULT_AGGREGATOR_URL2 = "https://aggregator.unicity.network/rpc";
-  var DEV_AGGREGATOR_URL2 = "https://dev-aggregator.dyndns.org/rpc";
-  var DEFAULT_BASE_PATH2 = "m/44'/0'/0'";
-  var DEFAULT_DERIVATION_PATH2 = `${DEFAULT_BASE_PATH2}/0/0`;
-  var TOKEN_REGISTRY_URL2 = "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet.json";
-  var TEST_NOSTR_RELAYS2 = [
-    "wss://nostr-relay.testnet.unicity.network"
-  ];
-  var DEFAULT_GROUP_RELAYS2 = [
-    "wss://sphere-relay.unicity.network"
-  ];
-  var NETWORKS2 = {
-    mainnet: {
-      name: "Mainnet",
-      aggregatorUrl: DEFAULT_AGGREGATOR_URL2,
-      nostrRelays: DEFAULT_NOSTR_RELAYS2,
-      groupRelays: DEFAULT_GROUP_RELAYS2,
-      tokenRegistryUrl: TOKEN_REGISTRY_URL2
-    },
-    // v1 cutover: 'testnet' now POINTS AT TESTNET2 (the v2 gateway network). The
-    // old goggregator testnet spoke the removed v1 protocol — a v2 engine cannot
-    // run against it. 'testnet2' stays as an alias of the same configuration.
-    testnet: {
-      name: "Testnet2",
-      networkId: 4,
-      // v2 state-transition gateway (networkId 4 comes from the trust base). apiKey is env-injected.
-      aggregatorUrl: "https://gateway.testnet2.unicity.network",
-      nostrRelays: TEST_NOSTR_RELAYS2,
-      // reuse testnet infra (shared relays/ipfs)
-      groupRelays: DEFAULT_GROUP_RELAYS2,
-      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
-    },
-    testnet2: {
-      name: "Testnet2",
-      networkId: 4,
-      // v2 state-transition gateway (networkId 4 comes from the trust base). apiKey is env-injected.
-      aggregatorUrl: "https://gateway.testnet2.unicity.network",
-      nostrRelays: TEST_NOSTR_RELAYS2,
-      // reuse testnet infra (shared relays/ipfs)
-      groupRelays: DEFAULT_GROUP_RELAYS2,
-      tokenRegistryUrl: "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet2.json"
-    },
-    // NOTE: mainnet/dev still point at v1-era aggregators. The v2 engine cannot
-    // operate against them until their gateways are cut over to the v2 protocol —
-    // wallet operations on these networks fail loudly (AGGREGATOR_ERROR) until then.
-    dev: {
-      name: "Development",
-      aggregatorUrl: DEV_AGGREGATOR_URL2,
-      nostrRelays: TEST_NOSTR_RELAYS2,
-      groupRelays: DEFAULT_GROUP_RELAYS2,
-      tokenRegistryUrl: TOKEN_REGISTRY_URL2
-    }
-  };
-  var SPHERE_NETWORKS2 = {
-    testnet2: { id: NETWORKS2.testnet2.networkId, name: "testnet2" }
-  };
-  var SPHERE_CONNECT_NAMESPACE2 = "sphere-connect";
-  var SPHERE_CONNECT_VERSION2 = "2.1";
-  var RPC_METHODS2 = {
-    GET_IDENTITY: "sphere_getIdentity",
-    GET_BALANCE: "sphere_getBalance",
-    GET_ASSETS: "sphere_getAssets",
-    GET_FIAT_BALANCE: "sphere_getFiatBalance",
-    GET_TOKENS: "sphere_getTokens",
-    GET_HISTORY: "sphere_getHistory",
-    RESOLVE: "sphere_resolve",
-    SUBSCRIBE: "sphere_subscribe",
-    UNSUBSCRIBE: "sphere_unsubscribe",
-    DISCONNECT: "sphere_disconnect",
-    GET_CONVERSATIONS: "sphere_getConversations",
-    GET_MESSAGES: "sphere_getMessages",
-    GET_DM_UNREAD_COUNT: "sphere_getDMUnreadCount",
-    MARK_AS_READ: "sphere_markAsRead"
-  };
-  var INTENT_ACTIONS2 = {
-    SEND: "send",
-    DM: "dm",
-    PAYMENT_REQUEST: "payment_request",
-    RECEIVE: "receive",
-    SIGN_MESSAGE: "sign_message",
-    MINT: "mint"
-  };
-  var ERROR_CODES2 = {
-    // Standard JSON-RPC
-    PARSE_ERROR: -32700,
-    INVALID_REQUEST: -32600,
-    METHOD_NOT_FOUND: -32601,
-    INVALID_PARAMS: -32602,
-    INTERNAL_ERROR: -32603,
-    // Sphere Connect (4xxx)
-    NOT_CONNECTED: 4001,
-    PERMISSION_DENIED: 4002,
-    USER_REJECTED: 4003,
-    SESSION_EXPIRED: 4004,
-    ORIGIN_BLOCKED: 4005,
-    RATE_LIMITED: 4006,
-    UNSUPPORTED_PROTOCOL_VERSION: 4007,
-    // Connect MAJOR mismatch (incompatible era)
-    INCOMPATIBLE_NETWORK: 4008,
-    // dApp targets a different network than the wallet
-    // Wallet locked; THE SESSION IS STILL ALIVE. A QUERY may be retried after wallet:unlocked.
-    // An INTENT already delegated to the wallet is NEVER answered with this code — it gets
-    // INTENT_OUTCOME_UNKNOWN (4201) instead, because a retry could double-spend.
-    WALLET_LOCKED: 4009,
-    INSUFFICIENT_BALANCE: 4100,
-    INVALID_RECIPIENT: 4101,
-    TRANSFER_FAILED: 4102,
-    INTENT_CANCELLED: 4200,
-    /**
-     * The intent was DELEGATED to the wallet and the host lost track of the answer — a host
-     * deadline fired, or the wallet locked / logged out mid-flight. **The outcome is UNKNOWN:
-     * the money may or may not have moved.**
-     *
-     * A dApp MUST NOT retry on this code. Reconcile out of band (poll the recipient, the
-     * aggregator, or your own backend) and only then decide.
-     *
-     * This code exists because every other answer would be a lie. `INTENT_CANCELLED` (4200)
-     * asserts the user declined and nothing happened; `WALLET_LOCKED` (4009) invites a retry
-     * after the unlock. Sending either for an intent the wallet had already submitted is how a
-     * paid-but-not-credited order — and then a double spend on retry — happens.
-     */
-    INTENT_OUTCOME_UNKNOWN: 4201
-  };
-  var WALLET_EVENTS2 = {
-    /** Wallet is LOCKED — the session is STILL ALIVE. Requests are answered
-     *  WALLET_LOCKED (4009) until `wallet:unlocked`. The dApp must NOT disconnect,
-     *  must NOT clear its sessionId, and must NOT re-handshake.
-     *  Payload: {@link WalletLockedPayload}. Pushed by ConnectHost.setLocked() and
-     *  immediately after a handshake response carrying `locked: true`. */
-    LOCKED: "wallet:locked",
-    /** Wallet was unlocked — the SAME session continues: no re-handshake, no re-approval,
-     *  no re-subscribe (the host re-arms the dApp's subscriptions before pushing this).
-     *  Payload: {@link WalletUnlockedPayload} — carries the CURRENT identity, which may
-     *  differ from the one the dApp connected with. Pushed by ConnectHost.updateSphere()
-     *  on the locked -> live edge only. */
-    UNLOCKED: "wallet:unlocked",
-    /** The session is GONE (logout, wallet deleted, dApp sphere_disconnect, expiry seen at
-     *  unlock, a different seed behind the lock screen, host destroy).
-     *  The dApp must clear its session and re-handshake to continue. Unlocking does not cure it.
-     *  Payload: {@link WalletDisconnectedPayload}. Pushed by ConnectHost.revokeSession(). */
-    DISCONNECTED: "wallet:disconnected",
-    /** Active wallet address changed. dApp should update displayed identity.
-     *  Pushed automatically by ConnectHost — no sphere_subscribe needed. */
-    IDENTITY_CHANGED: "identity:changed"
-  };
-  var AUTO_PUSHED_EVENTS2 = [
-    WALLET_EVENTS2.LOCKED,
-    WALLET_EVENTS2.UNLOCKED,
-    WALLET_EVENTS2.DISCONNECTED,
-    WALLET_EVENTS2.IDENTITY_CHANGED
-  ];
-  function isSphereConnectMessage(msg) {
-    if (!msg || typeof msg !== "object") return false;
-    const m = msg;
-    if (m.ns !== SPHERE_CONNECT_NAMESPACE2) return false;
-    if (m.type === "handshake") return true;
-    if (typeof m.v !== "string") return false;
-    return majorOf(m.v) === majorOf(SPHERE_CONNECT_VERSION2);
-  }
-  var PERMISSION_SCOPES2 = {
-    IDENTITY_READ: "identity:read",
-    BALANCE_READ: "balance:read",
-    TOKENS_READ: "tokens:read",
-    HISTORY_READ: "history:read",
-    EVENTS_SUBSCRIBE: "events:subscribe",
-    RESOLVE_PEER: "resolve:peer",
-    TRANSFER_REQUEST: "transfer:request",
-    DM_REQUEST: "dm:request",
-    DM_READ: "dm:read",
-    DM_MANAGE: "dm:manage",
-    PAYMENT_REQUEST: "payment:request",
-    SIGN_REQUEST: "sign:request",
-    MINT_REQUEST: "mint:request"
-  };
-  var ALL_PERMISSIONS2 = Object.values(PERMISSION_SCOPES2);
-  var DEFAULT_PERMISSIONS2 = [
-    PERMISSION_SCOPES2.IDENTITY_READ
-  ];
-  var METHOD_PERMISSIONS2 = {
-    [RPC_METHODS2.GET_IDENTITY]: PERMISSION_SCOPES2.IDENTITY_READ,
-    [RPC_METHODS2.GET_BALANCE]: PERMISSION_SCOPES2.BALANCE_READ,
-    [RPC_METHODS2.GET_ASSETS]: PERMISSION_SCOPES2.BALANCE_READ,
-    [RPC_METHODS2.GET_FIAT_BALANCE]: PERMISSION_SCOPES2.BALANCE_READ,
-    [RPC_METHODS2.GET_TOKENS]: PERMISSION_SCOPES2.TOKENS_READ,
-    [RPC_METHODS2.GET_HISTORY]: PERMISSION_SCOPES2.HISTORY_READ,
-    [RPC_METHODS2.RESOLVE]: PERMISSION_SCOPES2.RESOLVE_PEER,
-    [RPC_METHODS2.SUBSCRIBE]: PERMISSION_SCOPES2.EVENTS_SUBSCRIBE,
-    [RPC_METHODS2.UNSUBSCRIBE]: PERMISSION_SCOPES2.EVENTS_SUBSCRIBE,
-    [RPC_METHODS2.GET_CONVERSATIONS]: PERMISSION_SCOPES2.DM_READ,
-    [RPC_METHODS2.GET_MESSAGES]: PERMISSION_SCOPES2.DM_READ,
-    [RPC_METHODS2.GET_DM_UNREAD_COUNT]: PERMISSION_SCOPES2.DM_READ,
-    [RPC_METHODS2.MARK_AS_READ]: PERMISSION_SCOPES2.DM_MANAGE
-  };
-  var INTENT_PERMISSIONS2 = {
-    [INTENT_ACTIONS2.SEND]: PERMISSION_SCOPES2.TRANSFER_REQUEST,
-    [INTENT_ACTIONS2.DM]: PERMISSION_SCOPES2.DM_REQUEST,
-    [INTENT_ACTIONS2.PAYMENT_REQUEST]: PERMISSION_SCOPES2.PAYMENT_REQUEST,
-    [INTENT_ACTIONS2.RECEIVE]: PERMISSION_SCOPES2.IDENTITY_READ,
-    [INTENT_ACTIONS2.SIGN_MESSAGE]: PERMISSION_SCOPES2.SIGN_REQUEST,
-    [INTENT_ACTIONS2.MINT]: PERMISSION_SCOPES2.MINT_REQUEST
-  };
-  var SETTLED_STATUSES2 = /* @__PURE__ */ new Set([
-    "confirmed",
-    "delivered",
-    "completed"
-  ]);
-  var REALTIME_STATUS2 = {
-    connected: "connected",
-    degraded: "reconnecting",
-    offline: "closed"
-  };
-  function toLegacyRequest2(view, status) {
-    return { ...view, symbol: view.symbol ?? "", status };
-  }
-  function paymentsOrNull2(sphere) {
-    try {
-      return sphere.payments;
-    } catch {
-      return null;
-    }
-  }
-  function legacyRequestPayload2(sphere, update) {
-    const view = paymentsOrNull2(sphere)?.requests.list().find((request) => request.id === update.id);
-    if (!view) {
-      return {
-        id: update.id,
-        requestId: update.id,
-        senderPubkey: "",
-        amount: "",
-        coinId: "",
-        symbol: "",
-        timestamp: Date.now(),
-        status: update.status
-      };
-    }
-    return toLegacyRequest2(view, update.status);
-  }
-  function requestStatusAttacher2(status) {
-    return (sphere, forward) => sphere.on("payment_request:updated", (update) => {
-      if (update.status === status) forward(legacyRequestPayload2(sphere, update));
-    });
-  }
-  function attentionAttacher2(code, toLegacy) {
-    return (sphere, forward) => sphere.on("transfer:attention", (attention) => {
-      if (attention.code === code) forward(toLegacy(attention));
-    });
-  }
-  function remoteUpdateAttacher2(sphere, forward) {
-    let sequence = 0;
-    return sphere.on("inventory:updated", () => {
-      sequence += 1;
-      forward({ providerId: "wallet-api", name: "wallet-api", sequence, cid: "", added: 0, removed: 0 });
-    });
-  }
-  var COMPAT_ATTACHERS2 = /* @__PURE__ */ new Map([
-    // Old completion split, held: deliveryPending ? delivery_pending : confirmed, plus the
-    // failed arm (manifest judgment call #1). Payloads are the TransferResult, unchanged.
-    ["transfer:confirmed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
-      if (SETTLED_STATUSES2.has(result.status) && result.deliveryPending !== true) forward(result);
-    })],
-    ["transfer:delivery_pending", (sphere, forward) => sphere.on("transfer:updated", (result) => {
-      if (result.status !== "failed" && result.deliveryPending === true) forward(result);
-    })],
-    ["transfer:failed", (sphere, forward) => sphere.on("transfer:updated", (result) => {
-      if (result.status === "failed") forward(result);
-    })],
-    // Same name on both wires, different payload: the raw v2 view has optional `symbol`;
-    // legacy subscribers get the IncomingPaymentRequest shape via the shared mapping.
-    ["payment_request:incoming", (sphere, forward) => sphere.on("payment_request:incoming", (view) => {
-      forward(toLegacyRequest2(view, view.status));
-    })],
-    ["payment_request:paid", requestStatusAttacher2("paid")],
-    ["payment_request:rejected", requestStatusAttacher2("rejected")],
-    ["payment_request:expired", requestStatusAttacher2("expired")],
-    // detail carries the old inner code (SPLIT_CHECKPOINT_LOST / CHECKPOINT_TRUSTBASE_MISMATCH).
-    ["split:checkpoint-stuck", attentionAttacher2("split:checkpoint-stuck", (attention) => ({
-      transferId: attention.transferId,
-      code: attention.detail ?? "",
-      error: attention.detail ?? ""
-    }))],
-    ["delivery:undeliverable", attentionAttacher2("delivery:undeliverable", (attention) => ({
-      transferId: attention.transferId,
-      recipientPubkey: "",
-      attempts: 0,
-      error: attention.detail ?? ""
-    }))],
-    ["delivery:deferred", attentionAttacher2("delivery:deferred", (attention) => ({
-      transferId: attention.transferId,
-      recipientPubkey: "",
-      reason: attention.detail ?? attention.code,
-      deferredUntil: 0
-    }))],
-    ["realtime:status", (sphere, forward) => sphere.on("connection:status", (connection) => {
-      forward({ status: REALTIME_STATUS2[connection.status] ?? "closed" });
-    })],
-    // The server IS storage on the v2 vertical — a degraded connection is degraded storage.
-    ["storage:degraded", (sphere, forward) => sphere.on("connection:status", (connection) => {
-      if (connection.status !== "degraded") return;
-      forward({ providerId: "wallet-api", error: "wallet-api connection degraded" });
-    })],
-    ["sync:completed", (sphere, forward) => sphere.on("inventory:updated", () => {
-      forward({ source: "payments", count: paymentsOrNull2(sphere)?.tokens().length ?? 0 });
-    })],
-    ["sync:remote-update", remoteUpdateAttacher2]
-  ]);
-  var WALLET_LOCKED_MESSAGE2 = "Wallet is locked";
-  var NOT_CONNECTED_MESSAGE2 = "Not connected";
-  var LOCKED_ALLOWLIST2 = /* @__PURE__ */ new Set([
-    RPC_METHODS2.GET_IDENTITY,
-    RPC_METHODS2.SUBSCRIBE,
-    RPC_METHODS2.UNSUBSCRIBE,
-    RPC_METHODS2.DISCONNECT
-  ]);
-  var REFUSE_NOT_CONNECTED2 = {
-    kind: "refuse",
-    error: { code: ERROR_CODES2.NOT_CONNECTED, message: NOT_CONNECTED_MESSAGE2 }
-  };
-  var REFUSE_LOCKED2 = {
-    kind: "refuse",
-    error: {
-      code: ERROR_CODES2.WALLET_LOCKED,
-      message: WALLET_LOCKED_MESSAGE2,
-      data: { reason: "locked" }
-    }
-  };
-  var EMPTY_WALLET_SNAPSHOT2 = Object.freeze({ capturedAt: 0 });
-  var CHANNEL_ONLY_CODES2 = /* @__PURE__ */ new Set([
-    ERROR_CODES2.WALLET_LOCKED,
-    ERROR_CODES2.NOT_CONNECTED
-  ]);
   var POPUP_CLOSE_CHECK_INTERVAL = 1e3;
   function originOf(targetOrigin) {
     if (targetOrigin === "*") return null;
