@@ -51,6 +51,9 @@
  * Idempotency: each `IncomingTransfer.id` becomes the `tx_id` on the
  * inserted row. The column has UNIQUE so duplicate firings (after a
  * reconnect, a crash between store and mailbox-ack, etc.) silently no-op.
+ * After every boot the watcher also replays the wallet's RECEIVED history
+ * under the same key (reconcileFromHistory), to credit arrivals the live
+ * listener could not see.
  *
  * Two things to know about that key, neither of which is a defect introduced
  * here — both are recorded so the next reader does not rediscover them:
@@ -255,6 +258,113 @@ async function recordIncomingTransfer(transfer: IncomingTransfer): Promise<boole
 	}
 }
 
+/** A row of `sphere.payments.history()` (the SDK's HistoryEntry), re-declared
+ *  for the same reason as IncomingTransfer above. */
+type HistoryEntry = {
+	readonly type: 'SENT' | 'RECEIVED' | 'MINT';
+	readonly tokenId?: string;
+	readonly coinId: string;
+	readonly amount: string;
+	/** Set only when the token carried more than one asset. Despite the name,
+	 *  each `id` is a COIN id. */
+	readonly tokenIds?: ReadonlyArray<{ id: string; amount: string }>;
+	readonly senderPubkey?: string;
+	readonly senderNametag?: string;
+	readonly memo?: string;
+	readonly timestamp: number;
+};
+
+/** wallet-api's history page maximum; larger values are clamped to it. */
+const HISTORY_PAGE_LIMIT = 500;
+
+/**
+ * Credit every RECEIVED history row the ledger does not have yet.
+ *
+ * WHY: the live `transfer:incoming` listener cannot see every arrival.
+ * `Sphere.import` starts the payments vertical before it returns, and the
+ * wallet-api socket's first open triggers a mailbox drain that nothing awaits.
+ * A deposit that arrived while this process was down can therefore be stored,
+ * acked and announced before the listener below exists, and that event is
+ * gone. The SDK writes the arrival to the server-side history BEFORE it emits
+ * the event, so this pass recovers it. It also recovers a credit whose insert
+ * failed (a DB error, say) after the mailbox entry was already acked.
+ *
+ * Keyed exactly like the live path: `tx_id` is the token id. History lowercases
+ * it, and wallet-api accepts only lowercase-hex token ids, so the live id is
+ * lowercase too. A row both paths see is inserted once (`tx_id` is UNIQUE).
+ *
+ * Only rows at or after `sinceMs` are considered (see reconcileFloor). The
+ * history reaches back further than this ledger does: past a ledger reset, and
+ * to deposits keyed `v2_<tokenId>` before the 0.15.0 bump. Replaying those
+ * would credit deposits a second time, or without the game debits they paid
+ * for. History is served newest first, so the walk stops at the first row
+ * older than the floor.
+ *
+ * Remaining gap: the SDK's history POST is best-effort. If that POST failed
+ * AND the event fired before the listener existed, neither path sees the
+ * arrival.
+ */
+export async function reconcileFromHistory(s: any, sinceMs: number): Promise<void> {
+	await ensureSchema();
+	const known = new Set<string>(
+		(await getDb().execute('SELECT tx_id FROM player_transactions WHERE tx_id IS NOT NULL'))
+			.rows.map((r: any) => String(r.tx_id)),
+	);
+	let before: string | undefined;
+	let checked = 0;
+	let credited = 0;
+	walk: do {
+		const page = await s.payments.history({
+			limit: HISTORY_PAGE_LIMIT,
+			...(before !== undefined ? { before } : {}),
+		});
+		for (const e of page.entries as HistoryEntry[]) {
+			// No usable timestamp: cannot tell which side of the floor it is on,
+			// so never credit it — but do not let it end the walk either.
+			if (!Number.isFinite(e.timestamp)) continue;
+			if (e.timestamp < sinceMs) break walk;
+			if (e.type !== 'RECEIVED' || !e.tokenId || known.has(e.tokenId)) continue;
+			const tokens = (e.tokenIds ?? [{ id: e.coinId, amount: e.amount }])
+				.map((a) => ({ coinId: a.id, amount: a.amount }));
+			// Nothing here this ledger accounts in (another coin, or coinless).
+			if (!tokens.some(isUct)) continue;
+			checked++;
+			const wrote = await recordIncomingTransfer({
+				id: e.tokenId,
+				senderPubkey: e.senderPubkey ?? '',
+				...(e.senderNametag !== undefined ? { senderNametag: e.senderNametag } : {}),
+				tokens,
+				...(e.memo !== undefined ? { memo: e.memo } : {}),
+				receivedAt: e.timestamp,
+			});
+			if (wrote) credited++;
+		}
+		before = page.more && page.cursor ? page.cursor : undefined;
+	} while (before !== undefined);
+	console.log(
+		`[arena-watcher] history reconcile since ${new Date(sinceMs).toISOString()}: ` +
+		`${checked} uncredited UCT arrival(s) found, ${credited} credited`,
+	);
+}
+
+/**
+ * The history reconcile's floor, in epoch ms: the start of the first boot
+ * against THIS ledger, recorded in the DB, so it resets together with the
+ * ledger. `bootStartedAt` must be taken before `Sphere.import`. Arrivals
+ * drained during the import are timestamped after it, so the first boot's own
+ * window is covered.
+ */
+export async function reconcileFloor(bootStartedAt: number): Promise<number> {
+	await ensureSchema();
+	const db = getDb();
+	await db.execute({
+		sql: `INSERT OR IGNORE INTO arena_watcher_state (key, value) VALUES ('reconcile_since', ?)`,
+		args: [String(bootStartedAt)],
+	});
+	const res = await db.execute(`SELECT value FROM arena_watcher_state WHERE key = 'reconcile_since'`);
+	return Number(res.rows[0].value);
+}
+
 /**
  * Boot the watcher. Idempotent — calling more than once is a no-op.
  * Throws if ARENA_WALLET_FILE is missing or malformed; the server should
@@ -345,6 +455,10 @@ export async function startArenaWatcher(): Promise<void> {
 	//
 	// `network` MUST be passed: it is compared against walletApi.network, and
 	// omitting it (as this call used to) is an immediate INVALID_CONFIG.
+	//
+	// The import drains the mailbox before the listener below exists, so the
+	// reconcile floor has to be taken BEFORE it (see reconcileFloor).
+	const bootStartedAt = Date.now();
 	sphere = await sdk.Sphere.import({
 		mnemonic: wallet.mnemonic,
 		network,
@@ -369,6 +483,16 @@ export async function startArenaWatcher(): Promise<void> {
 		});
 	});
 	console.log('[arena-watcher] subscribed to transfer:incoming');
+
+	// AFTER the listener is attached, so nothing falls between the two: an
+	// arrival announced from now on reaches the listener, and anything announced
+	// earlier is already in the history. See reconcileFromHistory for why this
+	// pass is needed. Its failure must not take the live listener down with it.
+	await reconcileFloor(bootStartedAt)
+		.then((since) => reconcileFromHistory(sphere, since))
+		.catch((err) => {
+			console.error('[arena-watcher] history reconcile failed — arrivals announced during boot may be uncredited', err);
+		});
 }
 
 export async function stopArenaWatcher(): Promise<void> {

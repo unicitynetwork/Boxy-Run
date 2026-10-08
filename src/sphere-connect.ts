@@ -256,7 +256,9 @@ async function disconnect(): Promise<void> {
   state.identity = null;
   state.balance = null;
   state.error = null;
-  state.outcomeUnknown = false;
+  // `outcomeUnknown` is deliberately NOT cleared: a disconnect (the button, or
+  // the popup closing) followed by a reconnect would otherwise re-enable the
+  // very payment the guard exists to block. Only a reload clears it.
   updateUI('disconnected');
 }
 
