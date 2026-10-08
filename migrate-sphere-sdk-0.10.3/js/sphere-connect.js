@@ -1092,7 +1092,6 @@ var SphereConnect = (() => {
     state.identity = null;
     state.balance = null;
     state.error = null;
-    state.outcomeUnknown = false;
     updateUI("disconnected");
   }
   async function refreshBalance() {

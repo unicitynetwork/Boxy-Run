@@ -710,9 +710,15 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
     return 'timeout';
   }
 
+  // The poll must OUTLAST the ConnectClient's own 120s intent timeout. At 120s
+  // the client rejects the deposit with INTENT_OUTCOME_UNKNOWN, which settles
+  // the race first and engages the outcomeUnknown guard below. A shorter poll
+  // (it was 45 = 90s) reports 'timeout' while the send is still live at the
+  // wallet, and anything that re-enables Transfer then invites a second
+  // payment. 65 attempts at >= 2s each is >= 130s.
   const result=await Promise.race([
     depositPromise,
-    pollForDrop(45),
+    pollForDrop(65),
   ]);
   diag('transfer.race_result',{txId,result,isDepositPaid:w.isDepositPaid,balanceAfter:w.balance});
 
@@ -738,13 +744,12 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
     status.textContent='Transfer complete! +'+amount+' UCT';
   }else if(result==='timeout'){
     diag('transfer.timeout',{txId});
-    status.innerHTML='Timed out. If UCT left your wallet, your balance will update on refresh. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Reset wallet</button>';
+    // Reached only if the deposit has not settled even after the client's own
+    // intent timeout, so its outcome is unknown. Same handling as
+    // INTENT_OUTCOME_UNKNOWN: no reset shortcut in the message and Transfer
+    // stays disabled. The way forward is a reload and a balance check.
+    status.textContent='Timed out. If UCT left your wallet, your balance will update on refresh. Do not pay again until it does.';
     status.style.color='var(--orange)';
-    // This poll gives up at 45*2s = 90s, but the ConnectClient's own intent
-    // timeout is 120s and the host's deadline is longer still — so 'timeout'
-    // here means the send is very likely STILL LIVE at the wallet, not dead.
-    // Re-enabling Transfer would offer a second payment for the same purchase.
-    // Leave it disabled; a reload is the honest way forward.
     btn.disabled=true;
     btn.textContent='Reload to continue';
     return;
