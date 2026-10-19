@@ -323,7 +323,8 @@ async function runBot(idx: number): Promise<void> {
 				case 'challenge-start': {
 					// Redirect equivalent for bots — start playing the challenge match
 					currentMatchId = msg.matchId;
-					const gameNum = msg.gameNumber || 1;
+					// A challenge always opens game 1; the message carries no game number.
+					const gameNum = 1;
 					currentGameNum = gameNum;
 					readied.clear();
 					started.clear();

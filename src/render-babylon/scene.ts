@@ -113,12 +113,9 @@ export function createScene(container?: HTMLElement | null): SceneHandle {
 	// Only glow coins/powerups — exclude everything else
 	glowLayer.customEmissiveColorSelector = (mesh, subMesh, material, result) => {
 		if (mesh.name.startsWith('coin') || mesh.name.startsWith('flame') || mesh.name.startsWith('sun')) {
-			result.set(
-				material.emissiveColor.r,
-				material.emissiveColor.g,
-				material.emissiveColor.b,
-				1,
-			);
+			// Coin, flame and sun meshes all use StandardMaterial.
+			const emissive = (material as StandardMaterial).emissiveColor;
+			result.set(emissive.r, emissive.g, emissive.b, 1);
 		} else {
 			result.set(0, 0, 0, 0);
 		}

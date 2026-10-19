@@ -9,6 +9,8 @@ import type { CharacterAction } from '../sim/state';
 export interface MatchWS {
 	send: (msg: Record<string, unknown>) => void;
 	close: () => void;
+	/** The socket's readyState; CLOSED (3) when there is no socket. */
+	readonly wsState: number;
 }
 
 export function connectMatchWS(opts: {

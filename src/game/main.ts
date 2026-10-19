@@ -276,7 +276,7 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 	const config = DEFAULT_CONFIG;
 	const scene = createScene();
 	setActiveScene(scene);
-	const render = createRenderState(scene, skin, true);
+	const render = createRenderState(scene, skin);
 	// No ghost — opponent status shown via server-confirmed data only.
 	let oppStatusEl: HTMLElement | null = null;
 	function showOppStatus(text: string, color: string) {
@@ -836,7 +836,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 		inputsSent = 0;
 		tickAccumulator = 0;
 		lastFrameTime = performance.now();
-		render.character.root.visible = true;
 		if (seriesHud) seriesHud.style.display = '';
 		removeDeathBanner();
 		updateSeriesHud();
@@ -936,7 +935,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				if (phase === 'playing') {
 					sendMatchDone();
 					setPhase('done_sent');
-					render.character.root.visible = false;
 					hideOppStatus();
 					if (seriesHud) seriesHud.style.display = 'none';
 				}
@@ -972,7 +970,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 					gameLog('earlyDecide', { myScore: myState.score, oppScore });
 					setPhase('done_sent');
 					sendMatchDone();
-					render.character.root.visible = false;
 					hideOppStatus();
 					if (seriesHud) seriesHud.style.display = 'none';
 					showOverlay(
@@ -1049,7 +1046,6 @@ function startMatch(params: URLSearchParams, skin: CharacterSkin) {
 				// Self died → transition to done_sent
 				if (myState.gameOver && phase === 'playing') {
 					playCrash();
-					render.character.root.visible = false;
 					gameLog('died', { score: myState.score, inputsSent, tick: myState.tick, seed: currentSeed, inputs: inputLog });
 					setPhase('done_sent');
 					sendMatchDone();
@@ -2509,7 +2505,6 @@ async function startDailyChallenge(skin: CharacterSkin) {
 				if (state.gameOver) {
 					phase = 'dead';
 					playCrash();
-					render.character.root.visible = false;
 
 					// Submit score — server replays the inputs to verify the score.
 					// We require a real wallet nametag here; the unconnected
