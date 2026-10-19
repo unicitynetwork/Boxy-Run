@@ -312,7 +312,7 @@ var SphereConnect = (() => {
     }
   };
 
-  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-MFEBQDLV.js
+  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-ND2LPG5A.js
   var PERMISSION_SCOPES = {
     IDENTITY_READ: "identity:read",
     BALANCE_READ: "balance:read",
@@ -361,9 +361,9 @@ var SphereConnect = (() => {
     [INTENT_ACTIONS.SEND_NFT]: PERMISSION_SCOPES.NFT_TRANSFER,
     [INTENT_ACTIONS.MINT_NFT]: PERMISSION_SCOPES.NFT_MINT
   };
-  var SDK_VERSION = "0.18.1";
+  var SDK_VERSION = "0.19.1";
 
-  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-QCRWQNHK.js
+  // node_modules/@unicitylabs/sphere-sdk/dist/connect/chunks/chunk-U7EVEXG5.js
   var ConnectError = class extends Error {
     constructor(message, code, data) {
       super(message);
