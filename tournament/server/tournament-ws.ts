@@ -57,6 +57,7 @@ export async function getMatchLiveState(
 	} | null;
 	machinePhase: string | null;
 	lastGameResult: { scoreA: number; scoreB: number; winner: string } | null;
+	deadScores: { A: number | null; B: number | null } | null;
 }> {
 	// Machine state is the ONLY source of truth. If the match isn't in the
 	// machine, we have no live state to project — callers should fall back

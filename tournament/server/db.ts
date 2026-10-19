@@ -77,6 +77,14 @@ export async function ensureSchema(): Promise<void> {
 		CREATE INDEX IF NOT EXISTS idx_player_tx_nametag
 		ON player_transactions (nametag)
 	`);
+	// Arena watcher bookkeeping. `reconcile_since` is the epoch-ms floor below
+	// which the history reconcile never credits (see arena-watcher.ts).
+	await db.execute(`
+		CREATE TABLE IF NOT EXISTS arena_watcher_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)
+	`);
 	await db.execute(`
 		CREATE TABLE IF NOT EXISTS daily_challenge_scores (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,

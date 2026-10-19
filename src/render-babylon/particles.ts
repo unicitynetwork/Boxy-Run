@@ -14,6 +14,7 @@ import { Color4 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { Scene } from '@babylonjs/core/scene';
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 
 /** Create a small white circle texture for particles. */
 function makeParticleTexture(scene: Scene): Texture {
@@ -41,7 +42,9 @@ function getTex(scene: Scene): Texture {
 export function createDustTrail(scene: Scene, emitter: TransformNode): ParticleSystem {
 	const dust = new ParticleSystem('dust', 100, scene);
 	dust.particleTexture = getTex(scene);
-	dust.emitter = emitter;
+	// Typed AbstractMesh | Vector3, but the particle system only reads the
+	// emitter's world matrix, which a TransformNode has.
+	dust.emitter = emitter as unknown as AbstractMesh;
 	dust.minEmitBox = new Vector3(-80, -350, 100);
 	dust.maxEmitBox = new Vector3(80, -350, 300);
 

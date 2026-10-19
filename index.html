@@ -710,9 +710,15 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
     return 'timeout';
   }
 
+  // The poll must OUTLAST the ConnectClient's own 120s intent timeout. At 120s
+  // the client rejects the deposit with INTENT_OUTCOME_UNKNOWN, which settles
+  // the race first and engages the outcomeUnknown guard below. A shorter poll
+  // (it was 45 = 90s) reports 'timeout' while the send is still live at the
+  // wallet, and anything that re-enables Transfer then invites a second
+  // payment. 65 attempts at >= 2s each is >= 130s.
   const result=await Promise.race([
     depositPromise,
-    pollForDrop(45),
+    pollForDrop(65),
   ]);
   diag('transfer.race_result',{txId,result,isDepositPaid:w.isDepositPaid,balanceAfter:w.balance});
 
@@ -738,18 +744,33 @@ document.getElementById('btn-transfer').addEventListener('click',async()=>{
     status.textContent='Transfer complete! +'+amount+' UCT';
   }else if(result==='timeout'){
     diag('transfer.timeout',{txId});
-    status.innerHTML='Timed out. If UCT left your wallet, your balance will update on refresh. <button onclick="window.__forceReset()" style="text-decoration:underline;background:none;border:none;color:var(--cyan);cursor:pointer;font-size:11px">Reset wallet</button>';
+    // Reached only if the deposit has not settled even after the client's own
+    // intent timeout, so its outcome is unknown. Same handling as
+    // INTENT_OUTCOME_UNKNOWN: no reset shortcut in the message and Transfer
+    // stays disabled. The way forward is a reload and a balance check.
+    status.textContent='Timed out. If UCT left your wallet, your balance will update on refresh. Do not pay again until it does.';
     status.style.color='var(--orange)';
+    btn.disabled=true;
+    btn.textContent='Reload to continue';
+    return;
   }else{
     diag('transfer.failed',{txId,result,err:w.error});
     const msg=w.error||'Transfer cancelled';
     // Distinguish hard errors (insufficient balance, etc.) from a user-cancel.
     // Red for errors that require action; muted gray for plain cancellation.
-    const isError=/insufficient|not connected|required|failed|error/i.test(msg);
+    const isError=/insufficient|not connected|required|failed|error|unknown/i.test(msg);
     status.textContent=msg;
     status.style.color=isError?'var(--red,#ef4444)':'var(--text3)';
     status.style.fontSize=isError?'12px':'11px';
     status.style.fontWeight=isError?'600':'400';
+  }
+  // INTENT_OUTCOME_UNKNOWN: the wallet had the payment and its fate is unknown.
+  // Re-enabling Transfer here is exactly the second spend the code must not
+  // invite — leave it disabled and make a reload the only way forward.
+  if(w.outcomeUnknown){
+    btn.disabled=true;
+    btn.textContent='Reload to continue';
+    return;
   }
   btn.disabled=false;
   btn.textContent='Transfer';
